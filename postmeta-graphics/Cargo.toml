@@ -1,0 +1,13 @@
+[package]
+name = "postmeta-graphics"
+description = "Core graphics primitives for PostMeta (MetaPost reimplementation)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+kurbo.workspace = true
+
+[lints]
+workspace = true
