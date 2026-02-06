@@ -1,0 +1,19 @@
+[package]
+name = "postmeta-cli"
+description = "Command-line interface for PostMeta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "postmeta"
+path = "src/main.rs"
+
+[dependencies]
+postmeta-core = { path = "../postmeta-core" }
+postmeta-svg = { path = "../postmeta-svg" }
+postmeta-graphics = { path = "../postmeta-graphics" }
+
+[lints]
+workspace = true

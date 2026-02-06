@@ -1,0 +1,13 @@
+[package]
+name = "postmeta-core"
+description = "Parser and interpreter for the MetaPost language"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+postmeta-graphics = { path = "../postmeta-graphics" }
+
+[lints]
+workspace = true

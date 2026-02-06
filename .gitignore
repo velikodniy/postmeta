@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+Cargo.lock
+
+# Visual test outputs (generated, not committed)
+visual-tests/*.svg
+visual-tests/*.png
