@@ -31,7 +31,7 @@ use crate::input::{InputSystem, ResolvedToken, TokenList};
 use crate::internals::Internals;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{DrawingState, Type, Value};
-use crate::variables::{NumericState, SaveStack, VarValue, Variables};
+use crate::variables::{NumericState, SaveStack, VarTrie, VarValue, Variables};
 
 use expand::{IfState, MacroInfo};
 
@@ -47,6 +47,8 @@ pub struct Interpreter {
     pub symbols: SymbolTable,
     /// Variable storage.
     pub variables: Variables,
+    /// Variable type trie — tracks declared variable structure.
+    pub var_trie: VarTrie,
     /// Internal quantities.
     pub internals: Internals,
     /// Token input system.
@@ -124,12 +126,14 @@ impl Interpreter {
                 kind: crate::token::TokenKind::Eof,
                 span: crate::token::Span::at(0),
             },
+            capsule: None,
         };
 
         Self {
             fs: Box::new(crate::filesystem::NullFileSystem),
             symbols,
             variables: Variables::new(),
+            var_trie: VarTrie::new(),
             internals,
             input: InputSystem::new(),
             save_stack: SaveStack::new(),
@@ -176,6 +180,27 @@ impl Interpreter {
     fn get_x_next(&mut self) {
         self.get_next();
         self.expand_current();
+    }
+
+    /// Push the current token back into the input stream.
+    ///
+    /// After calling this, the next `get_next()` or `get_x_next()` will
+    /// return the same token again. This is `mp.web`'s `back_input`.
+    #[allow(dead_code)] // Used by future steps (variable tree, implicit multiplication)
+    pub(super) fn back_input(&mut self) {
+        self.input.back_input(self.cur.clone());
+    }
+
+    /// Push the current expression back into the input as a capsule token.
+    ///
+    /// The current `cur_exp`/`cur_type` are stashed into a capsule and
+    /// placed on the input stream. The next token read will be a
+    /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
+    #[allow(dead_code)] // Used by future steps (variable tree, mediation disambiguation)
+    pub(super) fn back_expr(&mut self) {
+        let ty = self.cur_type;
+        let val = self.take_cur_exp();
+        self.input.back_expr(val, ty);
     }
 
     /// Store the current token into a token list.
@@ -1111,6 +1136,58 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // back_input / back_expr integration
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn back_input_rescans_token() {
+        let mut interp = Interpreter::new();
+        interp.input.push_source("+ 3;".to_owned());
+        // Read "+"
+        interp.get_next();
+        assert_eq!(interp.cur.command, Command::PlusOrMinus);
+        // Push it back
+        interp.back_input();
+        // Read again — should get "+" again
+        interp.get_next();
+        assert_eq!(interp.cur.command, Command::PlusOrMinus);
+    }
+
+    #[test]
+    fn back_expr_capsule_roundtrip() {
+        let mut interp = Interpreter::new();
+        // Push source first (it goes on the bottom of the stack)
+        interp.input.push_source(";".to_owned());
+        // Set up a capsule with a pair value
+        interp.cur_exp = Value::Pair(5.0, 10.0);
+        interp.cur_type = Type::PairType;
+        // Push it back — this goes on top of the source
+        interp.back_expr();
+        // Now get_x_next reads from the capsule token list (top of stack)
+        interp.get_x_next();
+        assert_eq!(interp.cur.command, Command::CapsuleToken);
+        interp.scan_primary().unwrap();
+        assert_eq!(interp.cur_type, Type::PairType);
+        assert_eq!(interp.cur_exp.as_pair(), Some((5.0, 10.0)));
+    }
+
+    #[test]
+    fn back_expr_numeric_in_expression() {
+        // Push a numeric capsule and verify it can participate in arithmetic
+        let mut interp = Interpreter::new();
+        // Push source first (bottom of stack)
+        interp.input.push_source("+ 3;".to_owned());
+        // Then push capsule (top of stack)
+        interp.cur_exp = Value::Numeric(7.0);
+        interp.cur_type = Type::Known;
+        interp.back_expr();
+        interp.get_x_next();
+        interp.scan_expression().unwrap();
+        // Should evaluate to 7 + 3 = 10
+        assert_eq!(interp.cur_exp, Value::Numeric(10.0));
+    }
+
+    // -----------------------------------------------------------------------
     // vardef with @# suffix parameter
     // -----------------------------------------------------------------------
 
@@ -1155,6 +1232,43 @@ mod tests {
     // -----------------------------------------------------------------------
     // plain.mp loads without hard error
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_mp_error_count() {
+        use crate::filesystem::FileSystem;
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp.run("input plain;").unwrap();
+
+        let error_count = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        // Should not exceed 28 non-fatal errors (suffix/dashpattern issues).
+        assert!(
+            error_count <= 28,
+            "expected at most 28 errors, got {error_count}"
+        );
+    }
 
     #[test]
     fn plain_mp_loads() {

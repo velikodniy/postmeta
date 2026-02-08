@@ -14,7 +14,7 @@ use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, Wit
 use crate::error::{ErrorKind, InterpResult};
 use crate::internals::InternalId;
 use crate::types::{DrawingState, Type, Value};
-use crate::variables::{NumericState, SaveEntry, VarValue};
+use crate::variables::{NumericState, SaveEntry, SuffixSegment, VarValue};
 
 use super::helpers::{value_to_path_owned, value_to_scalar};
 use super::Interpreter;
@@ -111,6 +111,9 @@ impl Interpreter {
             // Expect a variable name (possibly compound with suffixes)
             if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
                 let mut name = name.clone();
+                let root_sym = self.cur.sym;
+                let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
+
                 // Use get_next (non-expanding) to avoid expanding vardef
                 // suffixes like `lft` in `pair laboff.lft`.
                 self.get_next();
@@ -122,16 +125,25 @@ impl Interpreter {
                 // vardef expansion on suffix names.
                 loop {
                     if self.cur.command == Command::LeftBracket {
-                        // Subscript array suffix `[]` — skip it
+                        // Subscript array suffix `[]`
                         self.get_next();
                         if self.cur.command == Command::RightBracket {
+                            suffix_segs.push(SuffixSegment::Subscript);
                             self.get_next();
+                        } else {
+                            // Not `[]` — push the bracket back and stop
+                            self.back_input();
+                            break;
                         }
                     } else if self.cur.command == Command::TagToken
                         || self.cur.command == Command::DefinedMacro
+                        || self.cur.command == Command::InternalQuantity
                     {
                         // Suffix part (e.g. `l` in `path_.l`, `lft` in `laboff.lft`)
                         if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                            if let Some(sym) = self.cur.sym {
+                                suffix_segs.push(SuffixSegment::Attr(sym));
+                            }
                             name.push('.');
                             name.push_str(s);
                         }
@@ -144,6 +156,9 @@ impl Interpreter {
                 self.expand_current();
 
                 let var_id = self.variables.lookup(&name);
+
+                // Determine the MetaPost type for the trie registration
+                let mp_type = Self::type_op_to_type(type_op);
 
                 // Set the variable to the correct type
                 let val = match type_op {
@@ -221,6 +236,11 @@ impl Interpreter {
                     _ => VarValue::Undefined,
                 };
                 self.variables.set(var_id, val);
+
+                // Register in the variable type trie
+                if let Some(root) = root_sym {
+                    self.var_trie.declare(root, &suffix_segs, mp_type);
+                }
             } else {
                 // Non-symbolic token — skip it
                 self.get_x_next();
@@ -237,6 +257,22 @@ impl Interpreter {
             self.get_x_next();
         }
         Ok(())
+    }
+
+    /// Convert a `TypeNameOp` modifier to a `Type`.
+    const fn type_op_to_type(type_op: u16) -> Type {
+        match type_op {
+            x if x == TypeNameOp::Numeric as u16 => Type::Numeric,
+            x if x == TypeNameOp::Boolean as u16 => Type::Boolean,
+            x if x == TypeNameOp::String as u16 => Type::String,
+            x if x == TypeNameOp::Path as u16 => Type::Path,
+            x if x == TypeNameOp::Pen as u16 => Type::Pen,
+            x if x == TypeNameOp::Picture as u16 => Type::Picture,
+            x if x == TypeNameOp::Pair as u16 => Type::PairType,
+            x if x == TypeNameOp::Color as u16 => Type::ColorType,
+            x if x == TypeNameOp::Transform as u16 => Type::TransformType,
+            _ => Type::Undefined,
+        }
     }
 
     /// Execute `addto` statement.

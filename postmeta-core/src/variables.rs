@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use postmeta_graphics::types::Scalar;
 
 use crate::equation::{DepList, VarId};
+use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 
 // ---------------------------------------------------------------------------
@@ -309,6 +310,162 @@ impl Variables {
 impl Default for Variables {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Variable type trie
+// ---------------------------------------------------------------------------
+
+/// A node in the variable type trie.
+///
+/// The trie records the structure of declared variables so the scanner can
+/// determine whether a suffix token extends a variable name or starts a new
+/// syntactic construct (e.g. a macro call).
+///
+/// This is a simplified version of `mp.web`'s "suffix tree". It does NOT
+/// store values (those stay in the flat [`Variables`] map); it only tracks
+/// **what paths are declared** and their types.
+#[derive(Debug, Clone, Default)]
+struct TrieNode {
+    /// The type declared at this node (`Undefined` if no declaration here).
+    ty: Type,
+    /// Named children (attribute suffixes, keyed by `SymbolId`).
+    ///
+    /// For `pair laboff.lft`, the root "laboff" node has a child keyed by
+    /// the `SymbolId` for "lft" with `ty = PairType`.
+    attrs: HashMap<SymbolId, Self>,
+    /// Collective subscript child (`[]`).
+    ///
+    /// If present, any numeric subscript at this level follows this subtree
+    /// for type and structure information. For `numeric x[]`, the "x" node
+    /// has a `collective` child with `ty = Numeric`.
+    collective: Option<Box<Self>>,
+}
+
+/// Variable type trie — tracks the structure of declared variables.
+///
+/// Enables the scanner to answer "is `lft` a suffix of `laboff`?" by
+/// checking whether `laboff.lft` exists as a declared path in the trie.
+/// This is the Rust equivalent of `mp.web`'s variable tree structure,
+/// but only for type/structure info (values stay in [`Variables`]).
+///
+/// # Usage
+///
+/// 1. **Type declarations** (`pair laboff.lft;`) register paths via
+///    [`declare`].
+/// 2. **Suffix scanning** uses [`has_suffix`] to check whether extending
+///    the current variable name is valid.
+/// 3. **Collective subscripts** (`numeric x[];`) register via `declare`
+///    with `None` suffix segments for `[]`.
+#[derive(Debug, Clone, Default)]
+pub struct VarTrie {
+    /// Root nodes keyed by the root variable's `SymbolId`.
+    roots: HashMap<SymbolId, TrieNode>,
+}
+
+/// One segment of a variable suffix path.
+#[derive(Debug, Clone)]
+pub enum SuffixSegment {
+    /// A named attribute (e.g. `.lft`, `.x`, `.r`).
+    Attr(SymbolId),
+    /// A collective subscript (`[]`).
+    Subscript,
+}
+
+impl VarTrie {
+    /// Create an empty trie.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            roots: HashMap::new(),
+        }
+    }
+
+    /// Declare a variable path with the given type.
+    ///
+    /// `root` is the `SymbolId` of the root token (e.g. "laboff").
+    /// `suffixes` is the path of suffix segments (e.g. `[Attr("lft")]`).
+    /// `ty` is the declared type (e.g. `PairType`).
+    ///
+    /// This creates all intermediate nodes as needed and sets the type
+    /// on the leaf node.
+    pub fn declare(&mut self, root: SymbolId, suffixes: &[SuffixSegment], ty: Type) {
+        let node = self.roots.entry(root).or_default();
+        let leaf = Self::walk_or_create(node, suffixes);
+        leaf.ty = ty;
+    }
+
+    /// Check whether extending a variable rooted at `root` with the given
+    /// `suffix_id` (a named attribute) would match a declared path.
+    ///
+    /// Returns `true` if the trie has a child for `suffix_id` at the
+    /// position described by `path_so_far` (the suffix segments already
+    /// consumed). This is used by the suffix scanner to decide whether
+    /// to collect a token as part of the variable name.
+    #[must_use]
+    pub fn has_suffix(
+        &self,
+        root: SymbolId,
+        path_so_far: &[SuffixSegment],
+        suffix_id: SymbolId,
+    ) -> bool {
+        let Some(node) = self.roots.get(&root) else {
+            return false;
+        };
+        let Some(current) = Self::walk(node, path_so_far) else {
+            return false;
+        };
+        current.attrs.contains_key(&suffix_id)
+    }
+
+    /// Check whether a root variable has any structure in the trie.
+    #[must_use]
+    pub fn has_root(&self, root: SymbolId) -> bool {
+        self.roots.contains_key(&root)
+    }
+
+    /// Get the type at a given path, or `None` if the path doesn't exist.
+    #[must_use]
+    pub fn get_type(&self, root: SymbolId, suffixes: &[SuffixSegment]) -> Option<Type> {
+        let node = self.roots.get(&root)?;
+        if suffixes.is_empty() {
+            return Some(node.ty);
+        }
+        let leaf = Self::walk(node, suffixes)?;
+        Some(leaf.ty)
+    }
+
+    /// Walk a path in the trie, returning the node at the end.
+    fn walk<'a>(node: &'a TrieNode, segments: &[SuffixSegment]) -> Option<&'a TrieNode> {
+        let mut current = node;
+        for seg in segments {
+            match seg {
+                SuffixSegment::Attr(id) => {
+                    current = current.attrs.get(id)?;
+                }
+                SuffixSegment::Subscript => {
+                    current = current.collective.as_deref()?;
+                }
+            }
+        }
+        Some(current)
+    }
+
+    /// Walk or create a path in the trie, returning a mutable ref to the leaf.
+    fn walk_or_create<'a>(node: &'a mut TrieNode, segments: &[SuffixSegment]) -> &'a mut TrieNode {
+        let mut current = node;
+        for seg in segments {
+            match seg {
+                SuffixSegment::Attr(id) => {
+                    current = current.attrs.entry(*id).or_default();
+                }
+                SuffixSegment::Subscript => {
+                    current = current.collective.get_or_insert_with(Default::default);
+                }
+            }
+        }
+        current
     }
 }
 

@@ -21,10 +21,11 @@ use postmeta_graphics::types::{
 ///
 /// The ordering matters: types >= `Numeric` are numeric; types with
 /// `Unknown*` variants can participate in nonlinear equations.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Type {
     /// Never mentioned.
+    #[default]
     Undefined = 0,
     /// No value (e.g. result of a procedure call).
     Vacuous = 1,

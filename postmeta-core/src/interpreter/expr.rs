@@ -11,7 +11,7 @@ use std::sync::Arc;
 use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
-use crate::variables::VarValue;
+use crate::variables::{SuffixSegment, VarValue};
 
 use super::helpers::{value_to_bool, value_to_scalar};
 use super::Interpreter;
@@ -138,10 +138,14 @@ impl Interpreter {
                 // a `DefinedMacro` (e.g. `lft` is a vardef, but `laboff.lft` is
                 // a declared pair variable).
                 //
-                // We use `get_next` (non-expanding) to peek at each potential
-                // suffix token, and only collect it if the resulting compound
-                // name is a declared variable.  If it's not a suffix, we call
-                // `expand_current` to handle macro expansion as usual.
+                // Two strategies for suffix collection:
+                // 1. **Trie-guided** — if the root has entries in `var_trie`,
+                //    use the trie to decide which suffix tokens to collect.
+                //    This correctly handles `laboff.lft` (declared pair) vs
+                //    calling the `lft` vardef macro.
+                // 2. **Fallback** — if the root has no trie entry, fall back
+                //    to the old `lookup_existing` approach for variables
+                //    created by assignment (not type declaration).
                 let sym = self.cur.sym;
                 let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
                 {
@@ -149,35 +153,59 @@ impl Interpreter {
                 } else {
                     String::new()
                 };
+
+                let has_trie_entry = sym.is_some_and(|s| self.var_trie.has_root(s));
+
                 // Use get_next (non-expanding) so we can inspect tokens that
                 // might be vardef macros before they get expanded.
                 self.get_next();
 
-                // Collect suffix tokens.  MetaPost variable names are
-                // structured (e.g. `laboff.lft`, `laboff.ulft`).
-                // Only collect if the compound name has been declared or
-                // previously assigned (i.e., exists as a non-Undefined
-                // variable).  Uses lookup_existing to avoid creating new
-                // variable entries as a side effect.
-                while self.cur.command == Command::TagToken
-                    || self.cur.command == Command::DefinedMacro
-                {
-                    let next_name =
-                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                            s.clone()
-                        } else {
+                if has_trie_entry {
+                    // Trie-guided suffix collection.
+                    let root_sym = sym.unwrap_or(crate::symbols::SymbolId::INVALID);
+                    let mut path: Vec<SuffixSegment> = Vec::new();
+
+                    while self.cur.command == Command::TagToken
+                        || self.cur.command == Command::DefinedMacro
+                        || self.cur.command == Command::InternalQuantity
+                    {
+                        let Some(suffix_sym) = self.cur.sym else {
                             break;
                         };
-                    let compound = format!("{name}.{next_name}");
-                    let is_known = self
-                        .variables
-                        .lookup_existing(&compound)
-                        .is_some_and(|id| !matches!(self.variables.get(id), VarValue::Undefined));
-                    if !is_known {
-                        break;
+                        let has = self.var_trie.has_suffix(root_sym, &path, suffix_sym);
+                        if !has {
+                            break;
+                        }
+                        // This suffix is part of the variable name.
+                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                            name.push('.');
+                            name.push_str(s);
+                        }
+                        path.push(SuffixSegment::Attr(suffix_sym));
+                        self.get_next();
                     }
-                    name = compound;
-                    self.get_next();
+                } else {
+                    // Fallback: lookup_existing for variables without trie entries.
+                    while self.cur.command == Command::TagToken
+                        || self.cur.command == Command::DefinedMacro
+                    {
+                        let next_name =
+                            if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                                s.clone()
+                            } else {
+                                break;
+                            };
+                        let compound = format!("{name}.{next_name}");
+                        let is_known =
+                            self.variables.lookup_existing(&compound).is_some_and(|id| {
+                                !matches!(self.variables.get(id), VarValue::Undefined)
+                            });
+                        if !is_known {
+                            break;
+                        }
+                        name = compound;
+                        self.get_next();
+                    }
                 }
 
                 // Now expand whatever token follows the variable name.
@@ -243,6 +271,21 @@ impl Interpreter {
                     self.cur_exp = Value::String(Arc::from(""));
                 }
                 self.cur_type = Type::String;
+                Ok(())
+            }
+
+            Command::CapsuleToken => {
+                // A capsule: an already-evaluated expression pushed back
+                // via back_expr. Extract the payload directly.
+                if let Some((val, ty)) = self.cur.capsule.take() {
+                    self.cur_exp = val;
+                    self.cur_type = ty;
+                } else {
+                    // CapsuleToken without payload — shouldn't happen, treat as vacuous
+                    self.cur_exp = Value::Vacuous;
+                    self.cur_type = Type::Vacuous;
+                }
+                self.get_x_next();
                 Ok(())
             }
 
