@@ -210,6 +210,33 @@ impl Variables {
         }
     }
 
+    /// Check if a variable is unknown (undefined or declared-but-unconstrained).
+    ///
+    /// This includes Undefined, `NumericVar(Undefined)`, `NumericVar(Numeric)`,
+    /// and compound types whose sub-parts are all unknown.
+    #[must_use]
+    pub fn is_unknown(&self, id: VarId) -> bool {
+        match self.get(id) {
+            VarValue::Undefined
+            | VarValue::NumericVar(NumericState::Undefined | NumericState::Numeric) => true,
+            VarValue::Pair { x, y } => self.is_unknown(*x) && self.is_unknown(*y),
+            VarValue::Color { r, g, b } => {
+                self.is_unknown(*r) && self.is_unknown(*g) && self.is_unknown(*b)
+            }
+            VarValue::Transform {
+                tx,
+                ty,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            } => [*tx, *ty, *txx, *txy, *tyx, *tyy]
+                .iter()
+                .all(|id| self.is_unknown(*id)),
+            _ => false,
+        }
+    }
+
     /// Get a known numeric value.
     #[must_use]
     #[allow(clippy::match_same_arms)]

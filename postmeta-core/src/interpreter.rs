@@ -3318,9 +3318,25 @@ impl Interpreter {
     }
 
     /// Execute an equation: `lhs = rhs`.
+    ///
+    /// If the LHS is an unknown variable, treat as assignment (`var = val`).
+    /// If both sides are known numerics, check consistency.
+    /// Full dependency-list equation solving is deferred.
     fn do_equation(&mut self, lhs: &Value, rhs: &Value) -> InterpResult<()> {
-        // Simplified equation handling: if LHS was a variable, assign RHS to it.
-        // Full equation solving with dependency lists comes later.
+        // Check if the LHS was an unknown variable — if so, treat equation
+        // as assignment.  This covers `mm = 2.83464`, `origin = (0,0)`, etc.
+        let lhs_is_unknown = self
+            .last_var_id
+            .is_some_and(|id| self.variables.is_unknown(id));
+
+        if lhs_is_unknown {
+            if let Some(var_id) = self.last_var_id {
+                self.assign_to_variable(var_id, rhs);
+                return Ok(());
+            }
+        }
+
+        // Both sides are known — check consistency for numeric equations
         if let (Value::Numeric(a), Value::Numeric(b)) = (lhs, rhs) {
             if (a - b).abs() > 0.001 {
                 self.report_error(
@@ -3330,43 +3346,48 @@ impl Interpreter {
             }
         }
 
-        // If we tracked a variable on the LHS, treat equation as assignment
+        // If we tracked a variable on the LHS, also assign
         if let Some(var_id) = self.last_var_id {
-            match rhs {
-                Value::Numeric(v) => {
-                    self.variables
-                        .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
-                }
-                Value::Pair(x, y) => {
-                    let var_val = self.variables.get(var_id).clone();
-                    if let VarValue::Pair { x: xid, y: yid } = var_val {
-                        self.variables
-                            .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
-                        self.variables
-                            .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
-                    } else {
-                        self.variables.set_known(var_id, rhs.clone());
-                    }
-                }
-                Value::Color(c) => {
-                    let var_val = self.variables.get(var_id).clone();
-                    if let VarValue::Color { r, g, b } = var_val {
-                        self.variables
-                            .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
-                        self.variables
-                            .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
-                        self.variables
-                            .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
-                    } else {
-                        self.variables.set_known(var_id, rhs.clone());
-                    }
-                }
-                _ => {
-                    self.variables.set_known(var_id, rhs.clone());
-                }
-            }
+            self.assign_to_variable(var_id, rhs);
         }
         Ok(())
+    }
+
+    /// Assign a value to a variable, handling compound types (Pair, Color).
+    fn assign_to_variable(&mut self, var_id: VarId, value: &Value) {
+        match value {
+            Value::Numeric(v) => {
+                self.variables
+                    .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
+            }
+            Value::Pair(x, y) => {
+                let var_val = self.variables.get(var_id).clone();
+                if let VarValue::Pair { x: xid, y: yid } = var_val {
+                    self.variables
+                        .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
+                    self.variables
+                        .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
+                } else {
+                    self.variables.set_known(var_id, value.clone());
+                }
+            }
+            Value::Color(c) => {
+                let var_val = self.variables.get(var_id).clone();
+                if let VarValue::Color { r, g, b } = var_val {
+                    self.variables
+                        .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
+                    self.variables
+                        .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
+                    self.variables
+                        .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
+                } else {
+                    self.variables.set_known(var_id, value.clone());
+                }
+            }
+            _ => {
+                self.variables.set_known(var_id, value.clone());
+            }
+        }
     }
 
     /// Execute an assignment: `var := expr`.
