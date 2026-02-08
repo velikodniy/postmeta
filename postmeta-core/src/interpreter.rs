@@ -28,9 +28,9 @@ use postmeta_graphics::types::{
 };
 
 use crate::command::{
-    BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, IterationOp, MessageOp, NullaryOp,
-    PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp,
-    WithOptionOp,
+    BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, IterationOp, MacroDefOp, MessageOp,
+    NullaryOp, ParamTypeOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp,
+    ThingToAddOp, UnaryOp, WithOptionOp,
 };
 use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
@@ -71,6 +71,32 @@ enum IfState {
 }
 
 // ---------------------------------------------------------------------------
+// Macro definitions
+// ---------------------------------------------------------------------------
+
+/// The type of a macro parameter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParamType {
+    /// `expr` — an expression argument.
+    Expr,
+    /// `suffix` — a variable suffix.
+    Suffix,
+    /// `text` — undelimited text (everything up to the next delimiter).
+    Text,
+}
+
+/// A defined macro's parameter and body information.
+#[derive(Debug, Clone)]
+struct MacroInfo {
+    /// Parameter types in order.
+    params: Vec<ParamType>,
+    /// The macro body as a token list.
+    body: TokenList,
+    /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
+    is_vardef: bool,
+}
+
+// ---------------------------------------------------------------------------
 // Interpreter state
 // ---------------------------------------------------------------------------
 
@@ -106,6 +132,8 @@ pub struct Interpreter {
     loop_exit: bool,
     /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
     pending_loop_body: Option<TokenList>,
+    /// Defined macros: `SymbolId` → macro info.
+    macros: std::collections::HashMap<SymbolId, MacroInfo>,
     /// Output pictures (one per `beginfig`/`endfig`).
     pub pictures: Vec<Picture>,
     /// Current picture being built.
@@ -171,6 +199,7 @@ impl Interpreter {
             loop_depth: 0,
             loop_exit: false,
             pending_loop_body: None,
+            macros: std::collections::HashMap::new(),
             pictures: Vec::new(),
             current_picture: Picture::new(),
             current_fig: None,
@@ -210,6 +239,7 @@ impl Interpreter {
                 Command::Iteration => self.expand_iteration(),
                 Command::ExitTest => self.expand_exitif(),
                 Command::RepeatLoop => self.expand_repeat_loop(),
+                Command::DefinedMacro => self.expand_defined_macro(),
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -626,6 +656,477 @@ impl Interpreter {
     }
 
     // =======================================================================
+    // Macro definition and expansion
+    // =======================================================================
+
+    /// Handle `def`/`vardef`/`primarydef`/`secondarydef`/`tertiarydef`.
+    ///
+    /// Syntax:
+    ///   `def <name>(param_list) = <body> enddef`
+    ///   `vardef <name>(param_list) = <body> enddef`
+    ///   `primarydef <lhs> <op> <rhs> = <body> enddef`
+    ///   `secondarydef <lhs> <op> <rhs> = <body> enddef`
+    ///   `tertiarydef <lhs> <op> <rhs> = <body> enddef`
+    fn do_macro_def(&mut self) -> InterpResult<()> {
+        let def_op = self.cur.modifier;
+        let is_vardef = def_op == MacroDefOp::VarDef as u16;
+        let is_binary_def = def_op == MacroDefOp::PrimaryDef as u16
+            || def_op == MacroDefOp::SecondaryDef as u16
+            || def_op == MacroDefOp::TertiaryDef as u16;
+
+        self.get_next(); // skip `def`/`vardef`/etc.
+
+        if is_binary_def {
+            // primarydef/secondarydef/tertiarydef: <param> <name> <param> = body enddef
+            // e.g., `primarydef a dotprod b = ...`
+            self.do_binary_macro_def(def_op)
+        } else {
+            // def/vardef: <name>(param_list) = body enddef
+            self.do_normal_macro_def(is_vardef)
+        }
+    }
+
+    /// Handle `def <name>(params) = body enddef` or `vardef <name>(params) = body enddef`.
+    fn do_normal_macro_def(&mut self, is_vardef: bool) -> InterpResult<()> {
+        // Get macro name
+        let Some(macro_sym) = self.cur.sym else {
+            self.report_error(ErrorKind::MissingToken, "Expected macro name after def");
+            self.skip_to_enddef();
+            return Ok(());
+        };
+        let macro_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+            s.clone()
+        } else {
+            String::new()
+        };
+
+        self.get_next(); // skip macro name
+
+        // Parse parameter list
+        let params = self.scan_macro_params()?;
+
+        // Expect `=`
+        if self.cur.command == Command::Equals || self.cur.command == Command::Assignment {
+            self.get_next();
+        } else {
+            self.report_error(ErrorKind::MissingToken, "Expected `=` in macro definition");
+        }
+
+        // Scan the body until `enddef`, replacing param names with Param(idx)
+        let param_names: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
+        let body = self.scan_macro_body(&param_names);
+
+        let param_types = params.into_iter().map(|(_, ty)| ty).collect();
+
+        // Store the macro
+        let info = MacroInfo {
+            params: param_types,
+            body,
+            is_vardef,
+        };
+        self.macros.insert(macro_sym, info);
+
+        // Set the symbol to DefinedMacro
+        self.symbols.set(
+            macro_sym,
+            crate::symbols::SymbolEntry {
+                command: Command::DefinedMacro,
+                modifier: 0,
+            },
+        );
+
+        // Skip past enddef (scan_macro_body consumed it)
+        // Get the next token
+        self.get_x_next();
+
+        // Consume trailing semicolon
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
+        }
+
+        let _ = macro_name;
+        Ok(())
+    }
+
+    /// Handle `primarydef`/`secondarydef`/`tertiarydef`.
+    ///
+    /// Syntax: `primarydef <lhs_param> <op_name> <rhs_param> = body enddef`
+    fn do_binary_macro_def(&mut self, def_op: u16) -> InterpResult<()> {
+        // Parse: <lhs_param> <op_name> <rhs_param>
+        let lhs_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+            s.clone()
+        } else {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected parameter name in binary macro def",
+            );
+            self.skip_to_enddef();
+            return Ok(());
+        };
+        self.get_next(); // skip lhs param
+
+        let Some(op_sym) = self.cur.sym else {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected operator name in binary macro def",
+            );
+            self.skip_to_enddef();
+            return Ok(());
+        };
+        self.get_next(); // skip op name
+
+        let rhs_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+            s.clone()
+        } else {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected parameter name in binary macro def",
+            );
+            self.skip_to_enddef();
+            return Ok(());
+        };
+        self.get_next(); // skip rhs param
+
+        // Expect `=`
+        if self.cur.command == Command::Equals || self.cur.command == Command::Assignment {
+            self.get_next();
+        }
+
+        // Scan body with two parameter names
+        let param_names = vec![lhs_name, rhs_name];
+        let body = self.scan_macro_body(&param_names);
+
+        // Store the macro
+        let info = MacroInfo {
+            params: vec![ParamType::Expr, ParamType::Expr],
+            body,
+            is_vardef: false,
+        };
+        self.macros.insert(op_sym, info);
+
+        // Set the symbol to the appropriate operator command
+        let cmd = match def_op {
+            x if x == MacroDefOp::PrimaryDef as u16 => Command::SecondaryPrimaryMacro,
+            x if x == MacroDefOp::SecondaryDef as u16 => Command::ExpressionTertiaryMacro,
+            _ => Command::TertiarySecondaryMacro, // tertiarydef
+        };
+        self.symbols.set(
+            op_sym,
+            crate::symbols::SymbolEntry {
+                command: cmd,
+                modifier: 0,
+            },
+        );
+
+        self.get_x_next();
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
+        }
+        Ok(())
+    }
+
+    /// Scan macro parameter list: `(expr x, suffix s, text t)`.
+    ///
+    /// Returns a list of (name, type) pairs. If there are no parentheses,
+    /// returns an empty list (parameterless macro).
+    fn scan_macro_params(&mut self) -> InterpResult<Vec<(String, ParamType)>> {
+        let mut params = Vec::new();
+
+        // Check for opening delimiter
+        if self.cur.command != Command::LeftDelimiter {
+            return Ok(params);
+        }
+        self.get_next(); // skip `(`
+
+        // Empty param list: ()
+        if self.cur.command == Command::RightDelimiter {
+            self.get_next();
+            return Ok(params);
+        }
+
+        loop {
+            // Expect a param type: expr, suffix, or text
+            let param_type = if self.cur.command == Command::ParamType {
+                let pt = match self.cur.modifier {
+                    x if x == ParamTypeOp::Expr as u16 => ParamType::Expr,
+                    x if x == ParamTypeOp::Suffix as u16 => ParamType::Suffix,
+                    x if x == ParamTypeOp::Text as u16 => ParamType::Text,
+                    _ => ParamType::Expr,
+                };
+                self.get_next(); // skip type keyword
+                pt
+            } else {
+                // Default to expr if no type specified
+                ParamType::Expr
+            };
+
+            // Get the parameter name
+            let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                s.clone()
+            } else {
+                self.report_error(ErrorKind::MissingToken, "Expected parameter name");
+                String::new()
+            };
+            self.get_next(); // skip param name
+
+            params.push((name, param_type));
+
+            // Comma separates params, right delimiter ends
+            if self.cur.command == Command::Comma {
+                self.get_next();
+            } else if self.cur.command == Command::RightDelimiter {
+                self.get_next();
+                break;
+            } else {
+                break;
+            }
+        }
+
+        Ok(params)
+    }
+
+    /// Scan a macro body until `enddef`, tracking nested `def`/`enddef` pairs.
+    ///
+    /// Parameter names are replaced with `StoredToken::Param(idx)` references.
+    fn scan_macro_body(&mut self, param_names: &[String]) -> TokenList {
+        let mut body = TokenList::new();
+        let mut depth: u32 = 0;
+
+        loop {
+            match self.cur.command {
+                Command::MacroDef => {
+                    // Nested def — store and increase depth
+                    depth += 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::MacroSpecial if self.cur.modifier == 0 => {
+                    // `enddef` — modifier 0 on MacroSpecial
+                    if depth == 0 {
+                        // Our enddef — don't store it, stop
+                        return body;
+                    }
+                    depth -= 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::Stop => {
+                    self.report_error(ErrorKind::MissingToken, "Missing `enddef`");
+                    return body;
+                }
+                _ => {
+                    // Check if this token matches a parameter name
+                    if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
+                        if depth == 0 {
+                            // Only substitute at top level (not inside nested defs)
+                            if let Some(idx) = param_names.iter().position(|p| p == name) {
+                                body.push(StoredToken::Param(idx));
+                                self.get_next();
+                                continue;
+                            }
+                        }
+                    }
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+            }
+        }
+    }
+
+    /// Expand a binary macro operator (from `primarydef`/`secondarydef`/`tertiarydef`).
+    ///
+    /// The left operand has already been evaluated and taken. The current
+    /// token is the operator name. We need to scan the right operand at the
+    /// next lower precedence level, then expand the body.
+    fn expand_binary_macro(&mut self, left: &Value) -> InterpResult<()> {
+        let Some(op_sym) = self.cur.sym else {
+            return Err(InterpreterError::new(
+                ErrorKind::Internal,
+                "Binary macro without symbol",
+            ));
+        };
+
+        let Some(macro_info) = self.macros.get(&op_sym).cloned() else {
+            return Err(InterpreterError::new(
+                ErrorKind::Internal,
+                "Undefined binary macro",
+            ));
+        };
+
+        // Determine which precedence to scan the RHS at
+        let cmd = self.cur.command;
+        self.get_x_next();
+        match cmd {
+            Command::SecondaryPrimaryMacro => self.scan_primary()?,
+            Command::TertiarySecondaryMacro => self.scan_secondary()?,
+            _ => self.scan_tertiary()?,
+        }
+
+        let right = self.take_cur_exp();
+
+        // Build param token lists — decompose compound values into tokens
+        let args = vec![
+            value_to_stored_tokens(left, &mut self.symbols),
+            value_to_stored_tokens(&right, &mut self.symbols),
+        ];
+
+        // Push the body with args
+        self.input
+            .push_token_list(macro_info.body, args, "binary macro".into());
+
+        // Get next token from expansion
+        self.get_x_next();
+        // Re-scan the result as an expression
+        self.scan_expression()?;
+
+        Ok(())
+    }
+
+    /// Skip tokens until we reach `enddef` (for error recovery).
+    fn skip_to_enddef(&mut self) {
+        let mut depth: u32 = 0;
+        loop {
+            match self.cur.command {
+                Command::MacroDef => {
+                    depth += 1;
+                    self.get_next();
+                }
+                Command::MacroSpecial if self.cur.modifier == 0 => {
+                    if depth == 0 {
+                        return;
+                    }
+                    depth -= 1;
+                    self.get_next();
+                }
+                Command::Stop => return,
+                _ => self.get_next(),
+            }
+        }
+    }
+
+    /// Expand a user-defined macro.
+    ///
+    /// Scans arguments according to the macro's parameter types, then pushes
+    /// the body as a token list with parameter bindings.
+    fn expand_defined_macro(&mut self) {
+        let Some(macro_sym) = self.cur.sym else {
+            self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+
+        let Some(macro_info) = self.macros.get(&macro_sym).cloned() else {
+            self.report_error(ErrorKind::Internal, "Undefined macro expansion");
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+
+        self.get_next(); // skip the macro name
+
+        // Scan arguments
+        let mut args: Vec<TokenList> = Vec::new();
+
+        if !macro_info.params.is_empty() {
+            // Expect opening delimiter
+            if self.cur.command == Command::LeftDelimiter {
+                self.get_x_next(); // skip `(` and expand
+            }
+
+            for (i, param_type) in macro_info.params.iter().enumerate() {
+                match param_type {
+                    ParamType::Expr => {
+                        // Scan an expression, evaluate it, store the result as tokens
+                        if self.scan_expression().is_ok() {
+                            let val = self.take_cur_exp();
+                            args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                        } else {
+                            args.push(Vec::new());
+                        }
+                    }
+                    ParamType::Suffix => {
+                        // Scan a suffix — collect symbolic tokens until delimiter
+                        let mut suffix_tokens = TokenList::new();
+                        while self.cur.command == Command::TagToken
+                            || self.cur.command == Command::InternalQuantity
+                            || self.cur.command == Command::NumericToken
+                            || self.cur.command == Command::LeftBracket
+                        {
+                            self.store_current_token(&mut suffix_tokens);
+                            self.get_next();
+                            // If we entered a bracket, scan until ]
+                            if self.cur.command == Command::RightBracket {
+                                self.store_current_token(&mut suffix_tokens);
+                                self.get_next();
+                            }
+                        }
+                        args.push(suffix_tokens);
+                    }
+                    ParamType::Text => {
+                        // Scan text — collect all tokens until closing delimiter
+                        // or next comma (if not the last param)
+                        let mut text_tokens = TokenList::new();
+                        let mut delim_depth: u32 = 0;
+                        loop {
+                            if delim_depth == 0 {
+                                if self.cur.command == Command::RightDelimiter {
+                                    break;
+                                }
+                                if self.cur.command == Command::Comma
+                                    && i < macro_info.params.len() - 1
+                                {
+                                    break;
+                                }
+                            }
+                            if self.cur.command == Command::LeftDelimiter {
+                                delim_depth += 1;
+                            } else if self.cur.command == Command::RightDelimiter {
+                                delim_depth -= 1;
+                            }
+                            if self.cur.command == Command::Stop {
+                                break;
+                            }
+                            self.store_current_token(&mut text_tokens);
+                            self.get_next();
+                        }
+                        args.push(text_tokens);
+                    }
+                }
+
+                // Consume comma between arguments
+                if self.cur.command == Command::Comma {
+                    self.get_x_next();
+                }
+            }
+
+            // Expect closing delimiter
+            if self.cur.command == Command::RightDelimiter {
+                self.get_next();
+            }
+        }
+
+        // Build the expansion token list
+        let mut expansion = macro_info.body.clone();
+
+        // For vardef, wrap in begingroup/endgroup
+        if macro_info.is_vardef {
+            let bg = self.symbols.lookup("begingroup");
+            let eg = self.symbols.lookup("endgroup");
+            expansion.insert(0, StoredToken::Symbol(bg));
+            expansion.push(StoredToken::Symbol(eg));
+        }
+
+        // Push the expansion with parameter bindings
+        self.input
+            .push_token_list(expansion, args, "macro expansion".into());
+
+        // Get the next token and continue expanding
+        self.get_next();
+        self.expand_current();
+    }
+
+    // =======================================================================
     // Expression parser — four levels
     // =======================================================================
 
@@ -815,8 +1316,16 @@ impl Interpreter {
         self.scan_primary()?;
 
         while self.cur.command.is_secondary_op() {
-            let op = self.cur.modifier;
             let cmd = self.cur.command;
+
+            if cmd == Command::SecondaryPrimaryMacro {
+                // User-defined primarydef operator
+                let left = self.take_cur_exp();
+                self.expand_binary_macro(&left)?;
+                break;
+            }
+
+            let op = self.cur.modifier;
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_primary()?;
@@ -857,8 +1366,16 @@ impl Interpreter {
         self.scan_secondary()?;
 
         while self.cur.command.is_tertiary_op() {
-            let op = self.cur.modifier;
             let cmd = self.cur.command;
+
+            if cmd == Command::TertiarySecondaryMacro {
+                // User-defined tertiarydef operator
+                let left = self.take_cur_exp();
+                self.expand_binary_macro(&left)?;
+                break;
+            }
+
+            let op = self.cur.modifier;
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_secondary()?;
@@ -910,6 +1427,12 @@ impl Interpreter {
                         self.scan_tertiary()?;
                         self.do_expression_binary(ExpressionBinaryOp::Concatenate as u16, &left)?;
                     }
+                    break;
+                }
+                Command::ExpressionTertiaryMacro => {
+                    // User-defined secondarydef operator
+                    let left = self.take_cur_exp();
+                    self.expand_binary_macro(&left)?;
                     break;
                 }
                 Command::ExpressionBinary => {
@@ -1797,6 +2320,7 @@ impl Interpreter {
             Command::Save => self.do_save(),
             Command::Interim => self.do_interim(),
             Command::Let => self.do_let(),
+            Command::MacroDef => self.do_macro_def(),
             Command::Show => self.do_show(),
             Command::MessageCommand => self.do_message(),
             Command::BeginGroup => {
@@ -2384,6 +2908,42 @@ fn value_to_stored_token(val: &Value) -> StoredToken {
     }
 }
 
+/// Convert a runtime `Value` to a list of `StoredToken`s that reconstruct it.
+///
+/// For compound types like pairs and colors, this produces the token sequence
+/// `( x , y )` or `( r , g , b )`. For simple types, returns a single token.
+fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> TokenList {
+    match val {
+        Value::Pair(x, y) => {
+            let lparen = symbols.lookup("(");
+            let comma = symbols.lookup(",");
+            let rparen = symbols.lookup(")");
+            vec![
+                StoredToken::Symbol(lparen),
+                StoredToken::Numeric(*x),
+                StoredToken::Symbol(comma),
+                StoredToken::Numeric(*y),
+                StoredToken::Symbol(rparen),
+            ]
+        }
+        Value::Color(c) => {
+            let lparen = symbols.lookup("(");
+            let comma = symbols.lookup(",");
+            let rparen = symbols.lookup(")");
+            vec![
+                StoredToken::Symbol(lparen),
+                StoredToken::Numeric(c.r),
+                StoredToken::Symbol(comma),
+                StoredToken::Numeric(c.g),
+                StoredToken::Symbol(comma),
+                StoredToken::Numeric(c.b),
+                StoredToken::Symbol(rparen),
+            ]
+        }
+        _ => vec![value_to_stored_token(val)],
+    }
+}
+
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Numeric(a), Value::Numeric(b)) => (a - b).abs() < 0.0001,
@@ -2659,6 +3219,126 @@ mod tests {
         interp.run("numeric x; x := 3 + 4; show x;").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_simple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def double(expr x) = 2 * x enddef; show double(5);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("10"), "expected 10 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_no_params() {
+        let mut interp = Interpreter::new();
+        interp.run("def seven = 7 enddef; show seven;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_two_params() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def add(expr a, expr b) = a + b enddef; show add(3, 4);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_multiple_calls() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def sq(expr x) = x * x enddef; show sq(3); show sq(5);")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 2);
+        assert!(interp.errors[0].message.contains("9"), "expected 9");
+        assert!(interp.errors[1].message.contains("25"), "expected 25");
+    }
+
+    #[test]
+    fn eval_def_nested_call() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def double(expr x) = 2 * x enddef; show double(double(3));")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("12"), "expected 12 in: {msg}");
+    }
+
+    #[test]
+    fn eval_vardef() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef triple(expr x) = 3 * x enddef; show triple(4);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("12"), "expected 12 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_with_body_statements() {
+        // A macro that assigns to a variable
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric result; def setresult(expr x) = result := x enddef; setresult(42); show result;")
+            .unwrap();
+        // Find the show message (skip any info/error messages before it)
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("42"),
+            "expected show 42, got errors: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_def_in_for_loop() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def inc(expr x) = x + 1 enddef; numeric s; s := 0; for i = 1, 2, 3: s := s + inc(i); endfor; show s;")
+            .unwrap();
+        // inc(1) + inc(2) + inc(3) = 2 + 3 + 4 = 9
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("9"),
+            "expected show 9, got errors: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_def_with_conditional() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def myabs(expr x) = if x < 0: -x else: x fi enddef; show myabs(-5); show myabs(3);")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 2);
+        assert!(interp.errors[0].message.contains("5"), "expected 5");
+        assert!(interp.errors[1].message.contains("3"), "expected 3");
+    }
+
+    #[test]
+    fn eval_primarydef() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("primarydef a dotprod b = xpart a * xpart b + ypart a * ypart b enddef; show (3,4) dotprod (1,2);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        // 3*1 + 4*2 = 11
+        assert!(msg.contains("11"), "expected 11 in: {msg}");
     }
 
     #[test]

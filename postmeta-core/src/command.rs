@@ -459,6 +459,15 @@ pub enum StrOpOp {
     ReadFrom = 3,
 }
 
+/// Operation codes for [`Command::ParamType`] — macro parameter type markers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum ParamTypeOp {
+    Expr = 0,
+    Suffix = 1,
+    Text = 2,
+}
+
 /// Operation codes for [`Command::IfTest`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -1246,6 +1255,23 @@ pub const PRIMITIVES: &[Primitive] = &[
         command: Command::WithinToken,
         modifier: 0,
     },
+    // -- Macro parameter type markers --
+    Primitive {
+        name: "expr",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Expr as u16,
+    },
+    Primitive {
+        name: "suffix",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Suffix as u16,
+    },
+    Primitive {
+        name: "text",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Text as u16,
+    },
+    // -- End / dump --
     Primitive {
         name: "end",
         command: Command::Stop,
