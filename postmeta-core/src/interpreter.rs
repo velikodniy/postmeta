@@ -1522,14 +1522,37 @@ impl Interpreter {
             }
 
             Command::TagToken => {
-                // Variable reference
+                // Variable reference — collect suffix parts to form compound name
                 let sym = self.cur.sym;
-                let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
+                {
                     s.clone()
                 } else {
                     String::new()
                 };
                 self.get_x_next();
+
+                // Collect suffix tokens: tag tokens form compound variable names
+                // (the scanner drops `.` separators, so suffixes appear as
+                // consecutive tag tokens, e.g. `laboff` `ulft` for `laboff.ulft`)
+                // Only collect if the compound name is a known (declared) variable,
+                // to avoid over-collecting independent tags like `s i` → `s.i`.
+                while self.cur.command == Command::TagToken {
+                    let next_name =
+                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                            s.clone()
+                        } else {
+                            break;
+                        };
+                    let compound = format!("{name}.{next_name}");
+                    let var_id = self.variables.lookup(&compound);
+                    if matches!(self.variables.get(var_id), VarValue::Undefined) {
+                        break;
+                    }
+                    name = compound;
+                    self.get_x_next();
+                }
+
                 self.resolve_variable(sym, &name)
             }
 
@@ -2739,7 +2762,13 @@ impl Interpreter {
                 {
                     // OK — endgroup or end terminates too
                 } else {
-                    self.report_error(ErrorKind::MissingToken, "Missing `;`");
+                    self.report_error(
+                        ErrorKind::MissingToken,
+                        format!(
+                            "Missing `;` (got {:?} {:?})",
+                            self.cur.command, self.cur.token.kind
+                        ),
+                    );
                 }
                 Ok(())
             }
