@@ -1552,7 +1552,12 @@ impl Interpreter {
                 // might be vardef macros before they get expanded.
                 self.get_next();
 
-                // Collect suffix tokens, checking against declared variables.
+                // Collect suffix tokens.  MetaPost variable names are
+                // structured (e.g. `laboff.lft`, `laboff.ulft`).
+                // Only collect if the compound name has been declared or
+                // previously assigned (i.e., exists as a non-Undefined
+                // variable).  Uses lookup_existing to avoid creating new
+                // variable entries as a side effect.
                 while self.cur.command == Command::TagToken
                     || self.cur.command == Command::DefinedMacro
                 {
@@ -1563,8 +1568,11 @@ impl Interpreter {
                             break;
                         };
                     let compound = format!("{name}.{next_name}");
-                    let var_id = self.variables.lookup(&compound);
-                    if matches!(self.variables.get(var_id), VarValue::Undefined) {
+                    let is_known = self
+                        .variables
+                        .lookup_existing(&compound)
+                        .is_some_and(|id| !matches!(self.variables.get(id), VarValue::Undefined));
+                    if !is_known {
                         break;
                     }
                     name = compound;
