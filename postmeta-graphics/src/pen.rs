@@ -37,20 +37,24 @@ pub const fn nullpen() -> Pen {
 /// Convert a cyclic path (after Hobby's algorithm) to a polygonal pen.
 ///
 /// Extracts the on-curve points and computes the convex hull.
-/// The path must be cyclic with at least 3 knots. Returns a polygonal pen
-/// with vertices in counter-clockwise order.
+/// The path must be cyclic. Returns a polygonal pen with vertices in
+/// counter-clockwise order.
+///
+/// Degenerate cases are allowed:
+/// - 1 knot: a single-point pen (like `penspeck`)
+/// - 2 knots: a line-segment pen (like `penrazor`)
 ///
 /// # Errors
 ///
-/// Returns [`GraphicsError::InvalidPen`] if the path is not cyclic or has
-/// fewer than 3 knots.
+/// Returns [`GraphicsError::InvalidPen`] if the path is not cyclic or is
+/// empty.
 pub fn makepen(path: &Path) -> Result<Pen, GraphicsError> {
     if !path.is_cyclic {
         return Err(GraphicsError::InvalidPen("makepen requires a cyclic path"));
     }
-    if path.knots.len() < 3 {
+    if path.knots.is_empty() {
         return Err(GraphicsError::InvalidPen(
-            "makepen requires at least 3 knots",
+            "makepen requires a non-empty path",
         ));
     }
 

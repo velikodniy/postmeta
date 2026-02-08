@@ -466,6 +466,9 @@ pub enum ParamTypeOp {
     Expr = 0,
     Suffix = 1,
     Text = 2,
+    Primary = 3,
+    Secondary = 4,
+    Tertiary = 5,
 }
 
 /// Operation codes for [`Command::IfTest`].
@@ -628,6 +631,22 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "endfor",
         command: Command::MacroSpecial,
         modifier: 1,
+    },
+    // Suffix parameter markers for vardef (mp.web §12615)
+    Primitive {
+        name: "#@",
+        command: Command::MacroSpecial,
+        modifier: 2, // macro_prefix
+    },
+    Primitive {
+        name: "@",
+        command: Command::MacroSpecial,
+        modifier: 3, // macro_at
+    },
+    Primitive {
+        name: "@#",
+        command: Command::MacroSpecial,
+        modifier: 4, // macro_suffix
     },
     Primitive {
         name: "shipout",
@@ -1270,6 +1289,21 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "text",
         command: Command::ParamType,
         modifier: ParamTypeOp::Text as u16,
+    },
+    Primitive {
+        name: "primary",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Primary as u16,
+    },
+    Primitive {
+        name: "secondary",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Secondary as u16,
+    },
+    Primitive {
+        name: "tertiary",
+        command: Command::ParamType,
+        modifier: ParamTypeOp::Tertiary as u16,
     },
     // -- End / dump --
     Primitive {
