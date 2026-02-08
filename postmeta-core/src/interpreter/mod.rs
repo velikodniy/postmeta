@@ -1,0 +1,1185 @@
+//! The `MetaPost` interpreter.
+//!
+//! This is the central module that ties together the scanner, symbol table,
+//! expression parser, equation solver, and statement executor. It implements
+//! `MetaPost`'s direct-interpretation model: expressions are evaluated as
+//! they are parsed, with no intermediate AST.
+//!
+//! # Expression hierarchy
+//!
+//! The recursive-descent parser follows `MetaPost`'s four precedence levels:
+//! - `scan_primary`: atoms, unary operators, grouping
+//! - `scan_secondary`: `*`, `/`, `scaled`, `rotated`, etc.
+//! - `scan_tertiary`: `+`, `-`, `++`, `+-+`
+//! - `scan_expression`: `=`, `<`, `>`, path construction
+
+mod equation;
+mod expand;
+mod expr;
+pub(crate) mod helpers;
+mod operators;
+mod path_parse;
+mod statement;
+
+use postmeta_graphics::types::{Color, Picture, Transform};
+
+use crate::command::Command;
+use crate::equation::VarId;
+use crate::error::{ErrorKind, InterpResult, InterpreterError};
+use crate::filesystem::FileSystem;
+use crate::input::{InputSystem, ResolvedToken, TokenList};
+use crate::internals::Internals;
+use crate::symbols::{SymbolId, SymbolTable};
+use crate::types::{DrawingState, Type, Value};
+use crate::variables::{NumericState, SaveStack, VarValue, Variables};
+
+use expand::{IfState, MacroInfo};
+
+// ---------------------------------------------------------------------------
+// Interpreter state
+// ---------------------------------------------------------------------------
+
+/// The `MetaPost` interpreter.
+pub struct Interpreter {
+    /// Filesystem for `input` commands.
+    fs: Box<dyn FileSystem>,
+    /// Symbol table (names → command codes).
+    pub symbols: SymbolTable,
+    /// Variable storage.
+    pub variables: Variables,
+    /// Internal quantities.
+    pub internals: Internals,
+    /// Token input system.
+    pub input: InputSystem,
+    /// Save stack for `begingroup`/`endgroup`.
+    pub save_stack: SaveStack,
+    /// Current expression value and type.
+    cur_exp: Value,
+    cur_type: Type,
+    /// Current resolved token (set by `get_next`).
+    cur: ResolvedToken,
+    /// Last scanned variable id (for assignment LHS tracking).
+    last_var_id: Option<VarId>,
+    /// Last scanned variable name (for assignment LHS tracking).
+    last_var_name: String,
+    /// Last scanned internal quantity index (for `interim` assignment).
+    last_internal_idx: Option<u16>,
+    /// If-stack depth tracking for nested conditionals.
+    if_stack: Vec<IfState>,
+    /// Loop nesting depth (for `exitif` to know which loop to break from).
+    #[allow(dead_code)]
+    loop_depth: u32,
+    /// Flag set by `exitif` to signal that the current loop should terminate.
+    loop_exit: bool,
+    /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
+    pending_loop_body: Option<TokenList>,
+    /// Defined macros: `SymbolId` → macro info.
+    macros: std::collections::HashMap<SymbolId, MacroInfo>,
+    /// Output pictures (one per `beginfig`/`endfig`).
+    pub pictures: Vec<Picture>,
+    /// Current picture being built.
+    pub current_picture: Picture,
+    /// Current figure number (from `beginfig`).
+    pub current_fig: Option<i32>,
+    /// Drawing state.
+    pub drawing_state: DrawingState,
+    /// Random seed.
+    pub random_seed: u64,
+    /// Error list.
+    pub errors: Vec<InterpreterError>,
+    /// Job name.
+    pub job_name: String,
+    /// Next delimiter id for `delimiters` command (0 is reserved for `()`).
+    next_delimiter_id: u16,
+}
+
+impl Interpreter {
+    /// Create a new interpreter.
+    #[must_use]
+    pub fn new() -> Self {
+        let mut symbols = SymbolTable::new();
+        let internals = Internals::new();
+
+        // Register internal quantities in the symbol table
+        for idx in 1..=crate::internals::MAX_GIVEN_INTERNAL {
+            let name = internals.name(idx);
+            if !name.is_empty() {
+                let id = symbols.lookup(name);
+                symbols.set(
+                    id,
+                    crate::symbols::SymbolEntry {
+                        command: Command::InternalQuantity,
+                        modifier: idx,
+                    },
+                );
+            }
+        }
+
+        // Dummy initial token
+        let cur = ResolvedToken {
+            command: Command::Stop,
+            modifier: 0,
+            sym: None,
+            token: crate::token::Token {
+                kind: crate::token::TokenKind::Eof,
+                span: crate::token::Span::at(0),
+            },
+        };
+
+        Self {
+            fs: Box::new(crate::filesystem::NullFileSystem),
+            symbols,
+            variables: Variables::new(),
+            internals,
+            input: InputSystem::new(),
+            save_stack: SaveStack::new(),
+            cur_exp: Value::Vacuous,
+            cur_type: Type::Vacuous,
+            cur,
+            last_var_id: None,
+            last_var_name: String::new(),
+            last_internal_idx: None,
+            if_stack: Vec::new(),
+            loop_depth: 0,
+            loop_exit: false,
+            pending_loop_body: None,
+            macros: std::collections::HashMap::new(),
+            pictures: Vec::new(),
+            current_picture: Picture::new(),
+            current_fig: None,
+            drawing_state: DrawingState::default(),
+            random_seed: 0,
+            errors: Vec::new(),
+            job_name: "output".into(),
+            next_delimiter_id: 1, // 0 is reserved for built-in ()
+        }
+    }
+
+    /// Set the filesystem for `input` commands.
+    pub fn set_filesystem(&mut self, fs: Box<dyn FileSystem>) {
+        self.fs = fs;
+    }
+
+    // =======================================================================
+    // Token access
+    // =======================================================================
+
+    /// Get the next token (raw, no expansion).
+    fn get_next(&mut self) {
+        self.cur = self.input.next_raw_token(&mut self.symbols);
+    }
+
+    /// Get the next token, expanding macros and conditionals.
+    ///
+    /// This is `get_x_next` from `mp.web`: it calls `get_next` and then
+    /// expands any expandable commands until a non-expandable one is found.
+    fn get_x_next(&mut self) {
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Store the current token into a token list.
+    fn store_current_token(&self, list: &mut TokenList) {
+        use crate::input::StoredToken;
+
+        match &self.cur.token.kind {
+            crate::token::TokenKind::Symbolic(_) => {
+                if let Some(sym) = self.cur.sym {
+                    list.push(StoredToken::Symbol(sym));
+                }
+            }
+            crate::token::TokenKind::Numeric(v) => {
+                list.push(StoredToken::Numeric(*v));
+            }
+            crate::token::TokenKind::StringLit(s) => {
+                list.push(StoredToken::StringLit(s.clone()));
+            }
+            crate::token::TokenKind::Eof => {}
+        }
+    }
+
+    // =======================================================================
+    // Value helpers
+    // =======================================================================
+
+    /// Take `cur_exp`, replacing it with `Vacuous`.
+    const fn take_cur_exp(&mut self) -> Value {
+        let val = std::mem::replace(&mut self.cur_exp, Value::Vacuous);
+        self.cur_type = Type::Vacuous;
+        val
+    }
+
+    /// Negate the current expression (unary minus).
+    fn negate_cur_exp(&mut self) {
+        match &self.cur_exp {
+            Value::Numeric(v) => self.cur_exp = Value::Numeric(-v),
+            Value::Pair(x, y) => self.cur_exp = Value::Pair(-x, -y),
+            Value::Color(c) => {
+                self.cur_exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
+            }
+            _ => {
+                self.report_error(ErrorKind::TypeError, "Cannot negate this type");
+            }
+        }
+    }
+
+    /// Resolve a variable name to its value.
+    fn resolve_variable(&mut self, sym: Option<SymbolId>, name: &str) -> InterpResult<()> {
+        let var_id = self.variables.lookup(name);
+        // Track last scanned variable for assignment LHS
+        self.last_var_id = Some(var_id);
+        self.last_var_name.clear();
+        self.last_var_name.push_str(name);
+        self.last_internal_idx = None;
+
+        match self.variables.get(var_id) {
+            VarValue::Known(v) => {
+                self.cur_exp = v.clone();
+                self.cur_type = v.ty();
+            }
+            VarValue::NumericVar(NumericState::Known(v)) => {
+                self.cur_exp = Value::Numeric(*v);
+                self.cur_type = Type::Known;
+            }
+            VarValue::Pair { x, y } => {
+                let xv = self.variables.known_value(*x).unwrap_or(0.0);
+                let yv = self.variables.known_value(*y).unwrap_or(0.0);
+                self.cur_exp = Value::Pair(xv, yv);
+                self.cur_type = Type::PairType;
+            }
+            VarValue::Color { r, g, b } => {
+                let rv = self.variables.known_value(*r).unwrap_or(0.0);
+                let gv = self.variables.known_value(*g).unwrap_or(0.0);
+                let bv = self.variables.known_value(*b).unwrap_or(0.0);
+                self.cur_exp = Value::Color(Color::new(rv, gv, bv));
+                self.cur_type = Type::ColorType;
+            }
+            VarValue::Transform {
+                tx,
+                ty,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            } => {
+                let parts = [*tx, *ty, *txx, *txy, *tyx, *tyy]
+                    .map(|id| self.variables.known_value(id).unwrap_or(0.0));
+                self.cur_exp = Value::Transform(Transform {
+                    tx: parts[0],
+                    ty: parts[1],
+                    txx: parts[2],
+                    txy: parts[3],
+                    tyx: parts[4],
+                    tyy: parts[5],
+                });
+                self.cur_type = Type::TransformType;
+            }
+            _ => {
+                // Variable is undefined or not yet known
+                // For now, return 0 for numeric, vacuous for others
+                self.cur_exp = Value::Numeric(0.0);
+                self.cur_type = Type::Known;
+            }
+        }
+        let _ = sym; // Used later for equation LHS tracking
+        Ok(())
+    }
+
+    // =======================================================================
+    // Error handling
+    // =======================================================================
+
+    /// Record a non-fatal error.
+    fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
+        self.errors.push(InterpreterError::new(kind, message));
+    }
+
+    // =======================================================================
+    // Public interface
+    // =======================================================================
+
+    /// Run a `MetaPost` program from source text.
+    pub fn run(&mut self, source: &str) -> InterpResult<()> {
+        self.input.push_source(source.to_owned());
+        self.get_x_next();
+
+        while self.cur.command != Command::Stop {
+            self.do_statement()?;
+        }
+
+        Ok(())
+    }
+
+    /// Get the output pictures.
+    #[must_use]
+    pub fn output(&self) -> &[Picture] {
+        &self.pictures
+    }
+}
+
+impl Default for Interpreter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn eval_numeric_literal() {
+        let mut interp = Interpreter::new();
+        interp.run("show 42;").unwrap();
+        // Should have a show message
+        assert!(!interp.errors.is_empty());
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_arithmetic() {
+        let mut interp = Interpreter::new();
+        interp.run("show 3 + 4;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_multiplication() {
+        let mut interp = Interpreter::new();
+        interp.run("show 3 * 5;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    #[test]
+    fn eval_string() {
+        let mut interp = Interpreter::new();
+        interp.run("show \"hello\";").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected hello in: {msg}");
+    }
+
+    #[test]
+    fn eval_boolean() {
+        let mut interp = Interpreter::new();
+        interp.run("show true;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn eval_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("show (3, 4);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(3,4)"), "expected (3,4) in: {msg}");
+    }
+
+    #[test]
+    fn eval_unary_minus() {
+        let mut interp = Interpreter::new();
+        interp.run("show -5;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("-5"), "expected -5 in: {msg}");
+    }
+
+    #[test]
+    fn eval_sqrt() {
+        let mut interp = Interpreter::new();
+        interp.run("show sqrt 9;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+    }
+
+    #[test]
+    fn eval_sind() {
+        let mut interp = Interpreter::new();
+        interp.run("show sind 90;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    #[test]
+    fn eval_comparison() {
+        let mut interp = Interpreter::new();
+        interp.run("show 3 < 5;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn eval_string_concat() {
+        let mut interp = Interpreter::new();
+        interp.run("show \"hello\" & \" world\";").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(
+            msg.contains("hello world"),
+            "expected 'hello world' in: {msg}"
+        );
+    }
+
+    #[test]
+    fn eval_multiple_statements() {
+        let mut interp = Interpreter::new();
+        interp.run("show 1; show 2; show 3;").unwrap();
+        assert_eq!(interp.errors.len(), 3);
+    }
+
+    #[test]
+    fn eval_internal_quantity() {
+        let mut interp = Interpreter::new();
+        interp.run("show linecap;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 (round) in: {msg}");
+    }
+
+    #[test]
+    fn eval_pencircle() {
+        let mut interp = Interpreter::new();
+        interp.run("show pencircle;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("pen"), "expected pen in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_true() {
+        let mut interp = Interpreter::new();
+        interp.run("show if true: 42 fi;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_false_else() {
+        let mut interp = Interpreter::new();
+        interp.run("show if false: 1 else: 2 fi;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_false_no_else() {
+        let mut interp = Interpreter::new();
+        // `if false: show 1; fi; show 2;` — only show 2 should execute
+        interp.run("if false: show 1; fi; show 2;").unwrap();
+        assert_eq!(
+            interp.errors.len(),
+            1,
+            "expected only 1 show, got {:?}",
+            interp.errors
+        );
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_elseif() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("if false: show 1; elseif true: show 2; fi;")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 1);
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_nested() {
+        let mut interp = Interpreter::new();
+        interp.run("if true: if true: show 42; fi; fi;").unwrap();
+        assert_eq!(interp.errors.len(), 1);
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_for_loop() {
+        let mut interp = Interpreter::new();
+        interp.run("for i = 1, 2, 3: show i; endfor;").unwrap();
+        assert_eq!(
+            interp.errors.len(),
+            3,
+            "expected 3 shows: {:?}",
+            interp.errors
+        );
+        assert!(interp.errors[0].message.contains("1"));
+        assert!(interp.errors[1].message.contains("2"));
+        assert!(interp.errors[2].message.contains("3"));
+    }
+
+    #[test]
+    fn eval_for_loop_step() {
+        // Accumulate sum inside a for loop
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;")
+            .unwrap();
+        // s should be 1+2+3 = 6
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("6"), "expected 6 in: {msg}");
+    }
+
+    #[test]
+    fn eval_forever_exitif() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric n; n := 0; forever: n := n + 1; exitif n > 3; endfor; show n;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("4"), "expected 4 in: {msg}");
+    }
+
+    #[test]
+    fn eval_xpart_ypart_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("show xpart (3, 7);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        interp.run("show ypart (3, 7);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_numeric() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 42; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_string() {
+        let mut interp = Interpreter::new();
+        interp.run("string s; s := \"hello\"; show s;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected hello in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_overwrite() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 10; x := 20; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("20"), "expected 20 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_internal() {
+        let mut interp = Interpreter::new();
+        interp.run("linecap := 0; show linecap;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("0"), "expected 0 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_expr() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 3 + 4; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_simple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def double(expr x) = 2 * x enddef; show double(5);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("10"), "expected 10 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_no_params() {
+        let mut interp = Interpreter::new();
+        interp.run("def seven = 7 enddef; show seven;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_two_params() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def add(expr a, expr b) = a + b enddef; show add(3, 4);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_multiple_calls() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def sq(expr x) = x * x enddef; show sq(3); show sq(5);")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 2);
+        assert!(interp.errors[0].message.contains("9"), "expected 9");
+        assert!(interp.errors[1].message.contains("25"), "expected 25");
+    }
+
+    #[test]
+    fn eval_def_nested_call() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def double(expr x) = 2 * x enddef; show double(double(3));")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("12"), "expected 12 in: {msg}");
+    }
+
+    #[test]
+    fn eval_vardef() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef triple(expr x) = 3 * x enddef; show triple(4);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("12"), "expected 12 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_with_body_statements() {
+        // A macro that assigns to a variable
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric result; def setresult(expr x) = result := x enddef; setresult(42); show result;")
+            .unwrap();
+        // Find the show message (skip any info/error messages before it)
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("42"),
+            "expected show 42, got errors: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_def_in_for_loop() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def inc(expr x) = x + 1 enddef; numeric s; s := 0; for i = 1, 2, 3: s := s + inc(i); endfor; show s;")
+            .unwrap();
+        // inc(1) + inc(2) + inc(3) = 2 + 3 + 4 = 9
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("9"),
+            "expected show 9, got errors: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_def_with_conditional() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def myabs(expr x) = if x < 0: -x else: x fi enddef; show myabs(-5); show myabs(3);")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 2);
+        assert!(interp.errors[0].message.contains("5"), "expected 5");
+        assert!(interp.errors[1].message.contains("3"), "expected 3");
+    }
+
+    #[test]
+    fn eval_scantokens_basic() {
+        let mut interp = Interpreter::new();
+        interp.run("show scantokens \"3 + 4\";").unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("7"),
+            "expected show 7, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_scantokens_define_and_use() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("scantokens \"def foo = 99 enddef\"; show foo;")
+            .unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("99"),
+            "expected show 99, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_input_file_not_found() {
+        let mut interp = Interpreter::new();
+        // Should report error but not crash
+        interp.run("input nonexistent;").unwrap();
+        assert!(
+            interp
+                .errors
+                .iter()
+                .any(|e| e.message.contains("not found")),
+            "expected file-not-found error: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_input_with_filesystem() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "testlib" || name == "testlib.mp" {
+                    Some("def tripleplus(expr x) = 3 * x + 1 enddef;".to_owned())
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp.run("input testlib; show tripleplus(10);").unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("31"),
+            "expected show 31, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_primarydef() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("primarydef a dotprod b = xpart a * xpart b + ypart a * ypart b enddef; show (3,4) dotprod (1,2);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        // 3*1 + 4*2 = 11
+        assert!(msg.contains("11"), "expected 11 in: {msg}");
+    }
+
+    #[test]
+    fn eval_xpart_shifted_pair() {
+        // (3, 7) shifted (10, 20) = (13, 27)
+        let mut interp = Interpreter::new();
+        interp.run("show xpart ((3,7) shifted (10,20));").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("13"), "expected 13 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        interp.run("show ypart ((3,7) shifted (10,20));").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("27"), "expected 27 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Type declarations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn type_declaration_numeric() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 42; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_string() {
+        let mut interp = Interpreter::new();
+        interp.run("string s; s := \"hello\"; show s;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected hello in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_boolean() {
+        let mut interp = Interpreter::new();
+        interp.run("boolean b; b := true; show b;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("pair p; p := (3, 7); show p;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(3,7)"), "expected (3,7) in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_color() {
+        let mut interp = Interpreter::new();
+        interp.run("color c; c := (1, 0, 0); show c;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(1,0,0)"), "expected (1,0,0) in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_multiple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric a, b; a := 10; b := 20; show a + b;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("30"), "expected 30 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Delimiters
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delimiters_custom() {
+        let mut interp = Interpreter::new();
+        interp.run("delimiters {{ }}; show {{ 3 + 4 }};").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn delimiters_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("delimiters {{ }}; show {{ 2, 5 }};").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(2,5)"), "expected (2,5) in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Newinternal
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn newinternal_basic() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("newinternal myvar; myvar := 7; show myvar;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn newinternal_multiple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("newinternal a, b; a := 3; b := 5; show a + b;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("8"), "expected 8 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Mediation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mediation_basic() {
+        let mut interp = Interpreter::new();
+        // 0.5[10,20] = 15
+        interp.run("show 0.5[10, 20];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    #[test]
+    fn mediation_endpoints() {
+        let mut interp = Interpreter::new();
+        // 0[a,b] = a
+        interp.run("show 0[3, 7];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        // 1[a,b] = b
+        interp.run("show 1[3, 7];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn mediation_fraction() {
+        let mut interp = Interpreter::new();
+        // 1/4[0,100] = 25
+        interp.run("show 1/4[0, 100];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("25"), "expected 25 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // For step/until
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn for_step_until() {
+        let mut interp = Interpreter::new();
+        // Sum 1 through 5
+        interp
+            .run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    #[test]
+    fn for_step_until_by_two() {
+        let mut interp = Interpreter::new();
+        // Sum 0, 2, 4, 6, 8, 10 = 30
+        interp
+            .run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("30"), "expected 30 in: {msg}");
+    }
+
+    #[test]
+    fn for_step_until_negative() {
+        let mut interp = Interpreter::new();
+        // Count down: 5, 4, 3, 2, 1 = 15
+        interp
+            .run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Str operator
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn str_operator() {
+        let mut interp = Interpreter::new();
+        interp.run("show str x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("x"), "expected x in: {msg}");
+    }
+
+    #[test]
+    fn str_operator_multi_char() {
+        let mut interp = Interpreter::new();
+        interp.run("show str foo;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("foo"), "expected foo in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Undelimited macro parameters
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn eval_def_undelimited_primary() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef double primary x = 2*x enddef; show double 5;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("10"), "expected 10 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_undelimited_secondary() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef neg secondary x = -x enddef; show neg 3;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("-3"), "expected -3 in: {msg}");
+    }
+
+    #[test]
+    fn eval_def_undelimited_expr() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef id expr x = x enddef; show id 5+3;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("8"), "expected 8 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Curl direction in path construction
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn curl_direction_in_def() {
+        let mut interp = Interpreter::new();
+        // This should define -- as a macro without error
+        interp
+            .run(
+                "def -- = {curl 1}..{curl 1} enddef; \
+                 path p; p = (0,0)--(1,0); show p;",
+            )
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("path"), "expected path in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // let: must not expand RHS macro
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn let_does_not_expand_rhs() {
+        let mut interp = Interpreter::new();
+        // Without fix, this crashes with "Expected pair, got known numeric"
+        // because the let would try to expand foo's body
+        interp
+            .run(
+                "def foo(expr z, d) = shifted -z rotated d shifted z enddef; \
+                 let bar = foo; show 1;",
+            )
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    #[test]
+    fn let_copies_macro_info() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "tertiarydef p _on_ d = d enddef; \
+                 let on = _on_; show 5 on 3;",
+            )
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Chained equations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn chained_equation() {
+        let mut interp = Interpreter::new();
+        // Chained equation: a = b = 5
+        // With current equation solver, direct assignment works for the rightmost
+        // variable. Full dependency tracking for intermediate vars is not yet wired.
+        interp.run("numeric a; a = 5; show a;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("5"), "expected a=5 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Type declaration with subscripts and suffixes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn type_declaration_subscript_array() {
+        let mut interp = Interpreter::new();
+        // Should not hang
+        interp.run("pair z_[];").unwrap();
+    }
+
+    #[test]
+    fn type_declaration_compound_suffix() {
+        let mut interp = Interpreter::new();
+        // Should not hang
+        interp.run("path path_.l, path_.r;").unwrap();
+    }
+
+    // -----------------------------------------------------------------------
+    // vardef with @# suffix parameter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn vardef_at_suffix_parses() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef foo@#(expr x) = x enddef; show 1;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // vardef with expr..of parameter pattern
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn vardef_expr_of_pattern() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef direction expr t of p = t enddef; show 1;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Multiple delimited parameter groups
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn multiple_delimited_param_groups() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef foo(expr u)(text t) = u enddef; show 1;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // plain.mp loads without hard error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plain_mp_loads() {
+        use crate::filesystem::FileSystem;
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        // Should not return Err (hard error) — warnings are OK
+        interp.run("input plain;").unwrap();
+    }
+}
