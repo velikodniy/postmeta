@@ -488,17 +488,17 @@ impl Interpreter {
             // Body tokens
             combined.splice(0..0, body.iter().cloned());
             // Prepend: <var> := <value> ;
-            let value_token = value_to_stored_token(val);
+            // Use value_to_stored_tokens to correctly handle compound types
+            // like pairs `(x,y)` and colors `(r,g,b)`.
+            let value_tokens = value_to_stored_tokens(val, &mut self.symbols);
             let semicolon_sym = self.symbols.lookup(";");
-            combined.splice(
-                0..0,
-                [
-                    StoredToken::Symbol(loop_var_sym),
-                    StoredToken::Symbol(assign_sym),
-                    value_token,
-                    StoredToken::Symbol(semicolon_sym),
-                ],
-            );
+            let mut prefix = vec![
+                StoredToken::Symbol(loop_var_sym),
+                StoredToken::Symbol(assign_sym),
+            ];
+            prefix.extend(value_tokens);
+            prefix.push(StoredToken::Symbol(semicolon_sym));
+            combined.splice(0..0, prefix);
         }
 
         if !combined.is_empty() {
