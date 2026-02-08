@@ -31,6 +31,7 @@ use crate::command::{
     BoundsOp, Command, ExpressionBinaryOp, MessageOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp,
     SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp, WithOptionOp,
 };
+use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{InputSystem, ResolvedToken};
 use crate::internals::{InternalId, Internals};
@@ -74,6 +75,12 @@ pub struct Interpreter {
     cur_type: Type,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
+    /// Last scanned variable id (for assignment LHS tracking).
+    last_var_id: Option<VarId>,
+    /// Last scanned variable name (for assignment LHS tracking).
+    last_var_name: String,
+    /// Last scanned internal quantity index (for `interim` assignment).
+    last_internal_idx: Option<u16>,
     /// Output pictures (one per `beginfig`/`endfig`).
     pub pictures: Vec<Picture>,
     /// Current picture being built.
@@ -132,6 +139,9 @@ impl Interpreter {
             cur_exp: Value::Vacuous,
             cur_type: Type::Vacuous,
             cur,
+            last_var_id: None,
+            last_var_name: String::new(),
+            last_internal_idx: None,
             pictures: Vec::new(),
             current_picture: Picture::new(),
             current_fig: None,
@@ -293,6 +303,9 @@ impl Interpreter {
                 let idx = self.cur.modifier;
                 self.cur_exp = Value::Numeric(self.internals.get(idx));
                 self.cur_type = Type::Known;
+                // Track for assignment LHS
+                self.last_internal_idx = Some(idx);
+                self.last_var_id = None;
                 self.get_x_next();
                 Ok(())
             }
@@ -1277,6 +1290,12 @@ impl Interpreter {
     /// Resolve a variable name to its value.
     fn resolve_variable(&mut self, sym: Option<SymbolId>, name: &str) -> InterpResult<()> {
         let var_id = self.variables.lookup(name);
+        // Track last scanned variable for assignment LHS
+        self.last_var_id = Some(var_id);
+        self.last_var_name.clear();
+        self.last_var_name.push_str(name);
+        self.last_internal_idx = None;
+
         match self.variables.get(var_id) {
             VarValue::Known(v) => {
                 self.cur_exp = v.clone();
@@ -1717,12 +1736,57 @@ impl Interpreter {
     }
 
     /// Execute an assignment: `var := expr`.
-    fn do_assignment(&mut self, lhs: &Value) -> InterpResult<()> {
+    fn do_assignment(&mut self, _lhs: &Value) -> InterpResult<()> {
         let rhs = self.take_cur_exp();
-        // For now, we handle string assignments directly
-        // Full implementation needs to walk token list for LHS
-        let _ = lhs;
-        let _ = rhs;
+
+        // Check if the LHS was an internal quantity (e.g., `linecap := 0`)
+        if let Some(idx) = self.last_internal_idx {
+            let val = value_to_scalar(&rhs)?;
+            self.internals.set(idx, val);
+            return Ok(());
+        }
+
+        // Check if the LHS was a variable (e.g., `x := 5`)
+        if let Some(var_id) = self.last_var_id {
+            match &rhs {
+                Value::Numeric(v) => {
+                    self.variables
+                        .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
+                }
+                Value::Pair(x, y) => {
+                    // If the variable is already a Pair with sub-parts, set each
+                    let var_val = self.variables.get(var_id).clone();
+                    if let VarValue::Pair { x: xid, y: yid } = var_val {
+                        self.variables
+                            .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
+                        self.variables
+                            .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
+                    } else {
+                        self.variables.set_known(var_id, rhs);
+                    }
+                }
+                Value::Color(c) => {
+                    let var_val = self.variables.get(var_id).clone();
+                    if let VarValue::Color { r, g, b } = var_val {
+                        self.variables
+                            .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
+                        self.variables
+                            .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
+                        self.variables
+                            .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
+                    } else {
+                        self.variables.set_known(var_id, rhs);
+                    }
+                }
+                _ => {
+                    // String, path, pen, picture, boolean, transform, etc.
+                    self.variables.set_known(var_id, rhs);
+                }
+            }
+            return Ok(());
+        }
+
+        self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");
         Ok(())
     }
 
@@ -1993,6 +2057,46 @@ mod tests {
 
         let mut interp = Interpreter::new();
         interp.run("show ypart (3, 7);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_numeric() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 42; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_string() {
+        let mut interp = Interpreter::new();
+        interp.run("string s; s := \"hello\"; show s;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected hello in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_overwrite() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 10; x := 20; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("20"), "expected 20 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_internal() {
+        let mut interp = Interpreter::new();
+        interp.run("linecap := 0; show linecap;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("0"), "expected 0 in: {msg}");
+    }
+
+    #[test]
+    fn eval_assignment_expr() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 3 + 4; show x;").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("7"), "expected 7 in: {msg}");
     }
