@@ -40,6 +40,15 @@ impl Interpreter {
                         self.get_x_next();
                     }
                 }
+                // Implicit multiplication: `3x`, `2bp`, `.5(1,2)`, etc.
+                // Triggers when a numeric is followed by a token in
+                // [min_primary_command..numeric_token) — i.e., anything
+                // that can start a primary EXCEPT +/- and another number.
+                if self.cur.command.can_start_implicit_mul() {
+                    let factor = self.take_cur_exp();
+                    self.scan_primary()?;
+                    self.do_implicit_mul(&factor)?;
+                }
                 Ok(())
             }
 

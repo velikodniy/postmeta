@@ -431,6 +431,35 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Perform implicit multiplication (e.g., `3x`, `2bp`, `.5(1,2)`).
+    ///
+    /// The `factor` is the numeric value on the left; `cur_exp`/`cur_type`
+    /// hold the right operand (the result of the recursive `scan_primary`).
+    pub(super) fn do_implicit_mul(&mut self, factor: &Value) -> InterpResult<()> {
+        let a = value_to_scalar(factor)?;
+        match &self.cur_exp {
+            Value::Numeric(b) => {
+                self.cur_exp = Value::Numeric(a * b);
+                self.cur_type = Type::Known;
+            }
+            Value::Pair(bx, by) => {
+                self.cur_exp = Value::Pair(a * bx, a * by);
+                self.cur_type = Type::PairType;
+            }
+            Value::Color(c) => {
+                self.cur_exp = Value::Color(Color::new(a * c.r, a * c.g, a * c.b));
+                self.cur_type = Type::ColorType;
+            }
+            _ => {
+                return Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!("Cannot multiply numeric by {}", self.cur_type),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Execute a tertiary binary operator.
     pub(super) fn do_tertiary_binary(
         &mut self,

@@ -1245,6 +1245,22 @@ mod tests {
     }
 
     #[test]
+    fn implicit_multiplication() {
+        let mut interp = Interpreter::new();
+        interp.run("bp := 1; show 3bp;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+    }
+
+    #[test]
+    fn implicit_multiplication_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("show 2(3,4);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(6,8)"), "expected (6,8) in: {msg}");
+    }
+
+    #[test]
     fn vardef_expands_in_expression() {
         // vardef macro should expand when used as standalone primary
         let mut interp = Interpreter::new();
@@ -1341,10 +1357,10 @@ mod tests {
             .iter()
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
-        // Should not exceed 8 non-fatal errors (dashpattern/outer/implicit-mult).
+        // Should not exceed 5 non-fatal errors (all from dashpattern).
         assert!(
-            error_count <= 8,
-            "expected at most 8 errors, got {error_count}"
+            error_count <= 5,
+            "expected at most 5 errors, got {error_count}"
         );
     }
 

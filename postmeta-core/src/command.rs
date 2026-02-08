@@ -238,6 +238,18 @@ impl Command {
         (self as u8) > (Self::Comma as u8)
     }
 
+    /// Can this command trigger implicit multiplication when preceded by
+    /// a numeric token?
+    ///
+    /// In `mp.web` §15381: `cur_cmd >= min_primary_command` (32) and
+    /// `cur_cmd < numeric_token` (44).  This covers everything that can
+    /// start a primary expression except `+`/`-` and another number.
+    #[must_use]
+    pub const fn can_start_implicit_mul(self) -> bool {
+        let code = self as u8;
+        code >= (Self::TypeName as u8) && code < (Self::NumericToken as u8)
+    }
+
     /// Can this command appear as a suffix token in variable names?
     ///
     /// In `mp.web`: `min_suffix_token` (42, `internal_quantity`) through
