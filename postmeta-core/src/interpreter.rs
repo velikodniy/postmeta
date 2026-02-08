@@ -28,8 +28,8 @@ use postmeta_graphics::types::{
 };
 
 use crate::command::{
-    BoundsOp, Command, ExpressionBinaryOp, MessageOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp,
-    SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp, WithOptionOp,
+    BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, MessageOp, NullaryOp, PlusMinusOp,
+    PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp, WithOptionOp,
 };
 use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
@@ -52,6 +52,21 @@ enum PendingJoin {
     Tension(Scalar),
     /// Pending explicit left control point for the next knot.
     Control(Point),
+}
+
+// ---------------------------------------------------------------------------
+// Conditional state
+// ---------------------------------------------------------------------------
+
+/// State of one level in the `if/elseif/else/fi` nesting stack.
+#[derive(Debug, Clone, Copy)]
+enum IfState {
+    /// We are currently executing the active branch.
+    Active,
+    /// A branch was already taken; skip remaining branches.
+    Done,
+    /// We are skipping tokens looking for `elseif`/`else`/`fi`.
+    Skipping,
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +96,11 @@ pub struct Interpreter {
     last_var_name: String,
     /// Last scanned internal quantity index (for `interim` assignment).
     last_internal_idx: Option<u16>,
+    /// If-stack depth tracking for nested conditionals.
+    /// Each entry records the state of a conditional level:
+    /// `true` means we are in the "active" branch (evaluating tokens),
+    /// `false` means we are skipping tokens.
+    if_stack: Vec<IfState>,
     /// Output pictures (one per `beginfig`/`endfig`).
     pub pictures: Vec<Picture>,
     /// Current picture being built.
@@ -142,6 +162,7 @@ impl Interpreter {
             last_var_id: None,
             last_var_name: String::new(),
             last_internal_idx: None,
+            if_stack: Vec::new(),
             pictures: Vec::new(),
             current_picture: Picture::new(),
             current_fig: None,
@@ -167,8 +188,160 @@ impl Interpreter {
     /// expands any expandable commands until a non-expandable one is found.
     fn get_x_next(&mut self) {
         self.get_next();
-        // For now, we don't expand macros yet — that comes in Phase 5.
-        // We just skip expandable commands other than DefinedMacro.
+        self.expand_current();
+    }
+
+    /// Expand any expandable tokens at the current position.
+    ///
+    /// After this, `self.cur` holds a non-expandable token.
+    fn expand_current(&mut self) {
+        while self.cur.command == Command::IfTest || self.cur.command == Command::FiOrElse {
+            if self.cur.command == Command::IfTest {
+                self.expand_if();
+            } else {
+                self.expand_fi_or_else();
+            }
+        }
+    }
+
+    /// Handle `if <boolean>:` — evaluate the condition and enter a branch.
+    ///
+    /// On return, `self.cur` is the first non-expandable token of the
+    /// active branch (or the token after `fi` if no branch is taken).
+    fn expand_if(&mut self) {
+        // Evaluate the boolean expression after `if`
+        self.get_x_next();
+        let condition = if self.scan_expression().is_ok() {
+            match &self.cur_exp {
+                Value::Boolean(b) => *b,
+                Value::Numeric(v) => *v != 0.0,
+                _ => {
+                    self.report_error(ErrorKind::TypeError, "if condition must be boolean");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        // Expect `:` after the condition
+        if self.cur.command == Command::Colon {
+            self.get_next(); // consume the colon
+        }
+
+        if condition {
+            self.if_stack.push(IfState::Active);
+            // `cur` is now the first token of the true branch — expand it
+            self.expand_current();
+        } else {
+            self.if_stack.push(IfState::Skipping);
+            // Skip tokens until else/elseif/fi. On return, `cur` is set.
+            self.skip_to_fi_or_else();
+        }
+    }
+
+    /// Handle `fi`, `else`, `elseif` encountered during active execution.
+    ///
+    /// On return, `self.cur` is the next non-expandable token.
+    fn expand_fi_or_else(&mut self) {
+        let modifier = self.cur.modifier;
+        if modifier == FiOrElseOp::Fi as u16 {
+            // End of conditional
+            self.if_stack.pop();
+            self.get_next();
+            self.expand_current();
+        } else if modifier == FiOrElseOp::Else as u16 || modifier == FiOrElseOp::ElseIf as u16 {
+            // Active branch done — skip remaining branches to `fi`.
+            if let Some(state) = self.if_stack.last_mut() {
+                *state = IfState::Done;
+            }
+            self.skip_to_fi();
+        }
+    }
+
+    /// Skip tokens until we find `else`, `elseif`, or `fi` at the current nesting level.
+    ///
+    /// Called when a conditional branch is false. On return, `self.cur` is set
+    /// to the first non-expandable token of the next active branch or after `fi`.
+    fn skip_to_fi_or_else(&mut self) {
+        let mut depth: u32 = 0;
+        loop {
+            match self.cur.command {
+                Command::IfTest => {
+                    depth += 1;
+                    self.get_next();
+                }
+                Command::FiOrElse if depth > 0 => {
+                    if self.cur.modifier == FiOrElseOp::Fi as u16 {
+                        depth -= 1;
+                    }
+                    self.get_next();
+                }
+                Command::FiOrElse if depth == 0 => {
+                    let modifier = self.cur.modifier;
+                    if modifier == FiOrElseOp::Fi as u16 {
+                        self.if_stack.pop();
+                        self.get_next();
+                        self.expand_current();
+                        return;
+                    } else if modifier == FiOrElseOp::Else as u16 {
+                        if let Some(state) = self.if_stack.last_mut() {
+                            *state = IfState::Active;
+                        }
+                        self.get_next(); // consume `else`
+                                         // consume the `:` after `else`
+                        if self.cur.command == Command::Colon {
+                            self.get_next();
+                        }
+                        self.expand_current();
+                        return;
+                    } else if modifier == FiOrElseOp::ElseIf as u16 {
+                        self.if_stack.pop();
+                        // Process the new `elseif` as an `if`
+                        self.expand_if();
+                        return;
+                    }
+                    self.get_next();
+                }
+                Command::Stop => {
+                    self.report_error(ErrorKind::MissingToken, "Missing `fi`");
+                    return;
+                }
+                _ => {
+                    self.get_next();
+                }
+            }
+        }
+    }
+
+    /// Skip tokens until we find `fi` at the current nesting level.
+    ///
+    /// Called when we already took a branch and hit `else`/`elseif`.
+    /// On return, `self.cur` is the next non-expandable token after `fi`.
+    fn skip_to_fi(&mut self) {
+        let mut depth: u32 = 0;
+        loop {
+            self.get_next();
+            match self.cur.command {
+                Command::IfTest => depth += 1,
+                Command::FiOrElse => {
+                    if self.cur.modifier == FiOrElseOp::Fi as u16 {
+                        if depth == 0 {
+                            self.if_stack.pop();
+                            self.get_next();
+                            self.expand_current();
+                            return;
+                        }
+                        depth -= 1;
+                    }
+                }
+                Command::Stop => {
+                    self.report_error(ErrorKind::MissingToken, "Missing `fi`");
+                    return;
+                }
+                _ => {}
+            }
+        }
     }
 
     // =======================================================================
@@ -2046,6 +2219,57 @@ mod tests {
         interp.run("show pencircle;").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("pen"), "expected pen in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_true() {
+        let mut interp = Interpreter::new();
+        interp.run("show if true: 42 fi;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_false_else() {
+        let mut interp = Interpreter::new();
+        interp.run("show if false: 1 else: 2 fi;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_false_no_else() {
+        let mut interp = Interpreter::new();
+        // `if false: show 1; fi; show 2;` — only show 2 should execute
+        interp.run("if false: show 1; fi; show 2;").unwrap();
+        assert_eq!(
+            interp.errors.len(),
+            1,
+            "expected only 1 show, got {:?}",
+            interp.errors
+        );
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_elseif() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("if false: show 1; elseif true: show 2; fi;")
+            .unwrap();
+        assert_eq!(interp.errors.len(), 1);
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("2"), "expected 2 in: {msg}");
+    }
+
+    #[test]
+    fn eval_if_nested() {
+        let mut interp = Interpreter::new();
+        interp.run("if true: if true: show 42; fi; fi;").unwrap();
+        assert_eq!(interp.errors.len(), 1);
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
     }
 
     #[test]
