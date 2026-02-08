@@ -39,6 +39,21 @@ use crate::types::{DrawingState, Type, Value};
 use crate::variables::{NumericState, SaveEntry, SaveStack, VarValue, Variables};
 
 // ---------------------------------------------------------------------------
+// Path join pending state
+// ---------------------------------------------------------------------------
+
+/// Pending left-side specification for the next knot in path construction.
+///
+/// When `tension t1 and t2` or `controls p1 and p2` is parsed, the second
+/// value applies to the *next* knot's left side and must be carried forward.
+enum PendingJoin {
+    /// Pending left tension for the next knot.
+    Tension(Scalar),
+    /// Pending explicit left control point for the next knot.
+    Control(Point),
+}
+
+// ---------------------------------------------------------------------------
 // Interpreter state
 // ---------------------------------------------------------------------------
 
@@ -490,10 +505,12 @@ impl Interpreter {
                 break;
             };
 
-            // Parse tension/controls
-            if join_type != u16::MAX {
-                self.parse_join_options(&mut knots)?;
-            }
+            // Parse tension/controls — returns pending left-side for next knot
+            let pending = if join_type == u16::MAX {
+                None
+            } else {
+                self.parse_join_options(&mut knots)?
+            };
 
             // Parse optional post-join direction {dir}
             let post_dir = if self.cur.command == Command::LeftBrace {
@@ -514,6 +531,14 @@ impl Interpreter {
                 if let Some(dir) = post_dir {
                     knots[0].left = dir;
                 }
+                // Apply pending join to first knot (cycle target)
+                match pending {
+                    Some(PendingJoin::Tension(t)) => knots[0].left_tension = t,
+                    Some(PendingJoin::Control(pt)) => {
+                        knots[0].left = KnotDirection::Explicit(pt);
+                    }
+                    None => {}
+                }
                 self.get_x_next();
                 break;
             }
@@ -524,6 +549,12 @@ impl Interpreter {
             let mut knot = self.value_to_knot(&point_val)?;
             if let Some(dir) = post_dir {
                 knot.left = dir;
+            }
+            // Apply pending left-side join from tension/controls
+            match pending {
+                Some(PendingJoin::Tension(t)) => knot.left_tension = t,
+                Some(PendingJoin::Control(pt)) => knot.left = KnotDirection::Explicit(pt),
+                None => {}
             }
             knots.push(knot);
         }
@@ -538,7 +569,12 @@ impl Interpreter {
     }
 
     /// Parse tension/controls options after `..`.
-    fn parse_join_options(&mut self, knots: &mut Vec<Knot>) -> InterpResult<()> {
+    ///
+    /// Returns a pending left-side specification for the *next* knot:
+    /// - `Some(PendingJoin::Tension(t))` — the next knot's `left_tension`
+    /// - `Some(PendingJoin::Control(pt))` — the next knot's `left` direction (explicit)
+    /// - `None` — no pending state
+    fn parse_join_options(&mut self, knots: &mut Vec<Knot>) -> InterpResult<Option<PendingJoin>> {
         match self.cur.command {
             Command::Tension => {
                 self.get_x_next();
@@ -570,12 +606,7 @@ impl Interpreter {
                 if let Some(last) = knots.last_mut() {
                     last.right_tension = t1;
                 }
-                // t2 will be set as left_tension on the next knot
-                // Store it temporarily — the next knot creation will pick it up
-                // For now, store as a pending state
-                // Actually, we'll set it when the next knot is created
-                // This is a simplification; the real impl would queue it
-                let _ = t2; // Will be handled when next knot is added
+                Ok(Some(PendingJoin::Tension(t2)))
             }
             Command::Controls => {
                 self.get_x_next();
@@ -595,13 +626,10 @@ impl Interpreter {
                 if let Some(last) = knots.last_mut() {
                     last.right = KnotDirection::Explicit(Point::new(x1, y1));
                 }
-                // cp2 will be the left control of the next knot
-                // Again, store temporarily
-                let _ = (x2, y2);
+                Ok(Some(PendingJoin::Control(Point::new(x2, y2))))
             }
-            _ => {} // No special join options
+            _ => Ok(None), // No special join options
         }
-        Ok(())
     }
 
     /// Convert a value to a path knot.
@@ -1170,8 +1198,8 @@ impl Interpreter {
             }
             Value::Transform(t) => {
                 let v = match part {
-                    0 => t.txx,
-                    1 => t.txy,
+                    0 => t.tx,
+                    1 => t.ty,
                     2 => t.txx,
                     3 => t.txy,
                     4 => t.tyx,
@@ -1954,5 +1982,32 @@ mod tests {
         interp.run("show pencircle;").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("pen"), "expected pen in: {msg}");
+    }
+
+    #[test]
+    fn eval_xpart_ypart_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("show xpart (3, 7);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        interp.run("show ypart (3, 7);").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn eval_xpart_shifted_pair() {
+        // (3, 7) shifted (10, 20) = (13, 27)
+        let mut interp = Interpreter::new();
+        interp.run("show xpart ((3,7) shifted (10,20));").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("13"), "expected 13 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        interp.run("show ypart ((3,7) shifted (10,20));").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("27"), "expected 27 in: {msg}");
     }
 }
