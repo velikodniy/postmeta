@@ -9,12 +9,14 @@ use crate::types::Scalar;
 
 /// Sine of an angle in degrees.
 #[inline]
+#[must_use]
 pub fn sind(degrees: Scalar) -> Scalar {
     degrees.to_radians().sin()
 }
 
 /// Cosine of an angle in degrees.
 #[inline]
+#[must_use]
 pub fn cosd(degrees: Scalar) -> Scalar {
     degrees.to_radians().cos()
 }
@@ -24,6 +26,7 @@ pub fn cosd(degrees: Scalar) -> Scalar {
 /// This corresponds to `MetaPost`'s `angle` operator.
 /// Returns 0 for the zero vector (`MetaPost` would give an error, but
 /// we choose a safe default).
+#[must_use]
 pub fn angle(x: Scalar, y: Scalar) -> Scalar {
     if x == 0.0 && y == 0.0 {
         return 0.0;
@@ -36,6 +39,7 @@ pub fn angle(x: Scalar, y: Scalar) -> Scalar {
 /// This is `MetaPost`'s internal exponential function, where the base is
 /// `2^(1/256)`. It maps 0 → 1, 256 → 2, 512 → 4, etc.
 #[inline]
+#[must_use]
 pub fn mexp(x: Scalar) -> Scalar {
     (x / 256.0 * core::f64::consts::LN_2).exp()
 }
@@ -44,6 +48,7 @@ pub fn mexp(x: Scalar) -> Scalar {
 ///
 /// Returns 0 for non-positive input (`MetaPost` would error).
 #[inline]
+#[must_use]
 pub fn mlog(x: Scalar) -> Scalar {
     if x <= 0.0 {
         return 0.0;
@@ -53,6 +58,7 @@ pub fn mlog(x: Scalar) -> Scalar {
 
 /// Pythagorean addition: `a ++ b = sqrt(a² + b²)`.
 #[inline]
+#[must_use]
 pub fn pyth_add(a: Scalar, b: Scalar) -> Scalar {
     a.hypot(b)
 }
@@ -61,6 +67,7 @@ pub fn pyth_add(a: Scalar, b: Scalar) -> Scalar {
 ///
 /// Returns 0 if `a² < b²`.
 #[inline]
+#[must_use]
 pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
     let sq = a.mul_add(a, -(b * b));
     if sq <= 0.0 {
@@ -72,6 +79,7 @@ pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
 
 /// Floor function (`MetaPost`'s `floor`).
 #[inline]
+#[must_use]
 pub fn floor(x: Scalar) -> Scalar {
     x.floor()
 }
@@ -79,6 +87,10 @@ pub fn floor(x: Scalar) -> Scalar {
 /// Uniform random deviate in [0, x).
 ///
 /// Uses a simple xorshift for reproducibility. The `seed` is mutated.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "precision loss is acceptable for a pseudo-random number generator"
+)]
 pub fn uniform_deviate(x: Scalar, seed: &mut u64) -> Scalar {
     *seed ^= *seed << 13;
     *seed ^= *seed >> 7;
@@ -101,7 +113,10 @@ pub fn normal_deviate(seed: &mut u64) -> Scalar {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
     use crate::types::EPSILON;

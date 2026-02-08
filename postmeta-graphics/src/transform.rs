@@ -22,6 +22,7 @@ use crate::types::{
 // ---------------------------------------------------------------------------
 
 /// Create a translation transform.
+#[must_use]
 pub const fn shifted(dx: Scalar, dy: Scalar) -> Transform {
     Transform {
         tx: dx,
@@ -31,6 +32,7 @@ pub const fn shifted(dx: Scalar, dy: Scalar) -> Transform {
 }
 
 /// Create a rotation transform (angle in degrees).
+#[must_use]
 pub fn rotated(degrees: Scalar) -> Transform {
     let rad = degrees.to_radians();
     let c = rad.cos();
@@ -46,6 +48,7 @@ pub fn rotated(degrees: Scalar) -> Transform {
 }
 
 /// Create a uniform scaling transform.
+#[must_use]
 pub const fn scaled(factor: Scalar) -> Transform {
     Transform {
         tx: 0.0,
@@ -58,6 +61,7 @@ pub const fn scaled(factor: Scalar) -> Transform {
 }
 
 /// Create an x-only scaling transform.
+#[must_use]
 pub const fn xscaled(factor: Scalar) -> Transform {
     Transform {
         txx: factor,
@@ -66,6 +70,7 @@ pub const fn xscaled(factor: Scalar) -> Transform {
 }
 
 /// Create a y-only scaling transform.
+#[must_use]
 pub const fn yscaled(factor: Scalar) -> Transform {
     Transform {
         tyy: factor,
@@ -74,6 +79,7 @@ pub const fn yscaled(factor: Scalar) -> Transform {
 }
 
 /// Create a horizontal shear (slant) transform.
+#[must_use]
 pub const fn slanted(factor: Scalar) -> Transform {
     Transform {
         txy: factor,
@@ -84,6 +90,7 @@ pub const fn slanted(factor: Scalar) -> Transform {
 /// Create a complex-multiplication transform: `zscaled (a, b)`.
 ///
 /// This simultaneously rotates and scales: the point (1, 0) maps to (a, b).
+#[must_use]
 pub fn zscaled(a: Scalar, b: Scalar) -> Transform {
     Transform {
         tx: 0.0,
@@ -100,6 +107,7 @@ pub fn zscaled(a: Scalar, b: Scalar) -> Transform {
 // ---------------------------------------------------------------------------
 
 /// Compose two transforms: apply `first`, then `second`.
+#[must_use]
 pub fn compose(first: &Transform, second: &Transform) -> Transform {
     let a = first.to_affine();
     let b = second.to_affine();
@@ -109,6 +117,7 @@ pub fn compose(first: &Transform, second: &Transform) -> Transform {
 /// Compute the inverse of a transform, if it exists.
 ///
 /// Returns `None` if the transform is singular (determinant is zero).
+#[must_use]
 pub fn inverse(t: &Transform) -> Option<Transform> {
     let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
     if det.abs() < 1e-30 {
@@ -126,6 +135,7 @@ pub fn inverse(t: &Transform) -> Option<Transform> {
 }
 
 /// Determinant of a transform.
+#[must_use]
 pub fn determinant(t: &Transform) -> Scalar {
     t.txx.mul_add(t.tyy, -(t.txy * t.tyx))
 }
@@ -136,12 +146,14 @@ pub fn determinant(t: &Transform) -> Scalar {
 
 /// Apply a transform to a point.
 #[inline]
+#[must_use]
 pub fn transform_point(t: &Transform, p: Point) -> Point {
     t.apply_to_point(p)
 }
 
 /// Apply a transform to a vector (direction — ignores translation).
 #[inline]
+#[must_use]
 pub fn transform_vec(t: &Transform, v: Vec2) -> Vec2 {
     Vec2::new(
         t.txx.mul_add(v.x, t.txy * v.y),
@@ -165,6 +177,7 @@ fn transform_knot_direction(t: &Transform, dir: &KnotDirection) -> KnotDirection
 }
 
 /// Apply a transform to a knot.
+#[must_use]
 pub fn transform_knot(t: &Transform, knot: &Knot) -> Knot {
     Knot {
         point: transform_point(t, knot.point),
@@ -176,12 +189,14 @@ pub fn transform_knot(t: &Transform, knot: &Knot) -> Knot {
 }
 
 /// Apply a transform to a path.
+#[must_use]
 pub fn transform_path(t: &Transform, path: &Path) -> Path {
     let knots = path.knots.iter().map(|k| transform_knot(t, k)).collect();
     Path::from_knots(knots, path.is_cyclic)
 }
 
 /// Apply a transform to a pen.
+#[must_use]
 pub fn transform_pen(t: &Transform, pen: &Pen) -> Pen {
     match pen {
         Pen::Elliptical(affine) => {
@@ -197,11 +212,13 @@ pub fn transform_pen(t: &Transform, pen: &Pen) -> Pen {
 }
 
 /// Apply a transform to a color (colors are unaffected by spatial transforms).
+#[must_use]
 pub const fn transform_color(_t: &Transform, c: Color) -> Color {
     c
 }
 
 /// Apply a transform to a `GraphicsObject`.
+#[must_use]
 pub fn transform_object(t: &Transform, obj: &GraphicsObject) -> GraphicsObject {
     match obj {
         GraphicsObject::Fill(fill) => GraphicsObject::Fill(FillObject {
@@ -245,6 +262,7 @@ pub fn transform_object(t: &Transform, obj: &GraphicsObject) -> GraphicsObject {
 }
 
 /// Apply a transform to an entire picture.
+#[must_use]
 pub fn transform_picture(t: &Transform, pic: &Picture) -> Picture {
     Picture {
         objects: pic
@@ -260,7 +278,10 @@ pub fn transform_picture(t: &Transform, pic: &Picture) -> Picture {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
     use crate::types::EPSILON;

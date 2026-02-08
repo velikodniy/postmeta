@@ -44,7 +44,10 @@ pub fn addto_contour(
 /// Add a stroked path to a picture.
 ///
 /// Corresponds to `addto <pic> doublepath <path>`.
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors MetaPost addto..doublepath with all stroke attributes"
+)]
 pub fn addto_doublepath(
     pic: &mut Picture,
     path: Path,
@@ -124,11 +127,13 @@ impl BoundingBox {
     };
 
     /// Check if this bounding box is valid (non-empty).
+    #[must_use]
     pub fn is_valid(&self) -> bool {
         self.min_x <= self.max_x && self.min_y <= self.max_y
     }
 
     /// Width.
+    #[must_use]
     pub fn width(&self) -> Scalar {
         if self.is_valid() {
             self.max_x - self.min_x
@@ -138,6 +143,7 @@ impl BoundingBox {
     }
 
     /// Height.
+    #[must_use]
     pub fn height(&self) -> Scalar {
         if self.is_valid() {
             self.max_y - self.min_y
@@ -147,21 +153,25 @@ impl BoundingBox {
     }
 
     /// Lower-left corner.
+    #[must_use]
     pub const fn llcorner(&self) -> Point {
         Point::new(self.min_x, self.min_y)
     }
 
     /// Lower-right corner.
+    #[must_use]
     pub const fn lrcorner(&self) -> Point {
         Point::new(self.max_x, self.min_y)
     }
 
     /// Upper-left corner.
+    #[must_use]
     pub const fn ulcorner(&self) -> Point {
         Point::new(self.min_x, self.max_y)
     }
 
     /// Upper-right corner.
+    #[must_use]
     pub const fn urcorner(&self) -> Point {
         Point::new(self.max_x, self.max_y)
     }
@@ -195,6 +205,7 @@ impl Default for BoundingBox {
 ///
 /// This is a conservative estimate using the convex hull of all control
 /// points, not the tight bound. This matches `MetaPost`'s behavior.
+#[must_use]
 pub fn path_bbox(path: &Path) -> BoundingBox {
     let mut bb = BoundingBox::EMPTY;
     for knot in &path.knots {
@@ -213,6 +224,7 @@ pub fn path_bbox(path: &Path) -> BoundingBox {
 ///
 /// When `true_corners` is false, `SetBounds` regions override the
 /// computed bbox. When true, they are ignored.
+#[must_use]
 pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
     let mut bb = BoundingBox::EMPTY;
     let mut bounds_stack: Vec<BoundingBox> = Vec::new();
@@ -281,7 +293,10 @@ fn pen_max_extent(pen: &Pen) -> Scalar {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
     use crate::types::{Knot, KnotDirection, EPSILON};

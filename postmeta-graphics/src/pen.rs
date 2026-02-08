@@ -12,18 +12,20 @@
 
 use kurbo::{Point, Vec2};
 
-use crate::types::{Knot, Path, Pen, Scalar};
+use crate::types::{index_to_scalar, Knot, Path, Pen, Scalar};
 
 // ---------------------------------------------------------------------------
 // pencircle / nullpen
 // ---------------------------------------------------------------------------
 
 /// Create a circular pen of the given diameter.
+#[must_use]
 pub fn pencircle(diameter: Scalar) -> Pen {
     Pen::circle(diameter)
 }
 
 /// The null pen: a single point at the origin.
+#[must_use]
 pub const fn nullpen() -> Pen {
     Pen::Elliptical(kurbo::Affine::new([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
 }
@@ -37,6 +39,11 @@ pub const fn nullpen() -> Pen {
 /// Extracts the on-curve points and computes the convex hull.
 /// The path must be cyclic. Returns a polygonal pen with vertices
 /// in counter-clockwise order.
+///
+/// # Panics
+///
+/// Panics if the path is not cyclic or has fewer than 3 knots.
+#[must_use]
 pub fn makepen(path: &Path) -> Pen {
     assert!(path.is_cyclic, "makepen requires a cyclic path");
     assert!(path.knots.len() >= 3, "makepen requires at least 3 knots");
@@ -54,6 +61,7 @@ pub fn makepen(path: &Path) -> Pen {
 ///
 /// - Elliptical pens produce an 8-knot approximation of the transformed circle.
 /// - Polygonal pens produce a cyclic path through the vertices.
+#[must_use]
 pub fn makepath(pen: &Pen) -> Path {
     match pen {
         Pen::Elliptical(affine) => make_ellipse_path(affine),
@@ -90,7 +98,7 @@ fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
     let mut knots = Vec::with_capacity(n);
 
     for i in 0..n {
-        let angle = (i as Scalar) * std::f64::consts::FRAC_PI_4;
+        let angle = index_to_scalar(i) * std::f64::consts::FRAC_PI_4;
         let cos_a = angle.cos();
         let sin_a = angle.sin();
 
@@ -106,7 +114,10 @@ fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
         );
         let left_cp = affine_transform_point(
             affine,
-            Point::new(KAPPA.mul_add(-tangent.x, p.x), KAPPA.mul_add(-tangent.y, p.y)),
+            Point::new(
+                KAPPA.mul_add(-tangent.x, p.x),
+                KAPPA.mul_add(-tangent.y, p.y),
+            ),
         );
 
         knots.push(Knot::with_controls(on_curve, left_cp, right_cp));
@@ -123,6 +134,7 @@ fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
 ///
 /// Returns the point on the pen boundary that is furthest in the
 /// direction `dir`. This is used for computing stroked path envelopes.
+#[must_use]
 pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
     match pen {
         Pen::Elliptical(affine) => {
@@ -168,6 +180,7 @@ pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
 
 /// Compute the convex hull of a set of points.
 /// Returns vertices in counter-clockwise order.
+#[must_use]
 pub fn convex_hull(points: &[Point]) -> Vec<Point> {
     if points.len() < 3 {
         return points.to_vec();
@@ -231,7 +244,10 @@ fn lerp(a: Point, b: Point, t: Scalar) -> Point {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
     use crate::types::EPSILON;

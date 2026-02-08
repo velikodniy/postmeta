@@ -21,14 +21,45 @@ pub const EPSILON: Scalar = 1.0 / 65536.0;
 /// Maximum coordinate value (matches `MetaPost`'s `infinity`).
 pub const INFINITY_VAL: Scalar = 4_095.999_98;
 
+/// Convert a segment index to a path time parameter.
+///
+/// Path operations use `f64` time parameters where integer values correspond
+/// to knot indices. Segment counts in any practical path are far below 2^52,
+/// so no precision is lost.
+#[inline]
+#[must_use]
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "path segment counts are far below 2^52"
+)]
+pub const fn index_to_scalar(i: usize) -> Scalar {
+    i as Scalar
+}
+
+/// Convert a non-negative path time parameter to a segment index.
+///
+/// The caller must ensure `t >= 0.0`. Values are floored before conversion.
+#[inline]
+#[must_use]
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "path time parameters are non-negative and small"
+)]
+pub fn scalar_to_index(t: Scalar) -> usize {
+    t.floor() as usize
+}
+
 /// Convert degrees to radians.
 #[inline]
+#[must_use]
 pub const fn deg_to_rad(deg: Scalar) -> Scalar {
     deg.to_radians()
 }
 
 /// Convert radians to degrees.
 #[inline]
+#[must_use]
 pub const fn rad_to_deg(rad: Scalar) -> Scalar {
     rad.to_degrees()
 }
@@ -58,6 +89,7 @@ impl Color {
     };
 
     #[inline]
+    #[must_use]
     pub const fn new(r: Scalar, g: Scalar, b: Scalar) -> Self {
         Self { r, g, b }
     }
@@ -83,6 +115,11 @@ pub enum LineCap {
 }
 
 impl LineCap {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "linecap/linejoin values are small integers (0, 1, 2)"
+    )]
+    #[must_use]
     pub const fn from_f64(v: Scalar) -> Self {
         match v as i32 {
             0 => Self::Butt,
@@ -102,6 +139,11 @@ pub enum LineJoin {
 }
 
 impl LineJoin {
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "linecap/linejoin values are small integers (0, 1, 2)"
+    )]
+    #[must_use]
     pub const fn from_f64(v: Scalar) -> Self {
         match v as i32 {
             0 => Self::Miter,
@@ -166,6 +208,7 @@ pub struct Knot {
 
 impl Knot {
     /// Create a new knot at the given point with default (open) constraints.
+    #[must_use]
     pub const fn new(point: Point) -> Self {
         Self {
             point,
@@ -177,6 +220,7 @@ impl Knot {
     }
 
     /// Create a knot with explicit Bezier control points already computed.
+    #[must_use]
     pub const fn with_controls(point: Point, left_cp: Point, right_cp: Point) -> Self {
         Self {
             point,
@@ -204,6 +248,7 @@ pub struct Path {
 
 impl Path {
     /// Create an empty open path.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             knots: Vec::new(),
@@ -212,6 +257,7 @@ impl Path {
     }
 
     /// Create a path from knots.
+    #[must_use]
     pub const fn from_knots(knots: Vec<Knot>, is_cyclic: bool) -> Self {
         Self { knots, is_cyclic }
     }
@@ -219,6 +265,7 @@ impl Path {
     /// Number of segments in the path.
     /// For a cyclic path with N knots, there are N segments.
     /// For an open path with N knots, there are N-1 segments.
+    #[must_use]
     pub fn num_segments(&self) -> usize {
         if self.knots.is_empty() {
             return 0;
@@ -231,6 +278,7 @@ impl Path {
     }
 
     /// The "length" of the path in `MetaPost` terms (number of segments).
+    #[must_use]
     pub fn length(&self) -> usize {
         self.num_segments()
     }
@@ -259,12 +307,14 @@ pub enum Pen {
 
 impl Pen {
     /// Create a circular pen with the given diameter centered at origin.
+    #[must_use]
     pub fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
         Self::Elliptical(Affine::scale(r))
     }
 
     /// The default pen: a circle of diameter 0.5bp.
+    #[must_use]
     pub fn default_pen() -> Self {
         Self::circle(0.5)
     }
@@ -311,12 +361,14 @@ impl Transform {
     /// kurbo Affine coefficients: [a, b, c, d, e, f]
     /// mapping: x' = a*x + c*y + e,  y' = b*x + d*y + f
     #[inline]
+    #[must_use]
     pub const fn to_affine(self) -> Affine {
         Affine::new([self.txx, self.tyx, self.txy, self.tyy, self.tx, self.ty])
     }
 
     /// Create from a kurbo `Affine`.
     #[inline]
+    #[must_use]
     pub const fn from_affine(a: Affine) -> Self {
         let c = a.as_coeffs();
         Self {
@@ -331,6 +383,7 @@ impl Transform {
 
     /// Apply this transform to a point.
     #[inline]
+    #[must_use]
     pub fn apply_to_point(&self, p: Point) -> Point {
         Point::new(
             self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
@@ -408,6 +461,7 @@ pub struct Picture {
 }
 
 impl Picture {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             objects: Vec::new(),
@@ -429,7 +483,10 @@ impl Picture {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
 

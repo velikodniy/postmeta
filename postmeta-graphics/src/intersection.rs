@@ -8,7 +8,7 @@
 
 use kurbo::Point;
 
-use crate::types::{KnotDirection, Path, Scalar};
+use crate::types::{index_to_scalar, KnotDirection, Path, Scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -23,6 +23,7 @@ pub struct Intersection {
 ///
 /// Returns `None` if the paths don't intersect.
 /// The returned times are in the range [0, `path.num_segments()`].
+#[must_use]
 pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
     let n1 = path1.num_segments();
     let n2 = path2.num_segments();
@@ -39,8 +40,8 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
 
             if let Some((t1, t2)) = intersect_cubics(&seg1, &seg2, 0.0, 1.0, 0.0, 1.0, 0) {
                 return Some(Intersection {
-                    t1: i as Scalar + t1,
-                    t2: j as Scalar + t2,
+                    t1: index_to_scalar(i) + t1,
+                    t2: index_to_scalar(j) + t2,
                 });
             }
         }
@@ -50,6 +51,7 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
 }
 
 /// Find all intersections between two paths.
+#[must_use]
 pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
     let n1 = path1.num_segments();
     let n2 = path2.num_segments();
@@ -72,8 +74,8 @@ pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
                 0.0,
                 1.0,
                 0,
-                i as Scalar,
-                j as Scalar,
+                index_to_scalar(i),
+                index_to_scalar(j),
                 &mut results,
             );
         }
@@ -207,7 +209,10 @@ fn intersect_cubics(
 }
 
 /// Find all intersections (appends to results).
-#[allow(clippy::too_many_arguments)]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "recursive bisection requires passing interval bounds for both curves"
+)]
 fn find_intersections_recursive(
     seg1: &CubicSeg,
     seg2: &CubicSeg,
@@ -330,7 +335,10 @@ fn get_segment_points(path: &Path, i: usize) -> CubicSeg {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[allow(clippy::float_cmp)]
+#[expect(
+    clippy::float_cmp,
+    reason = "exact float comparisons are intentional in tests"
+)]
 mod tests {
     use super::*;
     use crate::path::hobby::make_choices;

@@ -75,7 +75,10 @@ pub fn make_choices(path: &mut Path) {
 // Open path solver
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_lines)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Hobby's spline algorithm is inherently complex"
+)]
 fn solve_choices_open(path: &mut Path) {
     let n = path.knots.len();
     if n < 2 {
@@ -237,7 +240,10 @@ fn solve_choices_open(path: &mut Path) {
 // Cyclic path solver
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::needless_range_loop)]
+#[expect(
+    clippy::needless_range_loop,
+    reason = "loops use modular index arithmetic and cross-element dependencies"
+)]
 fn solve_choices_cyclic(path: &mut Path) {
     let n = path.knots.len();
     if n < 2 {

@@ -30,11 +30,13 @@ use postmeta_graphics::types::{
 ///
 /// The resulting document has a `viewBox` derived from the picture's
 /// bounding box (with a small margin) and uses PostScript points as units.
+#[must_use]
 pub fn render(picture: &Picture) -> Document {
     render_with_options(picture, &RenderOptions::default())
 }
 
 /// Render a [`Picture`] to an SVG string.
+#[must_use]
 pub fn render_to_string(picture: &Picture) -> String {
     render(picture).to_string()
 }
@@ -62,6 +64,7 @@ impl Default for RenderOptions {
 }
 
 /// Render a [`Picture`] to an SVG [`Document`] with custom options.
+#[must_use]
 pub fn render_with_options(picture: &Picture, opts: &RenderOptions) -> Document {
     let bb = picture_bbox(picture, opts.true_corners);
     let mut state = RenderState::new(opts);
@@ -298,6 +301,11 @@ fn write_point(d: &mut String, x: Scalar, y: Scalar, precision: usize) {
 // ---------------------------------------------------------------------------
 
 /// Convert a [`Color`] to an SVG color string.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "color components are clamped to [0, 255]"
+)]
 fn color_to_svg(c: Color) -> String {
     let r = (c.r.clamp(0.0, 1.0) * 255.0).round() as u8;
     let g = (c.g.clamp(0.0, 1.0) * 255.0).round() as u8;

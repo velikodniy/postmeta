@@ -7,7 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-kurbo.workspace = true
+kurbo = { version = "0.13", default-features = false, features = ["libm"] }
 
 [lints]
 workspace = true

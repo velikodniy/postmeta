@@ -8,10 +8,10 @@ rust-version.workspace = true
 
 [dependencies]
 postmeta-graphics = { path = "../postmeta-graphics" }
-svg.workspace = true
+svg = "0.18"
 
 [dev-dependencies]
-kurbo.workspace = true
+kurbo = { version = "0.13", default-features = false, features = ["libm"] }
 
 [lints]
 workspace = true
