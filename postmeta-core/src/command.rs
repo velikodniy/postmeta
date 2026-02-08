@@ -64,6 +64,8 @@ pub enum Command {
     AddTo = 20,
     /// `clip` / `setbounds` (`bounds_command` in `mp.web`).
     Bounds = 21,
+    /// `outer` — marks tokens as outer (not yet enforced, but parsed).
+    Outer = 22,
     /// `show` / `showtoken` / `showdependencies` / `showvariable` / `showstats`.
     Show = 24,
     /// `batchmode` / `nonstopmode` / `scrollmode` / `errorstopmode`.
@@ -600,6 +602,11 @@ pub const PRIMITIVES: &[Primitive] = &[
         modifier: 0,
     },
     // -- Statement-level commands --
+    Primitive {
+        name: "outer",
+        command: Command::Outer,
+        modifier: 0,
+    },
     Primitive {
         name: "save",
         command: Command::Save,

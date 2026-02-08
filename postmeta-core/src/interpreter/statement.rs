@@ -34,6 +34,7 @@ impl Interpreter {
             Command::AddTo => self.do_addto(),
             Command::Bounds => self.do_bounds(),
             Command::ShipOut => self.do_shipout(),
+            Command::Outer => self.do_outer(),
             Command::Save => self.do_save(),
             Command::Interim => self.do_interim(),
             Command::Let => self.do_let(),
@@ -451,6 +452,29 @@ impl Interpreter {
 
         self.pictures.push(pic);
 
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
+        }
+        Ok(())
+    }
+
+    /// Execute `outer` statement (no-op — skip the token list).
+    ///
+    /// In `MetaPost`, `outer` marks tokens so they cannot appear inside
+    /// macro definitions.  We parse the comma-separated token list but
+    /// do not enforce the restriction.
+    ///
+    /// Syntax: `outer <token> [, <token>]* ;`
+    fn do_outer(&mut self) -> InterpResult<()> {
+        // Read token names separated by commas until semicolon.
+        // Use get_next (non-expanding) to avoid triggering `end`/`bye`.
+        loop {
+            self.get_next(); // read a token name (skip it)
+            self.get_next(); // read separator (comma or semicolon)
+            if self.cur.command != Command::Comma {
+                break;
+            }
+        }
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
         }

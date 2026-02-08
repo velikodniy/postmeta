@@ -1043,7 +1043,7 @@ impl Interpreter {
         let mut args: Vec<TokenList> = Vec::new();
 
         if !macro_info.params.is_empty() {
-            self.get_next(); // advance past the macro name to start reading args
+            self.get_x_next(); // advance past the macro name, expanding conditionals/etc.
             let mut in_delimiters = false;
 
             for (i, param_type) in macro_info.params.iter().enumerate() {

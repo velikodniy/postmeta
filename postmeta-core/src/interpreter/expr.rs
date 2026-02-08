@@ -6,6 +6,7 @@
 //! - `scan_tertiary`: `+`, `-`, `++`, `+-+`
 //! - `scan_expression`: `=`, `<`, `>`, path construction
 
+use std::fmt::Write;
 use std::sync::Arc;
 
 use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
@@ -164,28 +165,61 @@ impl Interpreter {
 
                 let mut has_suffixes = false;
 
+                // Check early if this is a standalone vardef macro.
+                let is_root_vardef =
+                    root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
+
                 // Advance to next token. We use `get_x_next` (expanding) as
                 // mp.web does — since vardefs keep `TagToken`, they won't be
                 // expanded by `get_x_next`.
                 self.get_x_next();
 
-                // Suffix loop: collect tokens with command codes in [42..44].
-                while self.cur.command.is_suffix_token() {
-                    if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                        name.push('.');
-                        name.push_str(s);
-                    } else if self.cur.command == Command::NumericToken {
-                        // Numeric subscript — not yet fully implemented
+                // Suffix loop: collect symbolic suffixes, numeric subscripts,
+                // and bracketed subscript expressions `[expr]`.
+                //
+                // For vardef roots, we only collect symbolic suffixes (to build
+                // compound names like `laboff.lft`) — NOT subscripts, because
+                // numeric tokens and brackets should be parsed as macro
+                // arguments, not variable subscripts.
+                loop {
+                    if self.cur.command == Command::TagToken
+                        || self.cur.command == Command::InternalQuantity
+                    {
+                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                            name.push('.');
+                            name.push_str(s);
+                        }
+                        has_suffixes = true;
+                        self.get_x_next();
+                    } else if !is_root_vardef && self.cur.command == Command::NumericToken {
+                        // Bare numeric subscript: pen_3
+                        if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
+                            let _ = write!(name, "[{}]", v as i64);
+                        }
+                        has_suffixes = true;
+                        self.get_x_next();
+                    } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
+                        // Bracketed subscript: var[expr]
+                        self.get_x_next(); // skip `[`
+                        self.scan_expression()?;
+                        let subscript = match &self.cur_exp {
+                            Value::Numeric(v) => *v as i64,
+                            _ => 0,
+                        };
+                        let _ = write!(name, "[{subscript}]");
+                        if self.cur.command == Command::RightBracket {
+                            self.get_x_next();
+                        }
+                        has_suffixes = true;
+                    } else {
                         break;
                     }
-                    has_suffixes = true;
-                    self.get_x_next();
                 }
 
-                // Check if this is a vardef macro call (standalone root, no
-                // suffixes collected, and the symbol has a vardef entry).
-                let is_vardef_call = !has_suffixes
-                    && root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
+                // Check if this is a vardef macro call (standalone root or
+                // root with only symbolic suffixes that don't have a variable
+                // entry, and the symbol has a vardef entry in the macro table).
+                let is_vardef_call = !has_suffixes && is_root_vardef;
 
                 if is_vardef_call {
                     // Trigger vardef macro expansion.
@@ -282,12 +316,43 @@ impl Interpreter {
             }
 
             Command::TypeName => {
-                // Type name as primary — used in type declarations
-                // In expression context, this is an error
-                Err(InterpreterError::new(
-                    ErrorKind::InvalidExpression,
-                    "Type name cannot be used as an expression",
-                ))
+                // Type name as unary operator — type test.
+                // `numeric <primary>` → boolean, true if the primary is a known numeric.
+                // Same for `boolean`, `string`, `pen`, `path`, `picture`,
+                // `transform`, `color`, `pair`.
+                //
+                // See mp.web §740: each type_name acts as a type_range test.
+                use crate::command::TypeNameOp;
+                let op = self.cur.modifier;
+                self.get_x_next();
+                self.scan_primary()?;
+                let ty = self.cur_type;
+                let result = match op {
+                    x if x == TypeNameOp::Numeric as u16 => {
+                        // numeric: type_range(known)(independent)
+                        ty >= Type::Known && ty <= Type::Independent
+                    }
+                    x if x == TypeNameOp::Boolean as u16 => {
+                        ty == Type::Boolean || ty == Type::UnknownBoolean
+                    }
+                    x if x == TypeNameOp::String as u16 => {
+                        ty == Type::String || ty == Type::UnknownString
+                    }
+                    x if x == TypeNameOp::Pen as u16 => ty == Type::Pen || ty == Type::UnknownPen,
+                    x if x == TypeNameOp::Path as u16 => {
+                        ty == Type::Path || ty == Type::UnknownPath
+                    }
+                    x if x == TypeNameOp::Picture as u16 => {
+                        ty == Type::Picture || ty == Type::UnknownPicture
+                    }
+                    x if x == TypeNameOp::Transform as u16 => ty == Type::TransformType,
+                    x if x == TypeNameOp::Color as u16 => ty == Type::ColorType,
+                    x if x == TypeNameOp::Pair as u16 => ty == Type::PairType,
+                    _ => false,
+                };
+                self.cur_exp = Value::Boolean(result);
+                self.cur_type = Type::Boolean;
+                Ok(())
             }
 
             _ => {

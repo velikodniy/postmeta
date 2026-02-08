@@ -90,8 +90,20 @@ impl Interpreter {
 
         // Check if the LHS was an internal quantity (e.g., `linecap := 0`)
         if let Some(idx) = self.last_internal_idx {
-            let val = value_to_scalar(&rhs)?;
-            self.internals.set(idx, val);
+            match value_to_scalar(&rhs) {
+                Ok(val) => self.internals.set(idx, val),
+                Err(_) => {
+                    // Non-numeric assignment to internal — report but continue.
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        format!(
+                            "Internal quantity `{}` requires numeric, got {}",
+                            self.internals.name(idx),
+                            rhs.ty()
+                        ),
+                    );
+                }
+            }
             return Ok(());
         }
 
