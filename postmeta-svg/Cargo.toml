@@ -10,5 +10,8 @@ rust-version.workspace = true
 postmeta-graphics = { path = "../postmeta-graphics" }
 svg.workspace = true
 
+[dev-dependencies]
+kurbo.workspace = true
+
 [lints]
 workspace = true
