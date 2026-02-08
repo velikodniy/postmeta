@@ -1214,9 +1214,31 @@ mod tests {
     }
 
     #[test]
-    fn outer_does_not_hang() {
+    fn tertiarydef_with_picture() {
+        // Simplified _on_: just shift a picture
         let mut interp = Interpreter::new();
-        interp.run("let bye = end; outer end,bye;").unwrap();
+        interp
+            .run(
+                r#"
+            delimiters ();
+            tertiarydef p _on_ d =
+              begingroup
+              p shifted (0,d)
+              endgroup
+            enddef;
+            show nullpicture _on_ 3;
+        "#,
+            )
+            .unwrap();
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        for e in &errors {
+            eprintln!("  tertiarydef error: {}", e.message);
+        }
+        assert!(errors.is_empty(), "had {} errors", errors.len());
     }
 
     #[test]
@@ -1231,6 +1253,47 @@ mod tests {
             .filter(|e| e.message.contains("1"))
             .collect();
         assert!(!show_msgs.is_empty(), "show 1 should have been processed");
+    }
+
+    #[test]
+    fn dashpattern_basic() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                r#"
+            delimiters ();
+            tertiarydef p _on_ d =
+              begingroup save pic;
+              picture pic; pic=p;
+              addto pic doublepath (0,0)..(d,0);
+              pic shifted (0,d)
+              endgroup
+            enddef;
+            tertiarydef p _off_ d =
+              begingroup
+              p shifted (0,d)
+              endgroup
+            enddef;
+            vardef dashpattern(text t) =
+              save on, off;
+              let on=_on_;
+              let off=_off_;
+              nullpicture t
+            enddef;
+            show dashpattern(on 3 off 3);
+        "#,
+            )
+            .unwrap();
+        // Should produce a picture, not a "Cannot transform" error
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        for e in &errors {
+            eprintln!("  dashpattern error: {}", e.message);
+        }
+        assert!(errors.is_empty(), "dashpattern had {} errors", errors.len());
     }
 
     #[test]
@@ -1357,11 +1420,8 @@ mod tests {
             .iter()
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
-        // Should not exceed 5 non-fatal errors (all from dashpattern).
-        assert!(
-            error_count <= 5,
-            "expected at most 5 errors, got {error_count}"
-        );
+        // plain.mp should load with zero errors.
+        assert!(error_count == 0, "expected 0 errors, got {error_count}");
     }
 
     #[test]

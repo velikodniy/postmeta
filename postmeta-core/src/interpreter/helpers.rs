@@ -7,7 +7,7 @@ use postmeta_graphics::types::{Path, Pen, Scalar, Transform};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolTable;
-use crate::types::Value;
+use crate::types::{Type, Value};
 
 pub(super) fn value_to_scalar(val: &Value) -> InterpResult<Scalar> {
     match val {
@@ -94,8 +94,14 @@ pub(super) fn value_to_stored_token(val: &Value) -> StoredToken {
     match val {
         Value::Numeric(v) => StoredToken::Numeric(*v),
         Value::String(s) => StoredToken::StringLit(s.to_string()),
-        // For non-primitive types, store as numeric 0 (best-effort)
-        _ => StoredToken::Numeric(0.0),
+        Value::Boolean(_) => StoredToken::Capsule(val.clone(), Type::Boolean),
+        Value::Pair(..) => StoredToken::Capsule(val.clone(), Type::PairType),
+        Value::Color(..) => StoredToken::Capsule(val.clone(), Type::ColorType),
+        Value::Transform(..) => StoredToken::Capsule(val.clone(), Type::TransformType),
+        Value::Path(..) => StoredToken::Capsule(val.clone(), Type::Path),
+        Value::Pen(..) => StoredToken::Capsule(val.clone(), Type::Pen),
+        Value::Picture(..) => StoredToken::Capsule(val.clone(), Type::Picture),
+        Value::Vacuous => StoredToken::Capsule(val.clone(), Type::Vacuous),
     }
 }
 

@@ -979,13 +979,20 @@ impl Interpreter {
             value_to_stored_tokens(&right, &mut self.symbols),
         ];
 
-        // Push the body with args
-        self.input
-            .push_token_list(macro_info.body, args, "binary macro".into());
+        // After scanning the RHS, `self.cur` holds the first token
+        // beyond the operand.  This look-ahead may belong to an outer
+        // input level (e.g. remaining text-parameter tokens).  Append
+        // it to the body token list so it reappears naturally after
+        // the body is consumed, preventing token loss.
+        let mut body = macro_info.body;
+        self.store_current_token(&mut body);
 
-        // Get next token from expansion
+        // Push the body (with appended look-ahead) and args
+        self.input
+            .push_token_list(body, args, "binary macro".into());
+
+        // Get next token from expansion and evaluate the body
         self.get_x_next();
-        // Re-scan the result as an expression
         self.scan_expression()?;
 
         Ok(())
