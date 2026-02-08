@@ -1278,7 +1278,14 @@ impl Interpreter {
                         if self.cur.command == Command::RightDelimiter
                             && (next_is_undelimited || i + 1 >= macro_info.params.len())
                         {
-                            self.get_x_next();
+                            // Only advance past `)` if there are more params to
+                            // scan.  When this is the LAST parameter, leave
+                            // `self.cur` at `)` so the token that follows the
+                            // macro call (typically `;`) is not consumed before
+                            // the body expansion is pushed.
+                            if next_is_undelimited {
+                                self.get_x_next();
+                            }
                             in_delimiters = false;
                         }
                     }
@@ -1321,10 +1328,10 @@ impl Interpreter {
                 }
             }
 
-            // Consume any remaining closing delimiter
-            if in_delimiters && self.cur.command == Command::RightDelimiter {
-                self.get_next();
-            }
+            // Note: do NOT advance past a trailing `)` here.  The token
+            // after the macro call (e.g. `;`) must survive until the body
+            // expansion completes.  The input stack will resume reading
+            // from the source level (past `)`) once the expansion is done.
         }
 
         // Build the expansion token list
@@ -1522,7 +1529,18 @@ impl Interpreter {
             }
 
             Command::TagToken => {
-                // Variable reference — collect suffix parts to form compound name
+                // Variable reference — scan suffix parts to form compound name.
+                //
+                // MetaPost variable names are structured: `laboff.lft`, `z.r`,
+                // etc.  The scanner drops `.` separators, so suffixes appear as
+                // consecutive tokens.  A suffix part can be a `TagToken` or even
+                // a `DefinedMacro` (e.g. `lft` is a vardef, but `laboff.lft` is
+                // a declared pair variable).
+                //
+                // We use `get_next` (non-expanding) to peek at each potential
+                // suffix token, and only collect it if the resulting compound
+                // name is a declared variable.  If it's not a suffix, we call
+                // `expand_current` to handle macro expansion as usual.
                 let sym = self.cur.sym;
                 let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
                 {
@@ -1530,14 +1548,14 @@ impl Interpreter {
                 } else {
                     String::new()
                 };
-                self.get_x_next();
+                // Use get_next (non-expanding) so we can inspect tokens that
+                // might be vardef macros before they get expanded.
+                self.get_next();
 
-                // Collect suffix tokens: tag tokens form compound variable names
-                // (the scanner drops `.` separators, so suffixes appear as
-                // consecutive tag tokens, e.g. `laboff` `ulft` for `laboff.ulft`)
-                // Only collect if the compound name is a known (declared) variable,
-                // to avoid over-collecting independent tags like `s i` → `s.i`.
-                while self.cur.command == Command::TagToken {
+                // Collect suffix tokens, checking against declared variables.
+                while self.cur.command == Command::TagToken
+                    || self.cur.command == Command::DefinedMacro
+                {
                     let next_name =
                         if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
                             s.clone()
@@ -1550,8 +1568,11 @@ impl Interpreter {
                         break;
                     }
                     name = compound;
-                    self.get_x_next();
+                    self.get_next();
                 }
+
+                // Now expand whatever token follows the variable name.
+                self.expand_current();
 
                 self.resolve_variable(sym, &name)
             }
@@ -2784,29 +2805,37 @@ impl Interpreter {
             // Expect a variable name (possibly compound with suffixes)
             if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
                 let mut name = name.clone();
-                self.get_x_next();
+                // Use get_next (non-expanding) to avoid expanding vardef
+                // suffixes like `lft` in `pair laboff.lft`.
+                self.get_next();
 
-                // Collect suffix tokens (tag tokens and subscripts) as part of
-                // the compound variable name. The scanner drops `.` separators,
-                // so suffix parts appear as consecutive tag/symbolic tokens.
+                // Collect suffix tokens (tag tokens, subscripts, and symbols
+                // that might be macros but are suffix parts).  The scanner
+                // drops `.` separators, so suffix parts appear as consecutive
+                // tokens.  We use non-expanding reads to avoid triggering
+                // vardef expansion on suffix names.
                 loop {
                     if self.cur.command == Command::LeftBracket {
                         // Subscript array suffix `[]` — skip it
-                        self.get_x_next();
+                        self.get_next();
                         if self.cur.command == Command::RightBracket {
-                            self.get_x_next();
+                            self.get_next();
                         }
-                    } else if self.cur.command == Command::TagToken {
-                        // Suffix part (e.g. `l` in `path_.l`)
+                    } else if self.cur.command == Command::TagToken
+                        || self.cur.command == Command::DefinedMacro
+                    {
+                        // Suffix part (e.g. `l` in `path_.l`, `lft` in `laboff.lft`)
                         if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
                             name.push('.');
                             name.push_str(s);
                         }
-                        self.get_x_next();
+                        self.get_next();
                     } else {
                         break;
                     }
                 }
+                // Expand whatever follows the variable name.
+                self.expand_current();
 
                 let var_id = self.variables.lookup(&name);
 
