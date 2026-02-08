@@ -29,8 +29,8 @@ use postmeta_graphics::types::{
 
 use crate::command::{
     BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, IterationOp, MacroDefOp, MessageOp,
-    NullaryOp, ParamTypeOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp,
-    ThingToAddOp, UnaryOp, WithOptionOp,
+    NullaryOp, ParamTypeOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp, StrOpOp,
+    TertiaryBinaryOp, ThingToAddOp, TypeNameOp, UnaryOp, WithOptionOp,
 };
 use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
@@ -151,6 +151,8 @@ pub struct Interpreter {
     pub errors: Vec<InterpreterError>,
     /// Job name.
     pub job_name: String,
+    /// Next delimiter id for `delimiters` command (0 is reserved for `()`).
+    next_delimiter_id: u16,
 }
 
 impl Interpreter {
@@ -211,6 +213,7 @@ impl Interpreter {
             random_seed: 0,
             errors: Vec::new(),
             job_name: "output".into(),
+            next_delimiter_id: 1, // 0 is reserved for built-in ()
         }
     }
 
@@ -561,7 +564,33 @@ impl Interpreter {
                 break;
             }
             if self.scan_expression().is_ok() {
-                values.push(self.take_cur_exp());
+                let first_val = self.take_cur_exp();
+
+                // Check for `step <step> until <end>` after the first value
+                if self.cur.command == Command::StepToken {
+                    if let Ok(start) = value_to_scalar(&first_val) {
+                        self.get_x_next();
+                        if self.scan_expression().is_ok() {
+                            let step_val = self.take_cur_exp();
+                            if let Ok(step) = value_to_scalar(&step_val) {
+                                // Expect `until`
+                                if self.cur.command == Command::UntilToken {
+                                    self.get_x_next();
+                                    if self.scan_expression().is_ok() {
+                                        let end_val = self.take_cur_exp();
+                                        if let Ok(end) = value_to_scalar(&end_val) {
+                                            // Generate the range
+                                            self.generate_step_range(start, step, end, &mut values);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+
+                values.push(first_val);
             } else {
                 break;
             }
@@ -573,6 +602,36 @@ impl Interpreter {
             }
         }
         values
+    }
+
+    /// Generate numeric values for a `step`/`until` loop range.
+    #[allow(clippy::while_float)]
+    fn generate_step_range(&self, start: f64, step: f64, end: f64, values: &mut Vec<Value>) {
+        if step.abs() < f64::EPSILON {
+            // Zero step — avoid infinite loop
+            return;
+        }
+        let mut v = start;
+        let tolerance = f64::EPSILON.mul_add(end.abs().max(1.0), end);
+        if step > 0.0 {
+            while v <= tolerance {
+                values.push(Value::Numeric(v));
+                v += step;
+                // Safety limit to avoid runaway loops
+                if values.len() > 10_000 {
+                    break;
+                }
+            }
+        } else {
+            let neg_tolerance = (-f64::EPSILON).mul_add(end.abs().max(1.0), end);
+            while v >= neg_tolerance {
+                values.push(Value::Numeric(v));
+                v += step;
+                if values.len() > 10_000 {
+                    break;
+                }
+            }
+        }
     }
 
     /// Scan a loop body (tokens until `endfor`), handling nested for/endfor.
@@ -1362,6 +1421,27 @@ impl Interpreter {
                 Ok(())
             }
 
+            Command::StrOp => {
+                let op = self.cur.modifier;
+                self.get_x_next();
+                if op == StrOpOp::Str as u16 {
+                    // `str` <suffix> — converts suffix to string
+                    let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
+                    {
+                        s.clone()
+                    } else {
+                        String::new()
+                    };
+                    self.get_x_next();
+                    self.cur_exp = Value::String(Arc::from(name.as_str()));
+                } else {
+                    // readfrom etc. — not yet implemented
+                    self.cur_exp = Value::String(Arc::from(""));
+                }
+                self.cur_type = Type::String;
+                Ok(())
+            }
+
             Command::TypeName => {
                 // Type name as primary — used in type declarations
                 // In expression context, this is an error
@@ -1377,7 +1457,34 @@ impl Interpreter {
                 self.cur_type = Type::Vacuous;
                 Ok(())
             }
+        }?;
+
+        // Check for mediation: a[b,c] = (1-a)*b + a*c
+        if self.cur.command == Command::LeftBracket {
+            if let Value::Numeric(a) = self.cur_exp {
+                self.get_x_next();
+                self.scan_expression()?;
+                let b = value_to_scalar(&self.take_cur_exp())?;
+                if self.cur.command == Command::Comma {
+                    self.get_x_next();
+                } else {
+                    return Err(InterpreterError::new(
+                        ErrorKind::MissingToken,
+                        "Expected `,` in mediation a[b,c]",
+                    ));
+                }
+                self.scan_expression()?;
+                let c = value_to_scalar(&self.take_cur_exp())?;
+                if self.cur.command == Command::RightBracket {
+                    self.get_x_next();
+                }
+                // a[b,c] = b + a*(c - b) = (1-a)*b + a*c
+                self.cur_exp = Value::Numeric(a.mul_add(c - b, b));
+                self.cur_type = Type::Known;
+            }
         }
+
+        Ok(())
     }
 
     /// Parse and evaluate a secondary expression.
@@ -2357,6 +2464,33 @@ impl Interpreter {
                 self.cur_exp = Value::Pair(xv, yv);
                 self.cur_type = Type::PairType;
             }
+            VarValue::Color { r, g, b } => {
+                let rv = self.variables.known_value(*r).unwrap_or(0.0);
+                let gv = self.variables.known_value(*g).unwrap_or(0.0);
+                let bv = self.variables.known_value(*b).unwrap_or(0.0);
+                self.cur_exp = Value::Color(Color::new(rv, gv, bv));
+                self.cur_type = Type::ColorType;
+            }
+            VarValue::Transform {
+                tx,
+                ty,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            } => {
+                let parts = [*tx, *ty, *txx, *txy, *tyx, *tyy]
+                    .map(|id| self.variables.known_value(id).unwrap_or(0.0));
+                self.cur_exp = Value::Transform(Transform {
+                    tx: parts[0],
+                    ty: parts[1],
+                    txx: parts[2],
+                    txy: parts[3],
+                    tyx: parts[4],
+                    tyy: parts[5],
+                });
+                self.cur_type = Type::TransformType;
+            }
             _ => {
                 // Variable is undefined or not yet known
                 // For now, return 0 for numeric, vacuous for others
@@ -2390,6 +2524,8 @@ impl Interpreter {
             Command::Interim => self.do_interim(),
             Command::Let => self.do_let(),
             Command::MacroDef => self.do_macro_def(),
+            Command::Delimiters => self.do_delimiters(),
+            Command::NewInternal => self.do_new_internal(),
             Command::Show => self.do_show(),
             Command::MessageCommand => self.do_message(),
             Command::BeginGroup => {
@@ -2446,17 +2582,91 @@ impl Interpreter {
 
     /// Execute a type declaration (`numeric x, y;`).
     fn do_type_declaration(&mut self) -> InterpResult<()> {
-        // type_op tells us which type (numeric, pair, etc.) — used later
-        let _ = self.cur.modifier;
+        let type_op = self.cur.modifier;
         self.get_x_next();
 
         loop {
             // Expect a variable name
             if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
-                let var_id = self.variables.lookup(name);
-                // Clear the variable to undefined of the declared type
-                self.variables
-                    .set(var_id, VarValue::NumericVar(NumericState::Numeric));
+                let name = name.clone();
+                let var_id = self.variables.lookup(&name);
+
+                // Set the variable to the correct type
+                let val = match type_op {
+                    x if x == TypeNameOp::Numeric as u16 => {
+                        VarValue::NumericVar(NumericState::Numeric)
+                    }
+                    x if x == TypeNameOp::Boolean as u16 => VarValue::Known(Value::Boolean(false)),
+                    x if x == TypeNameOp::String as u16 => {
+                        VarValue::Known(Value::String(Arc::from("")))
+                    }
+                    x if x == TypeNameOp::Path as u16 => {
+                        VarValue::Known(Value::Path(Path::default()))
+                    }
+                    x if x == TypeNameOp::Pen as u16 => VarValue::Known(Value::Pen(Pen::default())),
+                    x if x == TypeNameOp::Picture as u16 => {
+                        VarValue::Known(Value::Picture(Picture::default()))
+                    }
+                    x if x == TypeNameOp::Pair as u16 => {
+                        let x_id = self.variables.alloc();
+                        let y_id = self.variables.alloc();
+                        self.variables
+                            .set(x_id, VarValue::NumericVar(NumericState::Numeric));
+                        self.variables
+                            .set(y_id, VarValue::NumericVar(NumericState::Numeric));
+                        // Also register named sub-parts so xpart/ypart can find them
+                        self.variables.register_name(&format!("{name}.x"), x_id);
+                        self.variables.register_name(&format!("{name}.y"), y_id);
+                        VarValue::Pair { x: x_id, y: y_id }
+                    }
+                    x if x == TypeNameOp::Color as u16 => {
+                        let r_id = self.variables.alloc();
+                        let g_id = self.variables.alloc();
+                        let b_id = self.variables.alloc();
+                        self.variables
+                            .set(r_id, VarValue::NumericVar(NumericState::Numeric));
+                        self.variables
+                            .set(g_id, VarValue::NumericVar(NumericState::Numeric));
+                        self.variables
+                            .set(b_id, VarValue::NumericVar(NumericState::Numeric));
+                        self.variables.register_name(&format!("{name}.r"), r_id);
+                        self.variables.register_name(&format!("{name}.g"), g_id);
+                        self.variables.register_name(&format!("{name}.b"), b_id);
+                        VarValue::Color {
+                            r: r_id,
+                            g: g_id,
+                            b: b_id,
+                        }
+                    }
+                    x if x == TypeNameOp::Transform as u16 => {
+                        let tx = self.variables.alloc();
+                        let ty = self.variables.alloc();
+                        let txx = self.variables.alloc();
+                        let txy = self.variables.alloc();
+                        let tyx = self.variables.alloc();
+                        let tyy = self.variables.alloc();
+                        for id in [tx, ty, txx, txy, tyx, tyy] {
+                            self.variables
+                                .set(id, VarValue::NumericVar(NumericState::Numeric));
+                        }
+                        self.variables.register_name(&format!("{name}.tx"), tx);
+                        self.variables.register_name(&format!("{name}.ty"), ty);
+                        self.variables.register_name(&format!("{name}.txx"), txx);
+                        self.variables.register_name(&format!("{name}.txy"), txy);
+                        self.variables.register_name(&format!("{name}.tyx"), tyx);
+                        self.variables.register_name(&format!("{name}.tyy"), tyy);
+                        VarValue::Transform {
+                            tx,
+                            ty,
+                            txx,
+                            txy,
+                            tyx,
+                            tyy,
+                        }
+                    }
+                    _ => VarValue::Undefined,
+                };
+                self.variables.set(var_id, val);
             }
             self.get_x_next();
 
@@ -2701,6 +2911,91 @@ impl Interpreter {
             self.symbols.set(l, entry);
         }
         self.get_x_next();
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
+        }
+        Ok(())
+    }
+
+    /// Execute `delimiters` statement.
+    ///
+    /// Syntax: `delimiters <left> <right>;`
+    /// Declares a pair of matching delimiters (like `(` and `)`).
+    /// Each pair gets a unique modifier so the parser can match them.
+    fn do_delimiters(&mut self) -> InterpResult<()> {
+        self.get_x_next();
+
+        // Get left delimiter symbol
+        let left_sym = self.cur.sym;
+        self.get_x_next();
+
+        // Get right delimiter symbol
+        let right_sym = self.cur.sym;
+        self.get_x_next();
+
+        // Allocate a unique delimiter id for this pair
+        let delim_id = self.next_delimiter_id;
+        self.next_delimiter_id += 1;
+
+        // Set the symbols as delimiter commands with matching modifier
+        if let Some(l) = left_sym {
+            self.symbols.set(
+                l,
+                crate::symbols::SymbolEntry {
+                    command: Command::LeftDelimiter,
+                    modifier: delim_id,
+                },
+            );
+        }
+        if let Some(r) = right_sym {
+            self.symbols.set(
+                r,
+                crate::symbols::SymbolEntry {
+                    command: Command::RightDelimiter,
+                    modifier: delim_id,
+                },
+            );
+        }
+
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
+        }
+        Ok(())
+    }
+
+    /// Execute `newinternal` statement.
+    ///
+    /// Syntax: `newinternal <name>, <name>, ...;`
+    /// Declares new internal numeric quantities.
+    fn do_new_internal(&mut self) -> InterpResult<()> {
+        self.get_x_next();
+
+        loop {
+            if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
+                let name = name.clone();
+                // Register the new internal
+                let idx = self.internals.new_internal(&name);
+
+                // Set the symbol to InternalQuantity
+                if let Some(sym) = self.cur.sym {
+                    self.symbols.set(
+                        sym,
+                        crate::symbols::SymbolEntry {
+                            command: Command::InternalQuantity,
+                            modifier: idx,
+                        },
+                    );
+                }
+            }
+            self.get_x_next();
+
+            if self.cur.command == Command::Comma {
+                self.get_x_next();
+                continue;
+            }
+            break;
+        }
+
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
         }
@@ -3501,5 +3796,197 @@ mod tests {
         interp.run("show ypart ((3,7) shifted (10,20));").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("27"), "expected 27 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Type declarations
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn type_declaration_numeric() {
+        let mut interp = Interpreter::new();
+        interp.run("numeric x; x := 42; show x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_string() {
+        let mut interp = Interpreter::new();
+        interp.run("string s; s := \"hello\"; show s;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected hello in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_boolean() {
+        let mut interp = Interpreter::new();
+        interp.run("boolean b; b := true; show b;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("pair p; p := (3, 7); show p;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(3,7)"), "expected (3,7) in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_color() {
+        let mut interp = Interpreter::new();
+        interp.run("color c; c := (1, 0, 0); show c;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(1,0,0)"), "expected (1,0,0) in: {msg}");
+    }
+
+    #[test]
+    fn type_declaration_multiple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric a, b; a := 10; b := 20; show a + b;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("30"), "expected 30 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Delimiters
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delimiters_custom() {
+        let mut interp = Interpreter::new();
+        interp.run("delimiters {{ }}; show {{ 3 + 4 }};").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn delimiters_pair() {
+        let mut interp = Interpreter::new();
+        interp.run("delimiters {{ }}; show {{ 2, 5 }};").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("(2,5)"), "expected (2,5) in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Newinternal
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn newinternal_basic() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("newinternal myvar; myvar := 7; show myvar;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn newinternal_multiple() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("newinternal a, b; a := 3; b := 5; show a + b;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("8"), "expected 8 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Mediation
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn mediation_basic() {
+        let mut interp = Interpreter::new();
+        // 0.5[10,20] = 15
+        interp.run("show 0.5[10, 20];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    #[test]
+    fn mediation_endpoints() {
+        let mut interp = Interpreter::new();
+        // 0[a,b] = a
+        interp.run("show 0[3, 7];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+
+        let mut interp = Interpreter::new();
+        // 1[a,b] = b
+        interp.run("show 1[3, 7];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("7"), "expected 7 in: {msg}");
+    }
+
+    #[test]
+    fn mediation_fraction() {
+        let mut interp = Interpreter::new();
+        // 1/4[0,100] = 25
+        interp.run("show 1/4[0, 100];").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("25"), "expected 25 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // For step/until
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn for_step_until() {
+        let mut interp = Interpreter::new();
+        // Sum 1 through 5
+        interp
+            .run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    #[test]
+    fn for_step_until_by_two() {
+        let mut interp = Interpreter::new();
+        // Sum 0, 2, 4, 6, 8, 10 = 30
+        interp
+            .run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("30"), "expected 30 in: {msg}");
+    }
+
+    #[test]
+    fn for_step_until_negative() {
+        let mut interp = Interpreter::new();
+        // Count down: 5, 4, 3, 2, 1 = 15
+        interp
+            .run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("15"), "expected 15 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Str operator
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn str_operator() {
+        let mut interp = Interpreter::new();
+        interp.run("show str x;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("x"), "expected x in: {msg}");
+    }
+
+    #[test]
+    fn str_operator_multi_char() {
+        let mut interp = Interpreter::new();
+        interp.run("show str foo;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("foo"), "expected foo in: {msg}");
     }
 }

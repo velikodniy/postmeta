@@ -129,6 +129,13 @@ impl Variables {
         id
     }
 
+    /// Register a name for an existing variable id.
+    ///
+    /// Used when creating compound type sub-parts (e.g. `p.x`, `p.y` for a pair `p`).
+    pub fn register_name(&mut self, name: &str, id: VarId) {
+        self.name_to_id.insert(name.to_owned(), id);
+    }
+
     /// Look up a variable by name without creating it.
     #[must_use]
     pub fn lookup_existing(&self, name: &str) -> Option<VarId> {
