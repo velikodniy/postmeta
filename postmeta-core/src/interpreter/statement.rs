@@ -96,6 +96,16 @@ impl Interpreter {
                             self.cur.command, self.cur.token.kind
                         ),
                     );
+                    // Skip to the next semicolon (or end) to recover.
+                    while self.cur.command != Command::Semicolon
+                        && self.cur.command != Command::Stop
+                        && self.cur.command != Command::EndGroup
+                    {
+                        self.get_x_next();
+                    }
+                    if self.cur.command == Command::Semicolon {
+                        self.get_x_next();
+                    }
                 }
                 Ok(())
             }

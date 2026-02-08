@@ -1188,6 +1188,84 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // vardef expansion from scan_primary (TagToken path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn vardef_suffix_in_equation() {
+        // laboff.lft where lft is a vardef — should work as variable, not expand
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef lft primary x = x enddef; pair laboff.lft; laboff.lft = (1,2); show 1;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    #[test]
+    fn vardef_suffix_undeclared_equation() {
+        // labxf.lft where labxf is undeclared and lft is a vardef
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef lft primary x = x enddef; labxf.lft = 1; show 1;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("1"), "expected 1 in: {msg}");
+    }
+
+    #[test]
+    fn outer_does_not_hang() {
+        let mut interp = Interpreter::new();
+        interp.run("let bye = end; outer end,bye;").unwrap();
+    }
+
+    #[test]
+    fn error_recovery_skips_to_semicolon() {
+        // Statement with unexpected comma should skip to ; and continue
+        let mut interp = Interpreter::new();
+        interp.run(",,,; show 1;").unwrap();
+        // Should have errors for the commas but still process "show 1"
+        let show_msgs: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.message.contains("1"))
+            .collect();
+        assert!(!show_msgs.is_empty(), "show 1 should have been processed");
+    }
+
+    #[test]
+    fn vardef_stays_tag_token() {
+        // After defining a vardef, the symbol should remain TagToken
+        let mut interp = Interpreter::new();
+        interp.run("vardef foo primary x = x + 1 enddef;").unwrap();
+        let sym = interp.symbols.lookup("foo");
+        let entry = interp.symbols.get(sym);
+        assert_eq!(entry.command, Command::TagToken);
+        assert!(interp.macros.contains_key(&sym));
+    }
+
+    #[test]
+    fn vardef_expands_in_expression() {
+        // vardef macro should expand when used as standalone primary
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef foo primary x = x + 1 enddef; show foo 5;")
+            .unwrap();
+        // show produces an error with the value
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("6"), "expected 6 in: {msg}");
+    }
+
+    #[test]
+    fn vardef_suffix_not_expanded() {
+        // A vardef symbol appearing as a suffix should NOT be expanded
+        let mut interp = Interpreter::new();
+        interp
+            .run("pair p.foo; vardef foo primary x = x enddef; p.foo = (1,2);")
+            .unwrap();
+    }
+
+    // -----------------------------------------------------------------------
     // vardef with @# suffix parameter
     // -----------------------------------------------------------------------
 
@@ -1263,10 +1341,10 @@ mod tests {
             .iter()
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
-        // Should not exceed 28 non-fatal errors (suffix/dashpattern issues).
+        // Should not exceed 8 non-fatal errors (dashpattern/outer/implicit-mult).
         assert!(
-            error_count <= 28,
-            "expected at most 28 errors, got {error_count}"
+            error_count <= 8,
+            "expected at most 8 errors, got {error_count}"
         );
     }
 

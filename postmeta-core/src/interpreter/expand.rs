@@ -631,14 +631,21 @@ impl Interpreter {
         };
         self.macros.insert(macro_sym, info);
 
-        // Set the symbol to DefinedMacro
-        self.symbols.set(
-            macro_sym,
-            crate::symbols::SymbolEntry {
-                command: Command::DefinedMacro,
-                modifier: 0,
-            },
-        );
+        // For regular `def`, set the symbol to `DefinedMacro` so that
+        // `get_x_next` expands it (expandable = cmd < min_command = 14).
+        // For `vardef`, keep the symbol as `TagToken` — the macro nature is
+        // detected by `scan_primary` when it checks `self.macros` after
+        // suffix collection.  This matches `mp.web`: vardef macros are stored
+        // in the variable structure, not in `eq_type`.
+        if !is_vardef {
+            self.symbols.set(
+                macro_sym,
+                crate::symbols::SymbolEntry {
+                    command: Command::DefinedMacro,
+                    modifier: 0,
+                },
+            );
+        }
 
         // Skip past enddef (scan_macro_body consumed it)
         // Get the next token
@@ -1010,7 +1017,7 @@ impl Interpreter {
     ///
     /// Scans arguments according to the macro's parameter types, then pushes
     /// the body as a token list with parameter bindings.
-    fn expand_defined_macro(&mut self) {
+    pub(super) fn expand_defined_macro(&mut self) {
         let Some(macro_sym) = self.cur.sym else {
             self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
             self.get_next();

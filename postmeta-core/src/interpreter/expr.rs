@@ -134,19 +134,18 @@ impl Interpreter {
                 //
                 // MetaPost variable names are structured: `laboff.lft`, `z.r`,
                 // etc.  The scanner drops `.` separators, so suffixes appear as
-                // consecutive tokens.  A suffix part can be a `TagToken` or even
-                // a `DefinedMacro` (e.g. `lft` is a vardef, but `laboff.lft` is
-                // a declared pair variable).
+                // consecutive tokens.
                 //
-                // Two strategies for suffix collection:
-                // 1. **Trie-guided** — if the root has entries in `var_trie`,
-                //    use the trie to decide which suffix tokens to collect.
-                //    This correctly handles `laboff.lft` (declared pair) vs
-                //    calling the `lft` vardef macro.
-                // 2. **Fallback** — if the root has no trie entry, fall back
-                //    to the old `lookup_existing` approach for variables
-                //    created by assignment (not type declaration).
-                let sym = self.cur.sym;
+                // The suffix loop accepts only tokens with command codes in the
+                // range [`InternalQuantity`..`NumericToken`] (42..44 in mp.web).
+                // This is how `vardef` macros like `lft` can appear as suffixes:
+                // vardefs keep `TagToken` (43) as their command code, unlike
+                // regular `def` macros which use `DefinedMacro` (13).
+                //
+                // After suffix collection, if the result is a standalone root
+                // that has a vardef in `self.macros`, we trigger macro expansion
+                // instead of variable lookup.
+                let root_sym = self.cur.sym;
                 let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
                 {
                     s.clone()
@@ -154,64 +153,48 @@ impl Interpreter {
                     String::new()
                 };
 
-                let has_trie_entry = sym.is_some_and(|s| self.var_trie.has_root(s));
+                let mut has_suffixes = false;
 
-                // Use get_next (non-expanding) so we can inspect tokens that
-                // might be vardef macros before they get expanded.
-                self.get_next();
+                // Advance to next token. We use `get_x_next` (expanding) as
+                // mp.web does — since vardefs keep `TagToken`, they won't be
+                // expanded by `get_x_next`.
+                self.get_x_next();
 
-                if has_trie_entry {
-                    // Trie-guided suffix collection.
-                    let root_sym = sym.unwrap_or(crate::symbols::SymbolId::INVALID);
-                    let mut path: Vec<SuffixSegment> = Vec::new();
-
-                    while self.cur.command == Command::TagToken
-                        || self.cur.command == Command::DefinedMacro
-                        || self.cur.command == Command::InternalQuantity
-                    {
-                        let Some(suffix_sym) = self.cur.sym else {
-                            break;
-                        };
-                        let has = self.var_trie.has_suffix(root_sym, &path, suffix_sym);
-                        if !has {
-                            break;
-                        }
-                        // This suffix is part of the variable name.
-                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                            name.push('.');
-                            name.push_str(s);
-                        }
-                        path.push(SuffixSegment::Attr(suffix_sym));
-                        self.get_next();
+                // Suffix loop: collect tokens with command codes in [42..44].
+                while self.cur.command.is_suffix_token() {
+                    if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                        name.push('.');
+                        name.push_str(s);
+                    } else if self.cur.command == Command::NumericToken {
+                        // Numeric subscript — not yet fully implemented
+                        break;
                     }
-                } else {
-                    // Fallback: lookup_existing for variables without trie entries.
-                    while self.cur.command == Command::TagToken
-                        || self.cur.command == Command::DefinedMacro
-                    {
-                        let next_name =
-                            if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                                s.clone()
-                            } else {
-                                break;
-                            };
-                        let compound = format!("{name}.{next_name}");
-                        let is_known =
-                            self.variables.lookup_existing(&compound).is_some_and(|id| {
-                                !matches!(self.variables.get(id), VarValue::Undefined)
-                            });
-                        if !is_known {
-                            break;
-                        }
-                        name = compound;
-                        self.get_next();
-                    }
+                    has_suffixes = true;
+                    self.get_x_next();
                 }
 
-                // Now expand whatever token follows the variable name.
-                self.expand_current();
+                // Check if this is a vardef macro call (standalone root, no
+                // suffixes collected, and the symbol has a vardef entry).
+                let is_vardef_call = !has_suffixes
+                    && root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
 
-                self.resolve_variable(sym, &name)
+                if is_vardef_call {
+                    // Trigger vardef macro expansion.
+                    // `self.cur` is the token AFTER the macro name (e.g. `(`).
+                    // `expand_defined_macro` expects `self.cur` to be the macro
+                    // token itself, then calls `get_next` to advance.  We push
+                    // the current token back so it becomes the "next" token, and
+                    // restore `self.cur` to the macro symbol.
+                    self.back_input();
+                    self.cur.command = Command::DefinedMacro;
+                    self.cur.sym = root_sym;
+                    self.expand_defined_macro();
+                    // After expansion, re-enter scan_primary to parse the
+                    // expanded result (mp.web's `goto restart`).
+                    return self.scan_primary();
+                }
+
+                self.resolve_variable(root_sym, &name)
             }
 
             Command::InternalQuantity => {

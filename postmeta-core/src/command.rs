@@ -237,6 +237,17 @@ impl Command {
     pub const fn ends_statement(self) -> bool {
         (self as u8) > (Self::Comma as u8)
     }
+
+    /// Can this command appear as a suffix token in variable names?
+    ///
+    /// In `mp.web`: `min_suffix_token` (42, `internal_quantity`) through
+    /// `max_suffix_token` (44, `numeric_token`).  This range covers
+    /// `InternalQuantity`, `TagToken`, and `NumericToken`.
+    #[must_use]
+    pub const fn is_suffix_token(self) -> bool {
+        let code = self as u8;
+        code >= (Self::InternalQuantity as u8) && code <= (Self::NumericToken as u8)
+    }
 }
 
 // ---------------------------------------------------------------------------
