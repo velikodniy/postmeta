@@ -285,10 +285,22 @@ impl SymbolTable {
     #[must_use]
     pub fn name(&self, id: SymbolId) -> &str {
         if id.0 < 256 {
-            // We'll return a static single-char string for printable ASCII
-            // For now, return empty for non-printable
-            // This is a simplification; the real table would store names
-            ""
+            // For single-char symbols, return the character as a string.
+            // We use a static lookup table for printable ASCII.
+            static CHAR_NAMES: std::sync::LazyLock<[String; 256]> =
+                std::sync::LazyLock::new(|| {
+                    std::array::from_fn(|i| {
+                        if (32..127).contains(&i) {
+                            // i is always < 256 from array::from_fn, so the cast is safe.
+                            #[allow(clippy::cast_possible_truncation)]
+                            let ch = i as u8;
+                            String::from(char::from(ch))
+                        } else {
+                            String::new()
+                        }
+                    })
+                });
+            &CHAR_NAMES[id.0 as usize]
         } else {
             let idx = (id.0 - 256) as usize;
             if idx < self.entries.len() {

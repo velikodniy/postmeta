@@ -616,6 +616,11 @@ pub const PRIMITIVES: &[Primitive] = &[
         modifier: 0,
     },
     Primitive {
+        name: "endfor",
+        command: Command::MacroSpecial,
+        modifier: 1,
+    },
+    Primitive {
         name: "shipout",
         command: Command::ShipOut,
         modifier: 0,

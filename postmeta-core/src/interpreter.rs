@@ -28,12 +28,13 @@ use postmeta_graphics::types::{
 };
 
 use crate::command::{
-    BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, MessageOp, NullaryOp, PlusMinusOp,
-    PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp, WithOptionOp,
+    BoundsOp, Command, ExpressionBinaryOp, FiOrElseOp, IterationOp, MessageOp, NullaryOp,
+    PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp, TertiaryBinaryOp, ThingToAddOp, UnaryOp,
+    WithOptionOp,
 };
 use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::input::{InputSystem, ResolvedToken};
+use crate::input::{InputSystem, ResolvedToken, StoredToken, TokenList};
 use crate::internals::{InternalId, Internals};
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{DrawingState, Type, Value};
@@ -97,10 +98,14 @@ pub struct Interpreter {
     /// Last scanned internal quantity index (for `interim` assignment).
     last_internal_idx: Option<u16>,
     /// If-stack depth tracking for nested conditionals.
-    /// Each entry records the state of a conditional level:
-    /// `true` means we are in the "active" branch (evaluating tokens),
-    /// `false` means we are skipping tokens.
     if_stack: Vec<IfState>,
+    /// Loop nesting depth (for `exitif` to know which loop to break from).
+    #[allow(dead_code)]
+    loop_depth: u32,
+    /// Flag set by `exitif` to signal that the current loop should terminate.
+    loop_exit: bool,
+    /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
+    pending_loop_body: Option<TokenList>,
     /// Output pictures (one per `beginfig`/`endfig`).
     pub pictures: Vec<Picture>,
     /// Current picture being built.
@@ -163,6 +168,9 @@ impl Interpreter {
             last_var_name: String::new(),
             last_internal_idx: None,
             if_stack: Vec::new(),
+            loop_depth: 0,
+            loop_exit: false,
+            pending_loop_body: None,
             pictures: Vec::new(),
             current_picture: Picture::new(),
             current_fig: None,
@@ -195,11 +203,14 @@ impl Interpreter {
     ///
     /// After this, `self.cur` holds a non-expandable token.
     fn expand_current(&mut self) {
-        while self.cur.command == Command::IfTest || self.cur.command == Command::FiOrElse {
-            if self.cur.command == Command::IfTest {
-                self.expand_if();
-            } else {
-                self.expand_fi_or_else();
+        while self.cur.command.is_expandable() {
+            match self.cur.command {
+                Command::IfTest => self.expand_if(),
+                Command::FiOrElse => self.expand_fi_or_else(),
+                Command::Iteration => self.expand_iteration(),
+                Command::ExitTest => self.expand_exitif(),
+                Command::RepeatLoop => self.expand_repeat_loop(),
+                _ => break, // Other expandables not yet implemented
             }
         }
     }
@@ -341,6 +352,276 @@ impl Interpreter {
                 }
                 _ => {}
             }
+        }
+    }
+
+    // =======================================================================
+    // Loop expansion
+    // =======================================================================
+
+    /// Handle `for`/`forsuffixes`/`forever` — scan the loop body, then replay.
+    ///
+    /// Syntax:
+    ///   `for <var> = <expr>, <expr>, ...: <body> endfor`
+    ///   `forsuffixes <var> = <suffix>, ...: <body> endfor`
+    ///   `forever: <body> endfor`
+    ///
+    /// On return, `self.cur` is the first non-expandable token after the loop.
+    fn expand_iteration(&mut self) {
+        let op = self.cur.modifier;
+
+        if op == IterationOp::Forever as u16 {
+            self.expand_forever();
+            return;
+        }
+
+        // Parse: <variable> = <value_list> : <body> endfor
+        self.get_next(); // skip `for`/`forsuffixes`
+
+        // Get the loop variable name
+        let loop_var_name = if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind
+        {
+            name.clone()
+        } else {
+            self.report_error(ErrorKind::MissingToken, "Expected loop variable name");
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+
+        self.get_next(); // skip the variable name
+
+        // Expect `=`
+        if self.cur.command != Command::Equals {
+            self.report_error(ErrorKind::MissingToken, "Expected `=` after loop variable");
+        }
+
+        // Parse value list: expr, expr, expr, ..., colon
+        let values = self.scan_loop_value_list();
+
+        // Expect `:` after value list
+        if self.cur.command == Command::Colon {
+            self.get_next(); // consume the colon
+        }
+
+        // Scan the loop body until `endfor`
+        let body = self.scan_loop_body();
+
+        // Build a combined token list with all iterations.
+        // For each value, we prepend: `<var> := <value> ;` then the body.
+        let loop_var_sym = self.symbols.lookup(&loop_var_name);
+        let assign_sym = self.symbols.lookup(":=");
+
+        let mut combined = TokenList::new();
+        for val in values.iter().rev() {
+            // Body tokens
+            combined.splice(0..0, body.iter().cloned());
+            // Prepend: <var> := <value> ;
+            let value_token = value_to_stored_token(val);
+            let semicolon_sym = self.symbols.lookup(";");
+            combined.splice(
+                0..0,
+                [
+                    StoredToken::Symbol(loop_var_sym),
+                    StoredToken::Symbol(assign_sym),
+                    value_token,
+                    StoredToken::Symbol(semicolon_sym),
+                ],
+            );
+        }
+
+        if !combined.is_empty() {
+            self.input
+                .push_token_list(combined, Vec::new(), "for-body".into());
+        }
+
+        // Get the next token from the combined body
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle `forever: <body> endfor`.
+    ///
+    /// Uses a sentinel-based approach: appends a `RepeatLoop` command token
+    /// at the end of each iteration's body. When we encounter `RepeatLoop`
+    /// during expansion, we re-push the body for the next iteration.
+    fn expand_forever(&mut self) {
+        self.get_next(); // skip `forever`
+
+        // Expect `:`
+        if self.cur.command == Command::Colon {
+            self.get_next();
+        }
+
+        // Scan the loop body
+        let body = self.scan_loop_body();
+
+        // Store the body in the interpreter for re-pushing on RepeatLoop
+        self.pending_loop_body = Some(body.clone());
+
+        // Push the first iteration with a RepeatLoop sentinel at the end
+        let mut iteration = body;
+        let repeat_sym = self.symbols.lookup("__repeat_loop__");
+        self.symbols.set(
+            repeat_sym,
+            crate::symbols::SymbolEntry {
+                command: Command::RepeatLoop,
+                modifier: 0,
+            },
+        );
+        iteration.push(StoredToken::Symbol(repeat_sym));
+        self.input
+            .push_token_list(iteration, Vec::new(), "forever-body".into());
+
+        // Get the first token and continue — the RepeatLoop sentinel will
+        // be caught by expand_current and re-push the body.
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle the `RepeatLoop` sentinel during expansion.
+    ///
+    /// Re-pushes the loop body for the next iteration, or stops if `exitif` fired.
+    fn expand_repeat_loop(&mut self) {
+        if self.loop_exit {
+            // Exit was requested — consume the sentinel and stop looping
+            self.pending_loop_body = None;
+            self.loop_exit = false;
+            self.get_next();
+            self.expand_current();
+            return;
+        }
+
+        // Re-push the body for the next iteration
+        if let Some(ref body) = self.pending_loop_body.clone() {
+            let repeat_sym = self.symbols.lookup("__repeat_loop__");
+            let mut iteration = body.clone();
+            iteration.push(StoredToken::Symbol(repeat_sym));
+            self.input
+                .push_token_list(iteration, Vec::new(), "forever-body".into());
+        } else {
+            self.pending_loop_body = None;
+        }
+
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Parse the value list for a `for` loop: `expr, expr, ...`
+    ///
+    /// Reads expressions separated by commas until a `:` is found.
+    /// Returns the list of values.
+    fn scan_loop_value_list(&mut self) -> Vec<Value> {
+        let mut values = Vec::new();
+        self.get_x_next(); // skip `=`
+
+        loop {
+            if self.cur.command == Command::Colon || self.cur.command == Command::Stop {
+                break;
+            }
+            if self.scan_expression().is_ok() {
+                values.push(self.take_cur_exp());
+            } else {
+                break;
+            }
+            // Check for comma separator
+            if self.cur.command == Command::Comma {
+                self.get_x_next();
+            } else {
+                break;
+            }
+        }
+        values
+    }
+
+    /// Scan a loop body (tokens until `endfor`), handling nested for/endfor.
+    ///
+    /// Returns the body as a `TokenList`.
+    fn scan_loop_body(&mut self) -> TokenList {
+        use crate::input::StoredToken;
+
+        let mut body = TokenList::new();
+        let mut depth: u32 = 0;
+
+        loop {
+            match self.cur.command {
+                Command::Iteration => {
+                    // Nested for — store the token and increase depth
+                    depth += 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::MacroSpecial if self.cur.modifier == 1 => {
+                    // `endfor` — modifier 1 on MacroSpecial
+                    if depth == 0 {
+                        // This is our endfor — don't store it, just stop
+                        return body;
+                    }
+                    depth -= 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::Stop => {
+                    self.report_error(ErrorKind::MissingToken, "Missing `endfor`");
+                    return body;
+                }
+                _ => {
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+            }
+        }
+    }
+
+    /// Store the current token into a token list.
+    fn store_current_token(&self, list: &mut TokenList) {
+        use crate::input::StoredToken;
+
+        match &self.cur.token.kind {
+            crate::token::TokenKind::Symbolic(_) => {
+                if let Some(sym) = self.cur.sym {
+                    list.push(StoredToken::Symbol(sym));
+                }
+            }
+            crate::token::TokenKind::Numeric(v) => {
+                list.push(StoredToken::Numeric(*v));
+            }
+            crate::token::TokenKind::StringLit(s) => {
+                list.push(StoredToken::StringLit(s.clone()));
+            }
+            crate::token::TokenKind::Eof => {}
+        }
+    }
+
+    /// Handle `exitif <boolean>;` — set the loop exit flag if condition is true.
+    ///
+    /// On return, `self.cur` is the first non-expandable token after `exitif`.
+    fn expand_exitif(&mut self) {
+        self.get_x_next(); // skip `exitif`
+        let should_exit = if self.scan_expression().is_ok() {
+            match &self.cur_exp {
+                Value::Boolean(b) => *b,
+                Value::Numeric(v) => *v != 0.0,
+                _ => {
+                    self.report_error(ErrorKind::TypeError, "exitif condition must be boolean");
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        // Set the flag BEFORE consuming remaining tokens, so that
+        // any RepeatLoop sentinel encountered during expand_current
+        // will see the exit request.
+        if should_exit {
+            self.loop_exit = true;
+        }
+
+        // Expect `;` after the condition
+        if self.cur.command == Command::Semicolon {
+            self.get_next();
+            self.expand_current();
         }
     }
 
@@ -1542,9 +1823,17 @@ impl Interpreter {
                     self.do_equation(&lhs, &rhs)?;
                 } else if self.cur.command == Command::Assignment {
                     // Assignment: var := expr
+                    // Save the LHS variable reference before RHS parsing clobbers it
+                    let saved_var_id = self.last_var_id;
+                    let saved_var_name = self.last_var_name.clone();
+                    let saved_internal_idx = self.last_internal_idx;
                     let lhs = self.take_cur_exp();
                     self.get_x_next();
                     self.scan_expression()?;
+                    // Restore the LHS tracking
+                    self.last_var_id = saved_var_id;
+                    self.last_var_name = saved_var_name;
+                    self.last_internal_idx = saved_internal_idx;
                     self.do_assignment(&lhs)?;
                 }
 
@@ -2085,6 +2374,16 @@ fn value_to_transform(val: &Value) -> InterpResult<Transform> {
     }
 }
 
+/// Convert a runtime `Value` to a `StoredToken` for embedding in token lists.
+fn value_to_stored_token(val: &Value) -> StoredToken {
+    match val {
+        Value::Numeric(v) => StoredToken::Numeric(*v),
+        Value::String(s) => StoredToken::StringLit(s.to_string()),
+        // For non-primitive types, store as numeric 0 (best-effort)
+        _ => StoredToken::Numeric(0.0),
+    }
+}
+
 fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Numeric(a), Value::Numeric(b)) => (a - b).abs() < 0.0001,
@@ -2270,6 +2569,43 @@ mod tests {
         assert_eq!(interp.errors.len(), 1);
         let msg = &interp.errors[0].message;
         assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    #[test]
+    fn eval_for_loop() {
+        let mut interp = Interpreter::new();
+        interp.run("for i = 1, 2, 3: show i; endfor;").unwrap();
+        assert_eq!(
+            interp.errors.len(),
+            3,
+            "expected 3 shows: {:?}",
+            interp.errors
+        );
+        assert!(interp.errors[0].message.contains("1"));
+        assert!(interp.errors[1].message.contains("2"));
+        assert!(interp.errors[2].message.contains("3"));
+    }
+
+    #[test]
+    fn eval_for_loop_step() {
+        // Accumulate sum inside a for loop
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;")
+            .unwrap();
+        // s should be 1+2+3 = 6
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("6"), "expected 6 in: {msg}");
+    }
+
+    #[test]
+    fn eval_forever_exitif() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric n; n := 0; forever: n := n + 1; exitif n > 3; endfor; show n;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("4"), "expected 4 in: {msg}");
     }
 
     #[test]
