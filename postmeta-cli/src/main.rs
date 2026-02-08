@@ -2,11 +2,43 @@
 
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process;
 
+use postmeta_core::filesystem::FileSystem;
 use postmeta_core::interpreter::Interpreter;
 use postmeta_svg::{render_with_options, RenderOptions};
+
+/// Filesystem implementation that reads from disk.
+///
+/// Searches in configured directories, trying the exact name first,
+/// then appending `.mp` if not found.
+struct OsFileSystem {
+    /// Directories to search for input files.
+    search_dirs: Vec<PathBuf>,
+}
+
+impl OsFileSystem {
+    const fn new(search_dirs: Vec<PathBuf>) -> Self {
+        Self { search_dirs }
+    }
+}
+
+impl FileSystem for OsFileSystem {
+    fn read_file(&self, name: &str) -> Option<String> {
+        let candidates = [name.to_owned(), format!("{name}.mp")];
+
+        for dir in &self.search_dirs {
+            for candidate in &candidates {
+                let path = dir.join(candidate);
+                if let Ok(contents) = fs::read_to_string(&path) {
+                    return Some(contents);
+                }
+            }
+        }
+        None
+    }
+}
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -20,13 +52,41 @@ fn main() {
     let config = parse_args(&args);
     let mut interp = Interpreter::new();
 
+    // Build search directories for input files
+    let mut search_dirs = Vec::new();
+
+    // Add the directory containing the input file
     if let Some(ref file) = config.input_file {
         let stem = Path::new(file)
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("output");
         stem.clone_into(&mut interp.job_name);
+
+        if let Some(parent) = Path::new(file).parent() {
+            search_dirs.push(parent.to_path_buf());
+        }
     }
+
+    // Add current directory
+    if let Ok(cwd) = env::current_dir() {
+        search_dirs.push(cwd);
+    }
+
+    // Add the standard library directory (lib/ relative to the executable)
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            // Try several common locations for the standard library
+            for relative in &["../lib", "../../lib", "lib"] {
+                let lib_dir = exe_dir.join(relative);
+                if lib_dir.is_dir() {
+                    search_dirs.push(lib_dir);
+                }
+            }
+        }
+    }
+
+    interp.set_filesystem(Box::new(OsFileSystem::new(search_dirs)));
 
     let source = read_source(&config);
     run_and_output(&mut interp, &source, &config.output_dir);

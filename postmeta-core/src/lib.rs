@@ -3,6 +3,7 @@
 pub mod command;
 pub mod equation;
 pub mod error;
+pub mod filesystem;
 pub mod input;
 pub mod internals;
 #[allow(

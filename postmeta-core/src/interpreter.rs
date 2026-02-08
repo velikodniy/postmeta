@@ -34,6 +34,7 @@ use crate::command::{
 };
 use crate::equation::VarId;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
+use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, StoredToken, TokenList};
 use crate::internals::{InternalId, Internals};
 use crate::symbols::{SymbolId, SymbolTable};
@@ -102,6 +103,8 @@ struct MacroInfo {
 
 /// The `MetaPost` interpreter.
 pub struct Interpreter {
+    /// Filesystem for `input` commands.
+    fs: Box<dyn FileSystem>,
     /// Symbol table (names → command codes).
     pub symbols: SymbolTable,
     /// Variable storage.
@@ -184,6 +187,7 @@ impl Interpreter {
         };
 
         Self {
+            fs: Box::new(crate::filesystem::NullFileSystem),
             symbols,
             variables: Variables::new(),
             internals,
@@ -208,6 +212,11 @@ impl Interpreter {
             errors: Vec::new(),
             job_name: "output".into(),
         }
+    }
+
+    /// Set the filesystem for `input` commands.
+    pub fn set_filesystem(&mut self, fs: Box<dyn FileSystem>) {
+        self.fs = fs;
     }
 
     // =======================================================================
@@ -240,6 +249,8 @@ impl Interpreter {
                 Command::ExitTest => self.expand_exitif(),
                 Command::RepeatLoop => self.expand_repeat_loop(),
                 Command::DefinedMacro => self.expand_defined_macro(),
+                Command::Input => self.expand_input(),
+                Command::ScanTokens => self.expand_scantokens(),
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -1122,6 +1133,64 @@ impl Interpreter {
             .push_token_list(expansion, args, "macro expansion".into());
 
         // Get the next token and continue expanding
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle `input <filename>`.
+    ///
+    /// Reads the named file via the filesystem trait and pushes it as a new
+    /// source input level.
+    fn expand_input(&mut self) {
+        self.get_next(); // skip `input`
+
+        // Get the filename from the next token
+        let filename = match &self.cur.token.kind {
+            crate::token::TokenKind::Symbolic(s) => s.clone(),
+            crate::token::TokenKind::StringLit(s) => s.clone(),
+            _ => {
+                self.report_error(ErrorKind::MissingToken, "Expected filename after `input`");
+                self.get_next();
+                self.expand_current();
+                return;
+            }
+        };
+
+        // Try to read the file
+        let contents = self.fs.read_file(&filename);
+
+        match contents {
+            Some(source) => {
+                self.input.push_source(source);
+            }
+            None => {
+                self.report_error(ErrorKind::Internal, format!("File not found: {filename}"));
+            }
+        }
+
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle `scantokens <string_expr>`.
+    ///
+    /// Evaluates the string expression and scans it as if it were source input.
+    fn expand_scantokens(&mut self) {
+        self.get_x_next(); // skip `scantokens`, expand
+
+        // Scan the string expression
+        if self.scan_primary().is_ok() {
+            if let Value::String(ref s) = self.cur_exp {
+                let source = s.to_string();
+                if !source.is_empty() {
+                    self.input.push_source(source);
+                }
+            } else {
+                self.report_error(ErrorKind::TypeError, "scantokens requires a string");
+            }
+        }
+
+        // The pushed source will be read by the next get_next
         self.get_next();
         self.expand_current();
     }
@@ -3328,6 +3397,85 @@ mod tests {
         assert_eq!(interp.errors.len(), 2);
         assert!(interp.errors[0].message.contains("5"), "expected 5");
         assert!(interp.errors[1].message.contains("3"), "expected 3");
+    }
+
+    #[test]
+    fn eval_scantokens_basic() {
+        let mut interp = Interpreter::new();
+        interp.run("show scantokens \"3 + 4\";").unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("7"),
+            "expected show 7, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_scantokens_define_and_use() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("scantokens \"def foo = 99 enddef\"; show foo;")
+            .unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("99"),
+            "expected show 99, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_input_file_not_found() {
+        let mut interp = Interpreter::new();
+        // Should report error but not crash
+        interp.run("input nonexistent;").unwrap();
+        assert!(
+            interp
+                .errors
+                .iter()
+                .any(|e| e.message.contains("not found")),
+            "expected file-not-found error: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn eval_input_with_filesystem() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "testlib" || name == "testlib.mp" {
+                    Some("def tripleplus(expr x) = 3 * x + 1 enddef;".to_owned())
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp.run("input testlib; show tripleplus(10);").unwrap();
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.message.contains(">>"))
+            .map(|e| &e.message);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().contains("31"),
+            "expected show 31, got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
     }
 
     #[test]
