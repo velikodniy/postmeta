@@ -11,7 +11,9 @@ pub mod hobby;
 
 use kurbo::{BezPath, PathEl, Point, Vec2};
 
-use crate::types::{index_to_scalar, scalar_to_index, Knot, KnotDirection, Path, Scalar, EPSILON};
+use crate::types::{
+    index_to_scalar, scalar_to_index, GraphicsError, Knot, KnotDirection, Path, Scalar, EPSILON,
+};
 
 // ---------------------------------------------------------------------------
 // Path → BezPath conversion
@@ -19,15 +21,14 @@ use crate::types::{index_to_scalar, scalar_to_index, Knot, KnotDirection, Path, 
 
 /// Convert a fully-resolved `Path` (all directions `Explicit`) to a `kurbo::BezPath`.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if any knot direction is not `Explicit` (i.e., the path has not
-/// been resolved by Hobby's algorithm).
-#[must_use]
-pub fn to_bez_path(path: &Path) -> BezPath {
+/// Returns [`GraphicsError::UnresolvedPath`] if any knot direction is not
+/// `Explicit` (i.e., the path has not been resolved by Hobby's algorithm).
+pub fn to_bez_path(path: &Path) -> Result<BezPath, GraphicsError> {
     let mut bp = BezPath::new();
     if path.knots.is_empty() {
-        return bp;
+        return Ok(bp);
     }
 
     bp.move_to(path.knots[0].point);
@@ -39,10 +40,16 @@ pub fn to_bez_path(path: &Path) -> BezPath {
         let k1 = &path.knots[j];
 
         let KnotDirection::Explicit(cp1) = k0.right else {
-            panic!("path not fully resolved: knot {i} right direction is not Explicit")
+            return Err(GraphicsError::UnresolvedPath {
+                knot: i,
+                side: "right",
+            });
         };
         let KnotDirection::Explicit(cp2) = k1.left else {
-            panic!("path not fully resolved: knot {j} left direction is not Explicit")
+            return Err(GraphicsError::UnresolvedPath {
+                knot: j,
+                side: "left",
+            });
         };
 
         bp.curve_to(cp1, cp2, k1.point);
@@ -52,7 +59,7 @@ pub fn to_bez_path(path: &Path) -> BezPath {
         bp.close_path();
     }
 
-    bp
+    Ok(bp)
 }
 
 /// Create a `Path` from a sequence of explicit cubic Bezier segments.
@@ -486,7 +493,7 @@ mod tests {
     #[test]
     fn test_to_bez_path_open() {
         let path = make_line_path();
-        let bp = to_bez_path(&path);
+        let bp = to_bez_path(&path).unwrap();
         let elements = bp.elements();
         assert_eq!(elements.len(), 2); // MoveTo + CurveTo
     }
@@ -494,7 +501,7 @@ mod tests {
     #[test]
     fn test_to_bez_path_cyclic() {
         let path = make_triangle_path();
-        let bp = to_bez_path(&path);
+        let bp = to_bez_path(&path).unwrap();
         let elements = bp.elements();
         // MoveTo + 3 CurveTos + ClosePath = 5
         assert_eq!(elements.len(), 5);

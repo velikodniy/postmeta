@@ -3,9 +3,45 @@
 //! These types define the fundamental data structures for the `MetaPost`
 //! graphics model: paths, pens, pictures, transforms, and colors.
 
+use std::fmt;
 use std::sync::Arc;
 
 use kurbo::{Affine, Point};
+
+// ---------------------------------------------------------------------------
+// Error
+// ---------------------------------------------------------------------------
+
+/// Errors returned by graphics operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GraphicsError {
+    /// A path has unresolved knot directions (not yet processed by Hobby's
+    /// algorithm).
+    UnresolvedPath {
+        /// Index of the knot with the unresolved direction.
+        knot: usize,
+        /// Which side of the knot is unresolved (`"left"` or `"right"`).
+        side: &'static str,
+    },
+    /// `makepen` was called with an invalid path.
+    InvalidPen(&'static str),
+}
+
+impl fmt::Display for GraphicsError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnresolvedPath { knot, side } => {
+                write!(
+                    f,
+                    "path not fully resolved: knot {knot} {side} direction is not Explicit"
+                )
+            }
+            Self::InvalidPen(msg) => write!(f, "invalid pen: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for GraphicsError {}
 
 // ---------------------------------------------------------------------------
 // Scalar

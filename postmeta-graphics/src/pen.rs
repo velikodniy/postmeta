@@ -12,7 +12,7 @@
 
 use kurbo::{Point, Vec2};
 
-use crate::types::{index_to_scalar, Knot, Path, Pen, Scalar};
+use crate::types::{index_to_scalar, GraphicsError, Knot, Path, Pen, Scalar};
 
 // ---------------------------------------------------------------------------
 // pencircle / nullpen
@@ -37,20 +37,26 @@ pub const fn nullpen() -> Pen {
 /// Convert a cyclic path (after Hobby's algorithm) to a polygonal pen.
 ///
 /// Extracts the on-curve points and computes the convex hull.
-/// The path must be cyclic. Returns a polygonal pen with vertices
-/// in counter-clockwise order.
+/// The path must be cyclic with at least 3 knots. Returns a polygonal pen
+/// with vertices in counter-clockwise order.
 ///
-/// # Panics
+/// # Errors
 ///
-/// Panics if the path is not cyclic or has fewer than 3 knots.
-#[must_use]
-pub fn makepen(path: &Path) -> Pen {
-    assert!(path.is_cyclic, "makepen requires a cyclic path");
-    assert!(path.knots.len() >= 3, "makepen requires at least 3 knots");
+/// Returns [`GraphicsError::InvalidPen`] if the path is not cyclic or has
+/// fewer than 3 knots.
+pub fn makepen(path: &Path) -> Result<Pen, GraphicsError> {
+    if !path.is_cyclic {
+        return Err(GraphicsError::InvalidPen("makepen requires a cyclic path"));
+    }
+    if path.knots.len() < 3 {
+        return Err(GraphicsError::InvalidPen(
+            "makepen requires at least 3 knots",
+        ));
+    }
 
     let points: Vec<Point> = path.knots.iter().map(|k| k.point).collect();
     let hull = convex_hull(&points);
-    Pen::Polygonal(hull)
+    Ok(Pen::Polygonal(hull))
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +326,7 @@ mod tests {
             ),
         ];
         let path = Path::from_knots(knots, true);
-        let pen = makepen(&path);
+        let pen = makepen(&path).unwrap();
         match pen {
             Pen::Polygonal(verts) => {
                 assert!(verts.len() >= 3);
