@@ -98,11 +98,12 @@ pub fn makepath(pen: &Pen) -> Path {
 /// of the unit circle.
 ///
 /// The 8 points are at 0, 45, 90, ..., 315 degrees on the unit circle,
-/// transformed by the affine. Control points use the standard cubic
-/// approximation constant `kappa = 4*(sqrt(2)-1)/3 ≈ 0.5522847`.
+/// transformed by the affine. Control points use the cubic Bezier
+/// approximation constant for 45° arcs: `kappa = (4/3) * tan(π/16)`.
 fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
-    // Magic constant for cubic approximation of a quarter-circle arc
-    const KAPPA: Scalar = 0.552_284_749_831;
+    // Cubic approximation constant for a 45° arc (8 segments per circle).
+    // kappa = (4/3) * tan(π/16) ≈ 0.26520784
+    const KAPPA: Scalar = 0.265_207_840_674;
 
     let n = 8;
     let mut knots = Vec::with_capacity(n);
