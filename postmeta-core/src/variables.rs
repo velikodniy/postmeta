@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use postmeta_graphics::types::Scalar;
 
-use crate::equation::{DepList, VarId};
+use crate::equation::{constant_value, dep_substitute, DepList, VarId};
 use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 
@@ -246,6 +246,36 @@ impl Variables {
             VarValue::NumericVar(NumericState::Known(v)) => Some(*v),
             VarValue::Known(Value::Numeric(v)) => Some(*v),
             _ => None,
+        }
+    }
+
+    /// Apply a solved linear equation `pivot = dep` and substitute it into all
+    /// existing dependent variables.
+    pub fn apply_linear_solution(&mut self, pivot: VarId, dep: &DepList) {
+        if let Some(v) = constant_value(dep) {
+            self.make_known(pivot, v);
+        } else {
+            self.make_dependent(pivot, dep.clone());
+        }
+
+        let mut updates: Vec<(VarId, NumericState)> = Vec::new();
+        for i in 0..self.values.len() {
+            let id = VarId(i as u32);
+            if id == pivot {
+                continue;
+            }
+            if let VarValue::NumericVar(NumericState::Dependent(existing)) = &self.values[i] {
+                let new_dep = dep_substitute(existing, pivot, dep);
+                if let Some(v) = constant_value(&new_dep) {
+                    updates.push((id, NumericState::Known(v)));
+                } else {
+                    updates.push((id, NumericState::Dependent(new_dep)));
+                }
+            }
+        }
+
+        for (id, state) in updates {
+            self.set(id, VarValue::NumericVar(state));
         }
     }
 

@@ -24,7 +24,7 @@ mod statement;
 use postmeta_graphics::types::{Color, Picture, Transform};
 
 use crate::command::Command;
-use crate::equation::VarId;
+use crate::equation::{const_dep, single_dep, DepList, VarId};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, TokenList};
@@ -34,6 +34,12 @@ use crate::types::{DrawingState, Type, Value};
 use crate::variables::{NumericState, SaveStack, VarTrie, VarValue, Variables};
 
 use expand::{IfState, MacroInfo};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum LhsBinding {
+    Variable { id: VarId, negated: bool },
+    Internal { idx: u16 },
+}
 
 // ---------------------------------------------------------------------------
 // Interpreter state
@@ -58,6 +64,8 @@ pub struct Interpreter {
     /// Current expression value and type.
     cur_exp: Value,
     cur_type: Type,
+    /// Linear dependency form for the current numeric expression (if linear).
+    cur_dep: Option<DepList>,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
     /// Last scanned variable id (for assignment LHS tracking).
@@ -66,6 +74,8 @@ pub struct Interpreter {
     last_var_name: String,
     /// Last scanned internal quantity index (for `interim` assignment).
     last_internal_idx: Option<u16>,
+    /// Binding for expression forms that can be equation left-hand sides.
+    last_lhs_binding: Option<LhsBinding>,
     /// If-stack depth tracking for nested conditionals.
     if_stack: Vec<IfState>,
     /// Loop nesting depth (for `exitif` to know which loop to break from).
@@ -139,10 +149,12 @@ impl Interpreter {
             save_stack: SaveStack::new(),
             cur_exp: Value::Vacuous,
             cur_type: Type::Vacuous,
+            cur_dep: None,
             cur,
             last_var_id: None,
             last_var_name: String::new(),
             last_internal_idx: None,
+            last_lhs_binding: None,
             if_stack: Vec::new(),
             loop_depth: 0,
             loop_exit: false,
@@ -228,21 +240,61 @@ impl Interpreter {
     // =======================================================================
 
     /// Take `cur_exp`, replacing it with `Vacuous`.
-    const fn take_cur_exp(&mut self) -> Value {
+    fn take_cur_exp(&mut self) -> Value {
         let val = std::mem::replace(&mut self.cur_exp, Value::Vacuous);
         self.cur_type = Type::Vacuous;
+        self.cur_dep = None;
         val
+    }
+
+    const fn take_cur_dep(&mut self) -> Option<DepList> {
+        self.cur_dep.take()
     }
 
     /// Negate the current expression (unary minus).
     fn negate_cur_exp(&mut self) {
         match &self.cur_exp {
-            Value::Numeric(v) => self.cur_exp = Value::Numeric(-v),
-            Value::Pair(x, y) => self.cur_exp = Value::Pair(-x, -y),
+            Value::Numeric(v) => {
+                self.cur_exp = Value::Numeric(-v);
+                if let Some(mut dep) = self.cur_dep.take() {
+                    crate::equation::dep_scale(&mut dep, -1.0);
+                    self.cur_dep = Some(dep);
+                }
+                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
+                    self.last_lhs_binding = Some(LhsBinding::Variable {
+                        id,
+                        negated: !negated,
+                    });
+                } else {
+                    self.last_lhs_binding = None;
+                }
+            }
+            Value::Pair(x, y) => {
+                self.cur_exp = Value::Pair(-x, -y);
+                self.cur_dep = None;
+                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
+                    self.last_lhs_binding = Some(LhsBinding::Variable {
+                        id,
+                        negated: !negated,
+                    });
+                } else {
+                    self.last_lhs_binding = None;
+                }
+            }
             Value::Color(c) => {
                 self.cur_exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
+                self.cur_dep = None;
+                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
+                    self.last_lhs_binding = Some(LhsBinding::Variable {
+                        id,
+                        negated: !negated,
+                    });
+                } else {
+                    self.last_lhs_binding = None;
+                }
             }
             _ => {
+                self.last_lhs_binding = None;
                 self.report_error(ErrorKind::TypeError, "Cannot negate this type");
             }
         }
@@ -256,21 +308,48 @@ impl Interpreter {
         self.last_var_name.clear();
         self.last_var_name.push_str(name);
         self.last_internal_idx = None;
+        self.last_lhs_binding = Some(LhsBinding::Variable {
+            id: var_id,
+            negated: false,
+        });
 
         match self.variables.get(var_id) {
             VarValue::Known(v) => {
                 self.cur_exp = v.clone();
                 self.cur_type = v.ty();
+                self.cur_dep = match v {
+                    Value::Numeric(n) => Some(const_dep(*n)),
+                    _ => None,
+                };
             }
             VarValue::NumericVar(NumericState::Known(v)) => {
                 self.cur_exp = Value::Numeric(*v);
                 self.cur_type = Type::Known;
+                self.cur_dep = Some(const_dep(*v));
+            }
+            VarValue::NumericVar(NumericState::Independent { .. }) => {
+                self.cur_exp = Value::Numeric(0.0);
+                self.cur_type = Type::Independent;
+                self.cur_dep = Some(single_dep(var_id));
+            }
+            VarValue::NumericVar(NumericState::Dependent(dep)) => {
+                self.cur_exp = Value::Numeric(crate::equation::constant_value(dep).unwrap_or(0.0));
+                self.cur_type = Type::Dependent;
+                self.cur_dep = Some(dep.clone());
+            }
+            VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
+            | VarValue::Undefined => {
+                self.variables.make_independent(var_id);
+                self.cur_exp = Value::Numeric(0.0);
+                self.cur_type = Type::Independent;
+                self.cur_dep = Some(single_dep(var_id));
             }
             VarValue::Pair { x, y } => {
                 let xv = self.variables.known_value(*x).unwrap_or(0.0);
                 let yv = self.variables.known_value(*y).unwrap_or(0.0);
                 self.cur_exp = Value::Pair(xv, yv);
                 self.cur_type = Type::PairType;
+                self.cur_dep = None;
             }
             VarValue::Color { r, g, b } => {
                 let rv = self.variables.known_value(*r).unwrap_or(0.0);
@@ -278,6 +357,7 @@ impl Interpreter {
                 let bv = self.variables.known_value(*b).unwrap_or(0.0);
                 self.cur_exp = Value::Color(Color::new(rv, gv, bv));
                 self.cur_type = Type::ColorType;
+                self.cur_dep = None;
             }
             VarValue::Transform {
                 tx,
@@ -298,12 +378,7 @@ impl Interpreter {
                     tyy: parts[5],
                 });
                 self.cur_type = Type::TransformType;
-            }
-            _ => {
-                // Variable is undefined or not yet known
-                // For now, return 0 for numeric, vacuous for others
-                self.cur_exp = Value::Numeric(0.0);
-                self.cur_type = Type::Known;
+                self.cur_dep = None;
             }
         }
         let _ = sym; // Used later for equation LHS tracking
@@ -1109,12 +1184,70 @@ mod tests {
     #[test]
     fn chained_equation() {
         let mut interp = Interpreter::new();
-        // Chained equation: a = b = 5
-        // With current equation solver, direct assignment works for the rightmost
-        // variable. Full dependency tracking for intermediate vars is not yet wired.
-        interp.run("numeric a; a = 5; show a;").unwrap();
-        let msg = &interp.errors[0].message;
-        assert!(msg.contains("5"), "expected a=5 in: {msg}");
+        // Chained equation with unary-minus LHS: right = -left = (1,0)
+        interp
+            .run("pair right,left; right=-left=(1,0); show right; show left;")
+            .unwrap();
+        assert!(
+            interp.errors.iter().any(|e| e.message.contains(">> (1,0)")),
+            "expected right=(1,0), got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+        assert!(
+            interp
+                .errors
+                .iter()
+                .any(|e| e.message.contains(">> (-1,0)") || e.message.contains(">> (-1,-0)")),
+            "expected left=(-1,0), got: {:?}",
+            interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn linear_equation_system_solves() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric x,y; x+y=5; x-y=1; show x; show y;")
+            .unwrap();
+
+        let messages: Vec<_> = interp.errors.iter().map(|e| e.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains(">> 3")),
+            "expected x=3, got: {:?}",
+            messages
+        );
+        assert!(
+            messages.iter().any(|m| m.contains(">> 2")),
+            "expected y=2, got: {:?}",
+            messages
+        );
+    }
+
+    #[test]
+    fn chained_assignment() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("newinternal a,b,c; a:=b:=c:=0; show a; show b; show c;")
+            .unwrap();
+
+        let error_count = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(error_count == 0, "expected 0 errors, got {error_count}");
+
+        let shows: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.message.contains(">>"))
+            .map(|e| e.message.as_str())
+            .collect();
+        assert!(
+            shows.iter().filter(|m| m.contains(">> 0")).count() >= 3,
+            "expected all values to be 0, got: {:?}",
+            shows
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1420,9 +1553,8 @@ mod tests {
             .iter()
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
-        // plain.mp loads with at most 1 error (pen_bot assignment due to
-        // chained-equation limitation: `right=-left=(1,0)` doesn't resolve
-        // correctly yet).
+        // plain.mp currently loads with at most one known non-fatal assignment
+        // issue during initialization.
         assert!(
             error_count <= 1,
             "expected at most 1 error, got {error_count}"

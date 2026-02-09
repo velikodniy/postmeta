@@ -3,31 +3,57 @@
 //! Handles `lhs = rhs` equations (including unknown-variable assignment)
 //! and `:=` explicit assignments.
 
+use crate::equation::{dep_add_scaled, solve_equation, DepList, SolveResult};
 use crate::error::{ErrorKind, InterpResult};
 use crate::types::Value;
 use crate::variables::{NumericState, VarValue};
 
 use super::helpers::value_to_scalar;
-use super::Interpreter;
+use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Execute an equation: `lhs = rhs`.
     ///
-    /// If the LHS is an unknown variable, treat as assignment (`var = val`).
-    /// If both sides are known numerics, check consistency.
+    /// If the LHS has a bindable form (`x`, `-x`, internal quantity), treat the
+    /// equation like assignment to that LHS. Otherwise check numeric consistency.
     /// Full dependency-list equation solving is deferred.
-    pub(super) fn do_equation(&mut self, lhs: &Value, rhs: &Value) -> InterpResult<()> {
-        // Check if the LHS was an unknown variable — if so, treat equation
-        // as assignment.  This covers `mm = 2.83464`, `origin = (0,0)`, etc.
-        let lhs_is_unknown = self
-            .last_var_id
-            .is_some_and(|id| self.variables.is_unknown(id));
-
-        if lhs_is_unknown {
-            if let Some(var_id) = self.last_var_id {
-                self.assign_to_variable(var_id, rhs);
+    pub(super) fn do_equation(
+        &mut self,
+        lhs: &Value,
+        rhs: &Value,
+        lhs_binding: Option<LhsBinding>,
+        lhs_dep: Option<DepList>,
+        rhs_dep: Option<DepList>,
+    ) -> InterpResult<()> {
+        if let (Some(ld), Some(rd)) = (lhs_dep, rhs_dep) {
+            if lhs_binding.is_some()
+                && crate::equation::is_constant(&ld)
+                && crate::equation::is_constant(&rd)
+            {
+                self.assign_binding(lhs_binding, rhs)?;
                 return Ok(());
             }
+
+            let equation_dep = dep_add_scaled(&ld, &rd, -1.0);
+            match solve_equation(&equation_dep) {
+                SolveResult::Solved { var_id, dep } => {
+                    self.variables.apply_linear_solution(var_id, &dep);
+                    return Ok(());
+                }
+                SolveResult::Redundant => return Ok(()),
+                SolveResult::Inconsistent(v) => {
+                    self.report_error(
+                        ErrorKind::InconsistentEquation,
+                        format!("Inconsistent equation residual: {v}"),
+                    );
+                    return Ok(());
+                }
+            }
+        }
+
+        if lhs_binding.is_some() {
+            self.assign_binding(lhs_binding, rhs)?;
+            return Ok(());
         }
 
         // Both sides are known — check consistency for numeric equations
@@ -39,12 +65,55 @@ impl Interpreter {
                 );
             }
         }
+        Ok(())
+    }
 
-        // If we tracked a variable on the LHS, also assign
-        if let Some(var_id) = self.last_var_id {
-            self.assign_to_variable(var_id, rhs);
+    pub(super) fn assign_binding(
+        &mut self,
+        lhs_binding: Option<LhsBinding>,
+        rhs: &Value,
+    ) -> InterpResult<()> {
+        match lhs_binding {
+            Some(LhsBinding::Variable { id, negated }) => {
+                let assigned = Self::apply_lhs_negation(rhs, negated)?;
+                self.assign_to_variable(id, &assigned);
+            }
+            Some(LhsBinding::Internal { idx }) => match value_to_scalar(rhs) {
+                Ok(val) => self.internals.set(idx, val),
+                Err(_) => {
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        format!(
+                            "Internal quantity `{}` requires numeric, got {}",
+                            self.internals.name(idx),
+                            rhs.ty()
+                        ),
+                    );
+                }
+            },
+            None => {
+                self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");
+            }
         }
         Ok(())
+    }
+
+    fn apply_lhs_negation(rhs: &Value, negated: bool) -> InterpResult<Value> {
+        if !negated {
+            return Ok(rhs.clone());
+        }
+
+        match rhs {
+            Value::Numeric(v) => Ok(Value::Numeric(-v)),
+            Value::Pair(x, y) => Ok(Value::Pair(-x, -y)),
+            Value::Color(c) => Ok(Value::Color(postmeta_graphics::types::Color::new(
+                -c.r, -c.g, -c.b,
+            ))),
+            _ => Err(crate::error::InterpreterError::new(
+                ErrorKind::TypeError,
+                format!("Cannot assign negated equation to {}", rhs.ty()),
+            )),
+        }
     }
 
     /// Assign a value to a variable, handling compound types (Pair, Color).
@@ -82,72 +151,5 @@ impl Interpreter {
                 self.variables.set_known(var_id, value.clone());
             }
         }
-    }
-
-    /// Execute an assignment: `var := expr`.
-    pub(super) fn do_assignment(&mut self, _lhs: &Value) -> InterpResult<()> {
-        let rhs = self.take_cur_exp();
-
-        // Check if the LHS was an internal quantity (e.g., `linecap := 0`)
-        if let Some(idx) = self.last_internal_idx {
-            match value_to_scalar(&rhs) {
-                Ok(val) => self.internals.set(idx, val),
-                Err(_) => {
-                    // Non-numeric assignment to internal — report but continue.
-                    self.report_error(
-                        ErrorKind::TypeError,
-                        format!(
-                            "Internal quantity `{}` requires numeric, got {}",
-                            self.internals.name(idx),
-                            rhs.ty()
-                        ),
-                    );
-                }
-            }
-            return Ok(());
-        }
-
-        // Check if the LHS was a variable (e.g., `x := 5`)
-        if let Some(var_id) = self.last_var_id {
-            match &rhs {
-                Value::Numeric(v) => {
-                    self.variables
-                        .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
-                }
-                Value::Pair(x, y) => {
-                    // If the variable is already a Pair with sub-parts, set each
-                    let var_val = self.variables.get(var_id).clone();
-                    if let VarValue::Pair { x: xid, y: yid } = var_val {
-                        self.variables
-                            .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
-                        self.variables
-                            .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
-                    } else {
-                        self.variables.set_known(var_id, rhs);
-                    }
-                }
-                Value::Color(c) => {
-                    let var_val = self.variables.get(var_id).clone();
-                    if let VarValue::Color { r, g, b } = var_val {
-                        self.variables
-                            .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
-                        self.variables
-                            .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
-                        self.variables
-                            .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
-                    } else {
-                        self.variables.set_known(var_id, rhs);
-                    }
-                }
-                _ => {
-                    // String, path, pen, picture, boolean, transform, etc.
-                    self.variables.set_known(var_id, rhs);
-                }
-            }
-            return Ok(());
-        }
-
-        self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");
-        Ok(())
     }
 }

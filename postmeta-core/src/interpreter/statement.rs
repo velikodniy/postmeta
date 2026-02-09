@@ -17,7 +17,7 @@ use crate::types::{DrawingState, Type, Value};
 use crate::variables::{NumericState, SaveEntry, SuffixSegment, VarValue};
 
 use super::helpers::{value_to_path_owned, value_to_scalar};
-use super::Interpreter;
+use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Execute one statement.
@@ -59,28 +59,47 @@ impl Interpreter {
                 self.scan_expression()?;
 
                 if self.cur.command == Command::Equals {
-                    // Equation chain: lhs = mid = ... = rhs
+                    // Equation chain: lhs = mid = ... = rhs.
+                    // All left-hand sides are equated to the FINAL rightmost value.
+                    let mut pending_lhs: Vec<(
+                        Value,
+                        Option<LhsBinding>,
+                        Option<crate::equation::DepList>,
+                    )> = Vec::new();
                     while self.cur.command == Command::Equals {
+                        let lhs_dep = self.cur_dep.clone();
                         let lhs = self.take_cur_exp();
+                        let lhs_binding = self.last_lhs_binding;
+                        pending_lhs.push((lhs, lhs_binding, lhs_dep));
                         self.get_x_next();
                         self.scan_expression()?;
-                        let rhs_clone = self.cur_exp.clone();
-                        self.do_equation(&lhs, &rhs_clone)?;
+                    }
+
+                    let rhs_clone = self.cur_exp.clone();
+                    let rhs_dep = self.cur_dep.clone();
+                    for (lhs, lhs_binding, lhs_dep) in &pending_lhs {
+                        self.do_equation(
+                            lhs,
+                            &rhs_clone,
+                            *lhs_binding,
+                            lhs_dep.clone(),
+                            rhs_dep.clone(),
+                        )?;
                     }
                 } else if self.cur.command == Command::Assignment {
-                    // Assignment: var := expr
-                    // Save the LHS variable reference before RHS parsing clobbers it
-                    let saved_var_id = self.last_var_id;
-                    let saved_var_name = self.last_var_name.clone();
-                    let saved_internal_idx = self.last_internal_idx;
-                    let lhs = self.take_cur_exp();
-                    self.get_x_next();
-                    self.scan_expression()?;
-                    // Restore the LHS tracking
-                    self.last_var_id = saved_var_id;
-                    self.last_var_name = saved_var_name;
-                    self.last_internal_idx = saved_internal_idx;
-                    self.do_assignment(&lhs)?;
+                    // Assignment chain: a := b := ... := rhs
+                    // All left-hand sides receive the final rhs value.
+                    let mut pending_lhs: Vec<Option<LhsBinding>> = Vec::new();
+                    while self.cur.command == Command::Assignment {
+                        pending_lhs.push(self.last_lhs_binding);
+                        self.get_x_next();
+                        self.scan_expression()?;
+                    }
+
+                    let rhs = self.cur_exp.clone();
+                    for lhs_binding in pending_lhs {
+                        self.assign_binding(lhs_binding, &rhs)?;
+                    }
                 }
 
                 // Expect statement terminator

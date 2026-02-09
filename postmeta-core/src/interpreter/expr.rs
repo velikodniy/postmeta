@@ -10,12 +10,13 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
+use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
 use super::helpers::{value_to_bool, value_to_scalar};
-use super::Interpreter;
+use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Parse and evaluate a primary expression.
@@ -25,7 +26,9 @@ impl Interpreter {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
                     self.cur_exp = Value::Numeric(v);
                     self.cur_type = Type::Known;
+                    self.cur_dep = Some(const_dep(v));
                 }
+                self.last_lhs_binding = None;
                 self.get_x_next();
                 // Check for fraction: 3/4 as a primary
                 if self.cur.command == Command::Slash {
@@ -46,9 +49,19 @@ impl Interpreter {
                 // [min_primary_command..numeric_token) — i.e., anything
                 // that can start a primary EXCEPT +/- and another number.
                 if self.cur.command.can_start_implicit_mul() {
+                    let factor_dep = self.take_cur_dep();
                     let factor = self.take_cur_exp();
                     self.scan_primary()?;
+                    self.last_lhs_binding = None;
                     self.do_implicit_mul(&factor)?;
+                    let factor_val = factor_dep
+                        .as_ref()
+                        .and_then(constant_value)
+                        .unwrap_or_else(|| value_to_scalar(&factor).unwrap_or(1.0));
+                    self.cur_dep = self.cur_dep.clone().map(|mut d| {
+                        dep_scale(&mut d, factor_val);
+                        d
+                    });
                 }
                 Ok(())
             }
@@ -58,6 +71,8 @@ impl Interpreter {
                     self.cur_exp = Value::String(Arc::from(s.as_str()));
                     self.cur_type = Type::String;
                 }
+                self.cur_dep = None;
+                self.last_lhs_binding = None;
                 self.get_x_next();
                 Ok(())
             }
@@ -65,14 +80,23 @@ impl Interpreter {
             Command::Nullary => {
                 let op = self.cur.modifier;
                 self.get_x_next();
-                self.do_nullary(op)
+                self.last_lhs_binding = None;
+                self.do_nullary(op)?;
+                self.cur_dep = if let Value::Numeric(v) = self.cur_exp {
+                    Some(const_dep(v))
+                } else {
+                    None
+                };
+                Ok(())
             }
 
             Command::Unary => {
                 let op = self.cur.modifier;
                 self.get_x_next();
                 self.scan_primary()?;
-                self.do_unary(op)
+                self.do_unary(op)?;
+                self.cur_dep = None;
+                Ok(())
             }
 
             Command::PlusOrMinus => {
@@ -117,6 +141,8 @@ impl Interpreter {
                         self.cur_exp = Value::Pair(x, y);
                         self.cur_type = Type::PairType;
                     }
+                    self.last_lhs_binding = None;
+                    self.cur_dep = None;
                 }
 
                 // Expect closing delimiter
@@ -136,6 +162,8 @@ impl Interpreter {
                 // Restore scope
                 self.do_endgroup();
                 self.get_x_next();
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 Ok(())
             }
 
@@ -244,9 +272,11 @@ impl Interpreter {
                 let idx = self.cur.modifier;
                 self.cur_exp = Value::Numeric(self.internals.get(idx));
                 self.cur_type = Type::Known;
+                self.cur_dep = Some(const_dep(self.internals.get(idx)));
                 // Track for assignment LHS
                 self.last_internal_idx = Some(idx);
                 self.last_var_id = None;
+                self.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
                 Ok(())
             }
@@ -266,6 +296,8 @@ impl Interpreter {
                 let first = self.take_cur_exp();
                 self.get_x_next();
                 self.scan_primary()?;
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 self.do_primary_binary(op, &first)
             }
 
@@ -275,6 +307,8 @@ impl Interpreter {
                 // it's used in path construction — handle that at expression level.
                 self.cur_exp = Value::Boolean(false);
                 self.cur_type = Type::Boolean;
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 self.get_x_next();
                 Ok(())
             }
@@ -297,6 +331,8 @@ impl Interpreter {
                     self.cur_exp = Value::String(Arc::from(""));
                 }
                 self.cur_type = Type::String;
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 Ok(())
             }
 
@@ -311,6 +347,12 @@ impl Interpreter {
                     self.cur_exp = Value::Vacuous;
                     self.cur_type = Type::Vacuous;
                 }
+                self.last_lhs_binding = None;
+                self.cur_dep = if let Value::Numeric(v) = self.cur_exp {
+                    Some(const_dep(v))
+                } else {
+                    None
+                };
                 self.get_x_next();
                 Ok(())
             }
@@ -352,6 +394,8 @@ impl Interpreter {
                 };
                 self.cur_exp = Value::Boolean(result);
                 self.cur_type = Type::Boolean;
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 Ok(())
             }
 
@@ -359,6 +403,8 @@ impl Interpreter {
                 // Missing primary — set to vacuous
                 self.cur_exp = Value::Vacuous;
                 self.cur_type = Type::Vacuous;
+                self.last_lhs_binding = None;
+                self.cur_dep = None;
                 Ok(())
             }
         }?;
@@ -385,6 +431,8 @@ impl Interpreter {
                 // a[b,c] = b + a*(c - b) = (1-a)*b + a*c
                 self.cur_exp = Value::Numeric(a.mul_add(c - b, b));
                 self.cur_type = Type::Known;
+                self.last_lhs_binding = None;
+                self.cur_dep = Some(const_dep(a.mul_add(c - b, b)));
             }
         }
 
@@ -406,13 +454,38 @@ impl Interpreter {
             }
 
             let op = self.cur.modifier;
+            let left_dep = self.take_cur_dep();
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_primary()?;
+            let right_dep = self.cur_dep.clone();
 
             match cmd {
                 Command::SecondaryBinary => {
+                    self.last_lhs_binding = None;
                     self.do_secondary_binary(op, &left)?;
+                    if op == crate::command::SecondaryBinaryOp::Times as u16 {
+                        let left_const = left_dep.as_ref().and_then(constant_value);
+                        let right_const = right_dep.as_ref().and_then(constant_value);
+                        self.cur_dep = left_const.map_or_else(
+                            || {
+                                right_const.and_then(|factor| {
+                                    left_dep.map(|mut d| {
+                                        dep_scale(&mut d, factor);
+                                        d
+                                    })
+                                })
+                            },
+                            |factor| {
+                                right_dep.map(|mut d| {
+                                    dep_scale(&mut d, factor);
+                                    d
+                                })
+                            },
+                        );
+                    } else {
+                        self.cur_dep = None;
+                    }
                 }
                 Command::Slash => {
                     // Division
@@ -422,10 +495,23 @@ impl Interpreter {
                     if b.abs() < f64::EPSILON {
                         self.report_error(ErrorKind::ArithmeticError, "Division by zero");
                         self.cur_exp = Value::Numeric(0.0);
+                        self.cur_dep = Some(const_dep(0.0));
                     } else {
                         self.cur_exp = Value::Numeric(a / b);
+                        let right_const = right_dep.as_ref().and_then(constant_value);
+                        self.cur_dep = right_const.and_then(|c| {
+                            if c.abs() < f64::EPSILON {
+                                None
+                            } else {
+                                left_dep.map(|mut d| {
+                                    dep_scale(&mut d, 1.0 / c);
+                                    d
+                                })
+                            }
+                        });
                     }
                     self.cur_type = Type::Known;
+                    self.last_lhs_binding = None;
                 }
                 Command::And => {
                     // Logical and
@@ -434,6 +520,8 @@ impl Interpreter {
                     let b = value_to_bool(&right)?;
                     self.cur_exp = Value::Boolean(a && b);
                     self.cur_type = Type::Boolean;
+                    self.last_lhs_binding = None;
+                    self.cur_dep = None;
                 }
                 _ => {}
             }
@@ -456,18 +544,34 @@ impl Interpreter {
             }
 
             let op = self.cur.modifier;
+            let left_dep = self.take_cur_dep();
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_secondary()?;
+            let right_dep = self.cur_dep.clone();
 
             match cmd {
                 Command::PlusOrMinus => {
                     let right = self.take_cur_exp();
+                    self.last_lhs_binding = None;
                     self.do_plus_minus(op, &left, &right)?;
+                    self.cur_dep = match (left_dep.as_ref(), right_dep.as_ref()) {
+                        (Some(ld), Some(rd)) => {
+                            let factor = if op == PlusMinusOp::Plus as u16 {
+                                1.0
+                            } else {
+                                -1.0
+                            };
+                            Some(dep_add_scaled(ld, rd, factor))
+                        }
+                        _ => None,
+                    };
                 }
                 Command::TertiaryBinary => {
                     let right = self.take_cur_exp();
+                    self.last_lhs_binding = None;
                     self.do_tertiary_binary(op, &left, &right)?;
+                    self.cur_dep = None;
                 }
                 _ => {}
             }
@@ -494,6 +598,7 @@ impl Interpreter {
                 Command::PathJoin => {
                     // Path construction
                     self.scan_path_construction()?;
+                    self.cur_dep = None;
                     break;
                 }
                 Command::Ampersand => {
@@ -505,7 +610,9 @@ impl Interpreter {
                         let left = self.take_cur_exp();
                         self.get_x_next();
                         self.scan_tertiary()?;
+                        self.last_lhs_binding = None;
                         self.do_expression_binary(ExpressionBinaryOp::Concatenate as u16, &left)?;
+                        self.cur_dep = None;
                     }
                     break;
                 }
@@ -513,17 +620,21 @@ impl Interpreter {
                     // User-defined secondarydef operator
                     let left = self.take_cur_exp();
                     self.expand_binary_macro(&left)?;
+                    self.cur_dep = None;
                     break;
                 }
                 Command::ExpressionBinary => {
                     let left = self.take_cur_exp();
                     self.get_x_next();
                     self.scan_tertiary()?;
+                    self.last_lhs_binding = None;
                     self.do_expression_binary(op, &left)?;
+                    self.cur_dep = None;
                 }
                 Command::LeftBrace => {
                     // Direction specification — start of path construction
                     self.scan_path_construction()?;
+                    self.cur_dep = None;
                     break;
                 }
                 _ => break,

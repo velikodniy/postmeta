@@ -68,6 +68,7 @@ impl Interpreter {
     /// Execute a unary operator on `cur_exp`.
     #[expect(clippy::too_many_lines, reason = "matching all unary ops")]
     pub(super) fn do_unary(&mut self, op: u16) -> InterpResult<()> {
+        self.last_lhs_binding = None;
         match op {
             x if x == UnaryOp::Not as u16 => {
                 let b = value_to_bool(&self.cur_exp)?;
