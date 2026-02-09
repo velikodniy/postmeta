@@ -195,8 +195,16 @@ impl Interpreter {
     /// This is `get_x_next` from `mp.web`: it calls `get_next` and then
     /// expands any expandable commands until a non-expandable one is found.
     fn get_x_next(&mut self) {
+        // Expansion is token-oriented; it should not overwrite the current
+        // expression value that the parser may already have computed.
+        let saved_exp = self.cur_exp.clone();
+        let saved_type = self.cur_type;
+        let saved_dep = self.cur_dep.clone();
         self.get_next();
         self.expand_current();
+        self.cur_exp = saved_exp;
+        self.cur_type = saved_type;
+        self.cur_dep = saved_dep;
     }
 
     /// Push the current token back into the input stream.
@@ -1799,6 +1807,153 @@ mod tests {
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
         assert!(interp.pictures.len() >= 2, "expected shipped pictures");
+    }
+
+    #[test]
+    fn plain_hide_postfix_preserves_left_expression() {
+        use crate::filesystem::FileSystem;
+        use crate::variables::VarValue;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run(
+                "input plain;
+                 path p;
+                 cuttings := (0,0)--(1cm,0);
+                 p := ((0,0)--(1cm,0)) hide(cuttings:=reverse cuttings);
+                 end;",
+            )
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+
+        let pid = interp
+            .variables
+            .lookup_existing("p")
+            .expect("path variable p should exist");
+        assert!(matches!(
+            interp.variables.get(pid),
+            VarValue::Known(crate::types::Value::Path(_))
+        ));
+    }
+
+    #[test]
+    fn plain_drawarrow_example_17() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run(
+                "input plain;
+                 beginfig(17);
+                   pair A, B, C;
+                   A := (0,0); B := (1cm,0); C := (0,1cm);
+                   drawarrow C--B--A;
+                   drawarrow A--C withpen pencircle scaled 2bp;
+                 endfig;
+                 end;",
+            )
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
+    }
+
+    #[test]
+    fn plain_drawdblarrow_example_18() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run(
+                "input plain;
+                 beginfig(18);
+                   pair A, B, C;
+                   A := (0,0); B := (1cm,0); C := (0,1cm);
+                   draw C--B--A--cycle;
+                   drawdblarrow A--C withpen pencircle scaled 2bp;
+                 endfig;
+                 end;",
+            )
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
     }
 
     // -----------------------------------------------------------------------

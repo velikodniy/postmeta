@@ -208,13 +208,12 @@ impl Interpreter {
                 // Suffix loop: collect symbolic suffixes, numeric subscripts,
                 // and bracketed subscript expressions `[expr]`.
                 //
-                // For vardef roots, we only collect symbolic suffixes (to build
-                // compound names like `laboff.lft`) — NOT subscripts, because
-                // numeric tokens and brackets should be parsed as macro
-                // arguments, not variable subscripts.
+                // For vardef roots, do NOT collect suffix tokens here; following
+                // tokens belong to undelimited macro arguments (e.g. `foo p`).
                 loop {
-                    if self.cur.command == Command::TagToken
-                        || self.cur.command == Command::InternalQuantity
+                    if !is_root_vardef
+                        && (self.cur.command == Command::TagToken
+                            || self.cur.command == Command::InternalQuantity)
                     {
                         if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
                             name.push('.');

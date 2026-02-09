@@ -849,18 +849,37 @@ impl Interpreter {
     /// token is found.
     fn scan_suffix_arg(&mut self) -> TokenList {
         let mut suffix_tokens = TokenList::new();
-        while self.cur.command == Command::TagToken
-            || self.cur.command == Command::InternalQuantity
-            || self.cur.command == Command::NumericToken
-            || self.cur.command == Command::LeftBracket
-        {
-            self.store_current_token(&mut suffix_tokens);
-            self.get_next();
-            // If we entered a bracket, scan until ]
-            if self.cur.command == Command::RightBracket {
+        loop {
+            if self.cur.command == Command::TagToken
+                || self.cur.command == Command::InternalQuantity
+                || self.cur.command == Command::NumericToken
+            {
                 self.store_current_token(&mut suffix_tokens);
                 self.get_next();
+                continue;
             }
+
+            if self.cur.command == Command::LeftBracket {
+                // Capture a full bracketed subscript, including nested brackets.
+                let mut depth: u32 = 0;
+                loop {
+                    if self.cur.command == Command::LeftBracket {
+                        depth += 1;
+                    } else if self.cur.command == Command::RightBracket {
+                        depth -= 1;
+                    }
+
+                    self.store_current_token(&mut suffix_tokens);
+                    self.get_next();
+
+                    if depth == 0 || self.cur.command == Command::Stop {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            break;
         }
         suffix_tokens
     }

@@ -33,9 +33,23 @@ enum PendingJoin {
 impl Interpreter {
     /// Parse a path expression starting from the current point/expression.
     pub(super) fn scan_path_construction(&mut self) -> InterpResult<()> {
-        let first_point = self.take_cur_exp();
-        let mut knots = vec![self.value_to_knot(&first_point)?];
-        let mut is_cyclic = false;
+        let first_expr = self.take_cur_exp();
+        let (mut knots, mut is_cyclic) = match first_expr {
+            Value::Pair(x, y) => (vec![Knot::new(Point::new(x, y))], false),
+            Value::Path(p) => (p.knots, p.is_cyclic),
+            Value::Numeric(v) => {
+                return Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!("Expected pair or path in path construction, got numeric {v}"),
+                ));
+            }
+            other => {
+                return Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!("Expected pair or path in path construction, got {}", other.ty()),
+                ));
+            }
+        };
 
         loop {
             // Parse optional pre-join direction {dir} or {curl n}
@@ -107,6 +121,20 @@ impl Interpreter {
             // Parse the next point
             self.scan_tertiary()?;
             let point_val = self.take_cur_exp();
+
+            // `&` can concatenate paths.
+            if join_type == u16::MAX {
+                if let Value::Path(mut rhs) = point_val {
+                    if let Some(dir) = post_dir
+                        && let Some(first) = rhs.knots.first_mut()
+                    {
+                        first.left = dir;
+                    }
+                    Self::append_path_concat(&mut knots, rhs.knots);
+                    continue;
+                }
+            }
+
             let mut knot = self.value_to_knot(&point_val)?;
             if let Some(dir) = post_dir {
                 knot.left = dir;
@@ -127,6 +155,32 @@ impl Interpreter {
         self.cur_exp = Value::Path(path_obj);
         self.cur_type = Type::Path;
         Ok(())
+    }
+
+    /// Concatenate path knots for `&`.
+    ///
+    /// If the tail point of `lhs` equals the head point of `rhs`, merge the
+    /// shared knot and keep the outgoing side from `rhs`.
+    fn append_path_concat(lhs: &mut Vec<Knot>, mut rhs: Vec<Knot>) {
+        if rhs.is_empty() {
+            return;
+        }
+
+        if lhs.is_empty() {
+            lhs.append(&mut rhs);
+            return;
+        }
+
+        let li = lhs.len() - 1;
+        let lp = lhs[li].point;
+        let rp = rhs[0].point;
+        if (lp.x - rp.x).abs() < 1e-9 && (lp.y - rp.y).abs() < 1e-9 {
+            lhs[li].right = rhs[0].right;
+            lhs[li].right_tension = rhs[0].right_tension;
+            rhs.remove(0);
+        }
+
+        lhs.append(&mut rhs);
     }
 
     /// Parse tension/controls options after `..`.
@@ -371,6 +425,35 @@ mod tests {
         assert_eq!(path.knots.len(), 3, "expected three knots");
 
         // Path choices should have been resolved to explicit controls.
+        assert!(matches!(path.knots[0].right, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[2].left, KnotDirection::Explicit(_)));
+    }
+
+    #[test]
+    fn ampersand_concatenates_paths() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "path p,q,r;
+                 p := (0,0)..(1,0);
+                 q := (1,0)..(1,1);
+                 r := p & q;",
+            )
+            .expect("path concatenation should parse");
+
+        let rid = interp
+            .variables
+            .lookup_existing("r")
+            .expect("path variable r should exist");
+        let path = match interp.variables.get(rid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+
+        assert_eq!(path.knots.len(), 3, "expected merged shared knot");
+        assert!(!path.is_cyclic);
         assert!(matches!(path.knots[0].right, KnotDirection::Explicit(_)));
         assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
         assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
