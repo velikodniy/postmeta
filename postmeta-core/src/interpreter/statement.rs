@@ -837,45 +837,29 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
     // Sort by starting x position.
     on_segments.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Build alternating on/off dashes.
-    // Walk from x=0 to x=total_length, emitting on and off segments.
-    let mut dashes: Vec<f64> = Vec::new();
-    let mut pos: f64 = 0.0;
+    // Build alternating on/off dashes in cyclic order starting from the first
+    // on-segment. A leading gap is represented via dash offset.
+    let first_start = on_segments[0].0;
+    let mut dashes: Vec<f64> = Vec::with_capacity(on_segments.len() * 2);
 
-    for (xmin, xmax) in &on_segments {
-        let gap = xmin - pos;
-        if gap > 1e-6 {
-            // Off segment before this on segment.
-            // If dashes is empty and there's a leading gap, it means the
-            // pattern starts with an off segment. Encode as on=0, off=gap.
-            if dashes.is_empty() {
-                dashes.push(0.0);
-            }
-            dashes.push(gap);
-        } else if dashes.is_empty() {
-            // First on segment starts at or before 0 — no leading gap.
-        }
-        let on_len = xmax - xmin;
+    for (idx, (xmin, xmax)) in on_segments.iter().enumerate() {
+        let on_len = (xmax - xmin).max(0.0);
         dashes.push(on_len);
-        pos = *xmax;
+
+        let next_start = if let Some((nx, _)) = on_segments.get(idx + 1) {
+            *nx
+        } else {
+            total_length + first_start
+        };
+        let off_len = (next_start - xmax).max(0.0);
+        dashes.push(off_len);
     }
 
-    // Trailing off segment (from last on-end to total_length).
-    let trailing = total_length - pos;
-    if trailing > 1e-6 {
-        dashes.push(trailing);
-    }
+    let offset = if first_start.abs() < 1e-6 {
+        0.0
+    } else {
+        first_start
+    };
 
-    // SVG stroke-dasharray needs an even number of values (on, off pairs).
-    // If odd, we need to handle wrap-around.  For MetaPost, the pattern
-    // repeats, so if it ends with an on-segment (no trailing off), we can
-    // append a 0-length off segment.
-    if dashes.len() % 2 != 0 {
-        dashes.push(0.0);
-    }
-
-    Some(DashPattern {
-        dashes,
-        offset: 0.0,
-    })
+    Some(DashPattern { dashes, offset })
 }

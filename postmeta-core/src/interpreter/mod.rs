@@ -1504,6 +1504,66 @@ mod tests {
     }
 
     #[test]
+    fn dashed_withdots_uses_leading_offset() {
+        // `dashpattern(off 2.5 on 0 off 2.5)` should produce one zero-length
+        // dash every 5 units, offset by 2.5 from the path start.
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                r#"
+            delimiters ();
+            tertiarydef p _on_ d =
+              begingroup save pic;
+              picture pic; pic=p;
+              addto pic doublepath (w,w)..(w+d,w);
+              w := w+d;
+              pic shifted (0,d)
+              endgroup
+            enddef;
+            tertiarydef p _off_ d =
+              begingroup w:=w+d;
+              p shifted (0,d)
+              endgroup
+            enddef;
+            vardef dashpattern(text t) =
+              save on, off, w;
+              let on=_on_;
+              let off=_off_;
+              w = 0;
+              nullpicture t
+            enddef;
+            addto currentpicture doublepath (0,0)..(30,0)
+              dashed dashpattern(off 2.5 on 0 off 2.5);
+        "#,
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "errors: {errors:?}");
+
+        let objects = &interp.current_picture.objects;
+        assert_eq!(objects.len(), 1, "expected 1 object, got {}", objects.len());
+
+        if let postmeta_graphics::types::GraphicsObject::Stroke(ref stroke) = objects[0] {
+            let dash = stroke.dash.as_ref().expect("expected dash pattern");
+            assert_eq!(dash.dashes.len(), 2, "dashes: {:?}", dash.dashes);
+            assert!((dash.dashes[0] - 0.0).abs() < 0.01, "on={}", dash.dashes[0]);
+            assert!(
+                (dash.dashes[1] - 5.0).abs() < 0.01,
+                "off={}",
+                dash.dashes[1]
+            );
+            assert!((dash.offset - 2.5).abs() < 0.01, "offset={}", dash.offset);
+        } else {
+            panic!("expected Stroke, got {:?}", objects[0]);
+        }
+    }
+
+    #[test]
     fn vardef_stays_tag_token() {
         // After defining a vardef, the symbol should remain TagToken
         let mut interp = Interpreter::new();
