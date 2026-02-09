@@ -159,11 +159,14 @@ impl Interpreter {
                 while self.cur.command != Command::EndGroup && self.cur.command != Command::Stop {
                     self.do_statement()?;
                 }
-                // Restore scope
+                // Restore scope — but preserve cur_exp/cur_type/cur_dep from
+                // the last expression in the group (the group's return value).
                 self.do_endgroup();
                 self.get_x_next();
                 self.last_lhs_binding = None;
-                self.cur_dep = None;
+                // Intentionally keep cur_dep: the group result's dependency
+                // info must survive so that unknown numerics (e.g. from
+                // `whatever`) can participate in equations after the group.
                 Ok(())
             }
 
@@ -414,7 +417,7 @@ impl Interpreter {
             if let Value::Numeric(a) = self.cur_exp {
                 self.get_x_next();
                 self.scan_expression()?;
-                let b = value_to_scalar(&self.take_cur_exp())?;
+                let b = self.take_cur_exp();
                 if self.cur.command == Command::Comma {
                     self.get_x_next();
                 } else {
@@ -424,15 +427,59 @@ impl Interpreter {
                     ));
                 }
                 self.scan_expression()?;
-                let c = value_to_scalar(&self.take_cur_exp())?;
+                let c = self.take_cur_exp();
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
                 }
-                // a[b,c] = b + a*(c - b) = (1-a)*b + a*c
-                self.cur_exp = Value::Numeric(a.mul_add(c - b, b));
-                self.cur_type = Type::Known;
+
+                // a[b,c] = b + a*(c-b) = (1-a)*b + a*c
+                let one_minus_a = 1.0 - a;
+                match (b, c) {
+                    (Value::Numeric(bn), Value::Numeric(cn)) => {
+                        self.cur_exp = Value::Numeric(a.mul_add(cn - bn, bn));
+                        self.cur_type = Type::Known;
+                        self.cur_dep = Some(const_dep(a.mul_add(cn - bn, bn)));
+                    }
+                    (Value::Pair(bx, by), Value::Pair(cx, cy)) => {
+                        self.cur_exp =
+                            Value::Pair(one_minus_a * bx + a * cx, one_minus_a * by + a * cy);
+                        self.cur_type = Type::PairType;
+                        self.cur_dep = None;
+                    }
+                    (Value::Color(bc), Value::Color(cc)) => {
+                        self.cur_exp = Value::Color(postmeta_graphics::types::Color::new(
+                            one_minus_a * bc.r + a * cc.r,
+                            one_minus_a * bc.g + a * cc.g,
+                            one_minus_a * bc.b + a * cc.b,
+                        ));
+                        self.cur_type = Type::ColorType;
+                        self.cur_dep = None;
+                    }
+                    (Value::Transform(bt), Value::Transform(ct)) => {
+                        self.cur_exp = Value::Transform(postmeta_graphics::types::Transform {
+                            tx: one_minus_a * bt.tx + a * ct.tx,
+                            ty: one_minus_a * bt.ty + a * ct.ty,
+                            txx: one_minus_a * bt.txx + a * ct.txx,
+                            txy: one_minus_a * bt.txy + a * ct.txy,
+                            tyx: one_minus_a * bt.tyx + a * ct.tyx,
+                            tyy: one_minus_a * bt.tyy + a * ct.tyy,
+                        });
+                        self.cur_type = Type::TransformType;
+                        self.cur_dep = None;
+                    }
+                    (bv, cv) => {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            format!(
+                                "Mediation requires matching types, got {} and {}",
+                                bv.ty(),
+                                cv.ty()
+                            ),
+                        ));
+                    }
+                }
+
                 self.last_lhs_binding = None;
-                self.cur_dep = Some(const_dep(a.mul_add(c - b, b)));
             }
         }
 
