@@ -1660,4 +1660,43 @@ mod tests {
         let msg = &interp.errors[0].message;
         assert!(msg.contains("42"), "expected 42 in: {msg}");
     }
+
+    // -----------------------------------------------------------------------
+    // Trailing tokens after undelimited macro params
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn trailing_tokens_after_undelimited_expr() {
+        // A macro with undelimited `primary` param stops scanning after the
+        // primary.  The trailing `;` must survive and terminate the statement.
+        let mut interp = Interpreter::new();
+        interp
+            .run("def greet primary x = show x enddef; greet 42;")
+            .unwrap();
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        let show_msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info);
+        assert!(
+            show_msg.is_some() && show_msg.unwrap().message.contains("42"),
+            "expected show 42"
+        );
+    }
+
+    #[test]
+    fn vardef_returns_value() {
+        // A vardef should return the value of its last expression.
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef triple(expr x) = 3 * x enddef; show triple(7);")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("21"), "expected 21 in: {msg}");
+    }
 }

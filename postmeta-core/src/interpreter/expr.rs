@@ -254,12 +254,23 @@ impl Interpreter {
 
                 if is_vardef_call {
                     // Trigger vardef macro expansion.
-                    // `self.cur` is the token AFTER the macro name (e.g. `(`).
-                    // `expand_defined_macro` expects `self.cur` to be the macro
-                    // token itself, then calls `get_next` to advance.  We push
-                    // the current token back so it becomes the "next" token, and
-                    // restore `self.cur` to the macro symbol.
-                    self.back_input();
+                    // `self.cur` is the token AFTER the macro name (e.g. `(`
+                    // or `;`).  We push it as a token-list level so that
+                    // `expand_defined_macro` can read it with `get_next`.
+                    // Using back_input() would put it in the priority slot,
+                    // which is read BEFORE any token-list level — including
+                    // the body that expand_defined_macro is about to push.
+                    {
+                        let mut trailing = crate::input::TokenList::new();
+                        self.store_current_token(&mut trailing);
+                        if !trailing.is_empty() {
+                            self.input.push_token_list(
+                                trailing,
+                                Vec::new(),
+                                "vardef trailing".into(),
+                            );
+                        }
+                    }
                     self.cur.command = Command::DefinedMacro;
                     self.cur.sym = root_sym;
                     self.expand_defined_macro();

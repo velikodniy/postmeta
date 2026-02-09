@@ -1137,11 +1137,24 @@ impl Interpreter {
             }
         }
 
-        // TODO: When the macro's last parameter is undelimited, `self.cur`
-        // holds the first token AFTER the arguments.  This token is lost
-        // when the body is pushed (mp.web §389 does `back_input` here).
-        // Fixing this requires redesigning `back_input` to use the input
-        // stack rather than a priority slot, so it is deferred.
+        // When the last parameter is undelimited, `self.cur` holds the first
+        // token AFTER the arguments (mp.web §389).  We must preserve it by
+        // pushing it as a one-token input level BEFORE the body expansion, so
+        // the body sits on top and is read first, then the trailing token,
+        // then the rest of the original source.
+        let last_param_undelimited = macro_info
+            .params
+            .last()
+            .copied()
+            .is_some_and(ParamType::is_undelimited);
+        if last_param_undelimited {
+            let mut trailing = TokenList::new();
+            self.store_current_token(&mut trailing);
+            if !trailing.is_empty() {
+                self.input
+                    .push_token_list(trailing, Vec::new(), "trailing token".into());
+            }
+        }
 
         // Build the expansion token list
         let mut expansion = macro_info.body.clone();
@@ -1154,7 +1167,7 @@ impl Interpreter {
             expansion.push(StoredToken::Symbol(eg));
         }
 
-        // Push the expansion with parameter bindings (on top of trailing token)
+        // Push the body expansion on top of the trailing token level
         self.input
             .push_token_list(expansion, args, "macro expansion".into());
 
