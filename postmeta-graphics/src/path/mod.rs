@@ -1,103 +1,15 @@
 //! Path operations and Hobby's spline algorithm.
 //!
 //! This module provides:
-//! - Conversion between `Path` (`MetaPost` knot representation) and
-//!   `kurbo::BezPath` (cubic Bezier segments).
 //! - Hobby's algorithm for computing smooth cubic Bezier control points
 //!   through a sequence of knots with direction/tension/curl constraints.
 //! - Path query operations: `point_of`, `direction_of`, `subpath`, `reverse`.
 
 pub mod hobby;
 
-use kurbo::{BezPath, PathEl, Point, Vec2};
-
 use crate::types::{
-    index_to_scalar, scalar_to_index, GraphicsError, Knot, KnotDirection, Path, Scalar, EPSILON,
+    index_to_scalar, scalar_to_index, Knot, KnotDirection, Path, Point, Scalar, Vec2, EPSILON,
 };
-
-// ---------------------------------------------------------------------------
-// Path → BezPath conversion
-// ---------------------------------------------------------------------------
-
-/// Convert a fully-resolved `Path` (all directions `Explicit`) to a `kurbo::BezPath`.
-///
-/// # Errors
-///
-/// Returns [`GraphicsError::UnresolvedPath`] if any knot direction is not
-/// `Explicit` (i.e., the path has not been resolved by Hobby's algorithm).
-pub fn to_bez_path(path: &Path) -> Result<BezPath, GraphicsError> {
-    let mut bp = BezPath::new();
-    if path.knots.is_empty() {
-        return Ok(bp);
-    }
-
-    bp.move_to(path.knots[0].point);
-
-    let n = path.num_segments();
-    for i in 0..n {
-        let j = (i + 1) % path.knots.len();
-        let k0 = &path.knots[i];
-        let k1 = &path.knots[j];
-
-        let KnotDirection::Explicit(cp1) = k0.right else {
-            return Err(GraphicsError::UnresolvedPath {
-                knot: i,
-                side: "right",
-            });
-        };
-        let KnotDirection::Explicit(cp2) = k1.left else {
-            return Err(GraphicsError::UnresolvedPath {
-                knot: j,
-                side: "left",
-            });
-        };
-
-        bp.curve_to(cp1, cp2, k1.point);
-    }
-
-    if path.is_cyclic {
-        bp.close_path();
-    }
-
-    Ok(bp)
-}
-
-/// Create a `Path` from a sequence of explicit cubic Bezier segments.
-#[must_use]
-pub fn from_bez_path(bp: &BezPath, is_cyclic: bool) -> Path {
-    let elements = bp.elements();
-    let mut knots: Vec<Knot> = Vec::new();
-
-    for el in elements {
-        match *el {
-            PathEl::MoveTo(p) => {
-                knots.push(Knot::new(p));
-            }
-            PathEl::CurveTo(cp1, cp2, p) => {
-                // Set the right control of the previous knot
-                if let Some(prev) = knots.last_mut() {
-                    prev.right = KnotDirection::Explicit(cp1);
-                }
-                // Create the new knot with left control
-                let mut k = Knot::new(p);
-                k.left = KnotDirection::Explicit(cp2);
-                knots.push(k);
-            }
-            PathEl::LineTo(p) => {
-                // A line is a degenerate cubic where controls = endpoints
-                if let Some(prev) = knots.last_mut() {
-                    prev.right = KnotDirection::Explicit(prev.point);
-                }
-                let mut k = Knot::new(p);
-                k.left = KnotDirection::Explicit(p);
-                knots.push(k);
-            }
-            PathEl::ClosePath | PathEl::QuadTo(..) => {}
-        }
-    }
-
-    Path::from_knots(knots, is_cyclic)
-}
 
 // ---------------------------------------------------------------------------
 // Path query operations
@@ -488,23 +400,6 @@ mod tests {
         let rev = reverse(&path);
         assert!(rev.is_cyclic);
         assert_eq!(rev.knots.len(), 3);
-    }
-
-    #[test]
-    fn test_to_bez_path_open() {
-        let path = make_line_path();
-        let bp = to_bez_path(&path).unwrap();
-        let elements = bp.elements();
-        assert_eq!(elements.len(), 2); // MoveTo + CurveTo
-    }
-
-    #[test]
-    fn test_to_bez_path_cyclic() {
-        let path = make_triangle_path();
-        let bp = to_bez_path(&path).unwrap();
-        let elements = bp.elements();
-        // MoveTo + 3 CurveTos + ClosePath = 5
-        assert_eq!(elements.len(), 5);
     }
 
     #[test]

@@ -4,13 +4,11 @@
 
 use std::sync::Arc;
 
-use kurbo::Point;
-
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::pen;
 use postmeta_graphics::transform;
-use postmeta_graphics::types::{Color, Picture, Transform};
+use postmeta_graphics::types::{Color, Picture, Point, Transform, Vec2};
 
 use crate::command::{
     ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
@@ -258,7 +256,7 @@ impl Interpreter {
             x if x == PrimaryBinaryOp::PenOffsetOf as u16 => {
                 let (dx, dy) = value_to_pair(first)?;
                 let p = value_to_pen(second)?;
-                let pt = pen::penoffset(p, kurbo::Vec2::new(dx, dy));
+                let pt = pen::penoffset(p, Vec2::new(dx, dy));
                 self.cur_exp = Value::Pair(pt.x, pt.y);
                 self.cur_type = Type::PairType;
             }

@@ -9,11 +9,9 @@
 //! - `clip <pic> to <path>` — clip to a region
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
-use kurbo::Point;
-
 use crate::types::{
-    Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture, Scalar,
-    StrokeObject,
+    Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture, Point,
+    Scalar, StrokeObject,
 };
 
 // ---------------------------------------------------------------------------
@@ -274,11 +272,10 @@ pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
 /// Rough estimate of the maximum pen extent (half-width).
 fn pen_max_extent(pen: &Pen) -> Scalar {
     match pen {
-        Pen::Elliptical(affine) => {
-            let c = affine.as_coeffs();
-            // Max of the two basis vector lengths
-            let len1 = c[0].hypot(c[1]);
-            let len2 = c[2].hypot(c[3]);
+        Pen::Elliptical(t) => {
+            // Max of the two basis vector lengths (columns of the 2×2 matrix)
+            let len1 = t.txx.hypot(t.tyx);
+            let len2 = t.txy.hypot(t.tyy);
             len1.max(len2)
         }
         Pen::Polygonal(verts) => verts

@@ -6,266 +6,164 @@ library, WASM module (e.g. Typst plugin), or CLI tool.
 ## Architecture
 
 ```
-postmeta-graphics   Core graphics primitives (Rust API, no parsing)
+postmeta-graphics   Core graphics primitives (zero dependencies)
        ^
-postmeta-svg        SVG renderer
+postmeta-svg        SVG renderer (depends on `svg` crate)
        ^
 postmeta-core       MetaPost language parser and interpreter
        ^
 postmeta-cli        Command-line interface
 ```
 
-## Crate APIs
-
-### postmeta-graphics
+## postmeta-graphics
 
 Pure computational library. All of MetaPost's core algorithms, usable as a
-standalone Rust API without any parsing. Depends on `kurbo` 0.13 (with
-`libm` feature).
+standalone Rust API without any parsing. **Zero external dependencies** — owns
+its `Point`, `Vec2`, and `Transform` types.
 
-#### types
+### Types
 
-Core data structures used throughout the workspace.
+Fundamental data structures shared across the workspace.
 
-```rust
-// Scalar primitives
-type Scalar = f64;
-const EPSILON: Scalar;          // 1/65536
-const INFINITY_VAL: Scalar;     // 4095.99998
-fn index_to_scalar(i: usize) -> Scalar;
-fn scalar_to_index(t: Scalar) -> usize;
-fn deg_to_rad(deg: Scalar) -> Scalar;
-fn rad_to_deg(rad: Scalar) -> Scalar;
+- **`Point`**, **`Vec2`** — 2D point and displacement vector (`f64` components).
+  Standard arithmetic ops (`Sub`, `Add`, `Mul`). `Point::lerp()` for
+  interpolation.
+- **`Scalar`** — alias for `f64`. `EPSILON = 1/65536` for comparisons.
+  `INFINITY_VAL = 4095.99998` matching MetaPost's maximum.
+- **`Color`** — RGB with components in [0, 1].
+- **`LineCap`**, **`LineJoin`** — stroke styles (map 1:1 to SVG/PostScript).
+- **`DashPattern`** — alternating on/off lengths with offset.
+- **`KnotDirection`** — direction constraint at a path knot:
+  `Explicit(Point)` | `Given(radians)` | `Curl(γ)` | `Open`.
+- **`Knot`** — on-curve point + left/right direction + left/right tension.
+  Methods: `left_cp()`, `right_cp()` for resolved control points.
+- **`Path`** — sequence of knots, optionally cyclic.
+  `num_segments()`, `length()` (MetaPost alias).
+- **`Pen`** — `Elliptical(Transform)` | `Polygonal(Vec<Point>)`.
+  `Pen::circle(diameter)`, `Pen::DEFAULT` (0.5bp).
+- **`Transform`** — 6-component affine: (tx + txx·x + txy·y, ty + tyx·x + tyy·y).
+  Supports `Mul` for composition, `inverse()`.
+- **`GraphicsObject`** — Fill | Stroke | Text | ClipStart/End | SetBoundsStart/End.
+- **`Picture`** — ordered collection of `GraphicsObject`.
 
-// Color (RGB, components in [0,1])
-struct Color { r, g, b: Scalar }
-  Color::BLACK, Color::WHITE, Color::new(r, g, b)
-
-// Line attributes
-enum LineCap  { Butt=0, Round=1(default), Square=2 }
-enum LineJoin { Miter=0, Round=1(default), Bevel=2 }
-  // both have from_f64(v) -> Self
-struct DashPattern { dashes: Vec<Scalar>, offset: Scalar }
-
-// Path building blocks
-enum KnotDirection { Explicit(Point), Given(Scalar), Curl(Scalar), Open }
-struct Knot { point: Point, left/right: KnotDirection, left/right_tension: Scalar }
-  Knot::new(point)                           // Open, tension 1.0
-  Knot::with_controls(point, left_cp, right_cp) // Explicit
-struct Path { knots: Vec<Knot>, is_cyclic: bool }
-  Path::new(), Path::from_knots(knots, cyclic)
-  path.num_segments(), path.length()
-
-// Pen
-enum Pen { Elliptical(kurbo::Affine), Polygonal(Vec<Point>) }
-  Pen::circle(diameter), Pen::default_pen()  // 0.5bp circle
-
-// Transform (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
-struct Transform { tx, ty, txx, txy, tyx, tyy: Scalar }
-  Transform::IDENTITY, to_affine(), from_affine()
-
-// Picture elements
-enum GraphicsObject { Fill(..), Stroke(..), Text(..), ClipStart(Path),
-                      ClipEnd, SetBoundsStart(Path), SetBoundsEnd }
-struct FillObject   { path, color, pen: Option<Pen>, line_join, miter_limit }
-struct StrokeObject  { path, pen, color, dash: Option<DashPattern>,
-                       line_cap, line_join, miter_limit }
-struct TextObject    { text: Arc<str>, font_name: Arc<str>, font_size,
-                       color, transform: Transform }
-struct Picture { objects: Vec<GraphicsObject> }
-  Picture::new(), push(obj), merge(&other)
-
-// Error
-enum GraphicsError { UnresolvedPath{knot,side}, InvalidPen(&str) }
-```
-
-#### math
-
-MetaPost mathematical primitives.
+### Transformable Trait
 
 ```rust
-fn sind(degrees) -> Scalar;
-fn cosd(degrees) -> Scalar;
-fn angle(x, y) -> Scalar;               // degrees, (-180, 180]
-fn mexp(x) -> Scalar;                   // 2^(x/256)
-fn mlog(x) -> Scalar;                   // 256 * log2(x)
-fn pyth_add(a, b) -> Scalar;            // sqrt(a^2 + b^2), i.e. a ++ b
-fn pyth_sub(a, b) -> Scalar;            // sqrt(a^2 - b^2), i.e. a +-+ b
-fn floor(x) -> Scalar;
-fn uniform_deviate(x, seed: &mut u64) -> Scalar;
-fn normal_deviate(seed: &mut u64) -> Scalar;
-```
-
-#### path
-
-Path operations and Hobby's spline algorithm.
-
-```rust
-fn to_bez_path(path: &Path) -> Result<BezPath, GraphicsError>;
-fn from_bez_path(bp: &BezPath, is_cyclic: bool) -> Path;
-fn point_of(path, t: Scalar) -> Point;
-fn direction_of(path, t: Scalar) -> Vec2;
-fn precontrol_of(path, t: Scalar) -> Point;
-fn postcontrol_of(path, t: Scalar) -> Point;
-fn subpath(path, t1, t2: Scalar) -> Path;   // supports t1 > t2
-fn reverse(path) -> Path;
-
-// path::hobby
-fn make_choices(path: &mut Path);  // resolves all KnotDirections to Explicit
-```
-
-#### transform
-
-Affine transforms matching MetaPost primitives.
-
-```rust
-// Constructors
-fn shifted(dx, dy) -> Transform;
-fn rotated(degrees) -> Transform;
-fn scaled(factor) -> Transform;
-fn xscaled(factor) -> Transform;
-fn yscaled(factor) -> Transform;
-fn slanted(factor) -> Transform;
-fn zscaled(a, b) -> Transform;      // complex multiplication
-
-// Composition
-fn compose(first, second: &Transform) -> Transform;
-fn inverse(t: &Transform) -> Option<Transform>;
-fn determinant(t: &Transform) -> Scalar;
-
-// Application (to various types)
-fn transform_point(t, p: Point) -> Point;
-fn transform_vec(t, v: Vec2) -> Vec2;
-fn transform_knot(t, knot: &Knot) -> Knot;
-fn transform_path(t, path: &Path) -> Path;
-fn transform_pen(t, pen: &Pen) -> Pen;
-fn transform_color(t, c: Color) -> Color;       // no-op
-fn transform_object(t, obj: &GraphicsObject) -> GraphicsObject;
-fn transform_picture(t, pic: &Picture) -> Picture;
-```
-
-#### pen
-
-Pen operations: creation, conversion, offset, convex hull.
-
-```rust
-fn pencircle(diameter: Scalar) -> Pen;
-fn nullpen() -> Pen;
-fn makepen(path: &Path) -> Result<Pen, GraphicsError>;  // cyclic path -> polygon
-fn makepath(pen: &Pen) -> Path;                          // pen -> cyclic path
-fn penoffset(pen: &Pen, dir: Vec2) -> Point;             // support point
-fn convex_hull(points: &[Point]) -> Vec<Point>;
-```
-
-#### intersection
-
-Curve-curve intersection via recursive bisection.
-
-```rust
-struct Intersection { t1: Scalar, t2: Scalar }
-
-fn intersection_times(path1, path2: &Path) -> Option<Intersection>;
-fn all_intersection_times(path1, path2: &Path) -> Vec<Intersection>;
-```
-
-#### picture
-
-Picture assembly: fill, stroke, clip, setbounds, bounding box.
-
-```rust
-fn addto_contour(pic, path, color, pen: Option<Pen>, line_join, miter_limit);
-fn addto_doublepath(pic, path, pen, color, dash, line_cap, line_join, miter_limit);
-fn addto_also(target: &mut Picture, source: &Picture);
-fn clip(pic: &mut Picture, clip_path: Path);
-fn setbounds(pic: &mut Picture, bounds_path: Path);
-
-struct BoundingBox { min_x, min_y, max_x, max_y: Scalar }
-  BoundingBox::EMPTY, is_valid(), expand_by(point), union(other)
-
-fn path_bbox(path: &Path) -> BoundingBox;
-fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox;
-```
-
-### postmeta-svg
-
-Converts `Picture` to SVG using the `svg` crate. Depends on `svg` 0.18
-and `postmeta-graphics`.
-
-```rust
-fn render(picture: &Picture) -> svg::Document;
-fn render_to_string(picture: &Picture) -> String;
-fn render_with_options(picture: &Picture, opts: &RenderOptions) -> svg::Document;
-
-struct RenderOptions {
-    margin: Scalar,      // default 1.0bp
-    precision: usize,    // default 4 decimal places
-    true_corners: bool,  // default false
+pub trait Transformable {
+    fn transformed(&self, t: &Transform) -> Self;
 }
 ```
 
-SVG output details:
-- Y-axis flip via root `<g transform="scale(1,-1)">`
-- Fill → `<path>` with fill attribute
-- Stroke → `<path>` with stroke attributes (width, cap, join, dash)
-- Text → `<text>` with counter-flip matrix so text reads correctly
-- Clip → `<defs><clipPath>` + `<g clip-path="url(#...)">`
-- SetBounds → transparent (contents rendered without wrapping)
+Implemented for `Point`, `Vec2`, `Knot`, `Path`, `Pen`, `GraphicsObject`,
+`Picture`. Transform constructors: `shifted`, `rotated` (degrees), `scaled`,
+`xscaled`, `yscaled`, `slanted`, `zscaled` (complex multiplication).
 
-### postmeta-core
+### Path Module
+
+Path query and conversion operations.
+
+- **`point_of(path, t)`** — evaluate point at time t (de Casteljau).
+- **`direction_of(path, t)`** — tangent vector at time t.
+- **`precontrol_of`**, **`postcontrol_of`** — control points at time t.
+- **`subpath(path, t1, t2)`** — extract sub-path (de Casteljau splitting).
+- **`reverse(path)`** — reverse knot order, swap left/right.
+
+**`CubicSeg`** — shared 4-point cubic Bezier representation with `eval()`,
+`deriv()`, `split()`, `subdivide()`, `bbox()` methods. Used by both path
+operations and intersection.
+
+#### Hobby's Spline Algorithm (`path::hobby`)
+
+**`make_choices(path)`** — resolves all `KnotDirection` values to `Explicit`
+control points. Implements John D. Hobby's algorithm from "Smooth, Easy to
+Compute Interpolating Splines" (1986), following the mp.web reference:
+
+1. Decompose path at breakpoints (knots with Given or Curl constraints).
+2. Compute turning angles between consecutive chord vectors.
+3. Set up tridiagonal linear system for unknown angles θ_k.
+4. Boundary conditions: curl ratio for endpoints, given direction for
+   constrained knots.
+5. Solve via forward sweep + back-substitution (open paths) or cyclic
+   tridiagonal solver with w-coefficient tracking (cyclic paths).
+6. Compute control points via the Hobby velocity function.
+7. "At least" tensions: clamp velocities to stay inside the bounding triangle
+   formed by adjacent chords.
+
+### Math Module
+
+MetaPost mathematical primitives: `sind`, `cosd` (degree-based), `angle`
+(returns degrees), `mexp`/`mlog` (base 2^(1/256)), `pyth_add` (++),
+`pyth_sub` (+-+), `floor`, `uniform_deviate`, `normal_deviate`.
+
+### Pen Module
+
+- **`makepen(path)`** — cyclic path → polygonal pen (convex hull via
+  Andrew's monotone chain algorithm).
+- **`makepath(pen)`** — pen → cyclic path (8-knot circle approximation
+  for elliptical; straight-line segments for polygonal).
+- **`penoffset(pen, dir)`** — support point in given direction (inverse
+  transpose method for elliptical; max dot product for polygonal).
+
+### Intersection Module
+
+**`intersection_times(path1, path2)`** — first intersection via recursive
+bisection of cubic Bezier segments. Checks bounding-box overlap at each
+level, splits both curves at midpoint (de Casteljau), recurses on the 4
+sub-pairs. Converges when segment extent < 10^-6 or depth > 40.
+
+**`all_intersection_times`** — finds all intersections with deduplication.
+
+### Picture Module
+
+Picture assembly matching MetaPost primitives:
+- **`addto_contour`**, **`addto_doublepath`**, **`addto_also`** — add fills,
+  strokes, merge pictures.
+- **`clip`**, **`setbounds`** — wrap objects in ClipStart/End or
+  SetBoundsStart/End brackets.
+- **`BoundingBox`** — axis-aligned bbox with empty sentinel (∞/−∞).
+  Control-point hull for paths (conservative, matching MetaPost).
+  Corner methods: `llcorner`, `lrcorner`, `ulcorner`, `urcorner`.
+
+## postmeta-svg
+
+Converts `Picture` to SVG using the `svg` crate.
+
+- Y-axis flip via root `<g transform="scale(1,-1)">`.
+- Fill → `<path>` with fill color.
+- Stroke → `<path>` with stroke-width, cap, join, dash attributes.
+  Stroke width extracted from pen transform (geometric mean of basis vectors).
+- Text → `<text>` with counter-flip matrix.
+- Clip → `<defs><clipPath>` + `<g clip-path="url(#...)">`.
+- SetBounds → transparent (only affects bbox computation).
+- Path data built as raw `d` strings (not via intermediate `BezPath`).
+
+## postmeta-core
 
 Hand-written recursive-descent parser and tree-walking interpreter.
 Implements only the ~210 engine primitives; macros like `draw`, `fill`,
-`--`, `---`, etc. are defined in `plain.mp`. Depends on
-`postmeta-graphics`.
+`--`, `---`, `fullcircle`, etc. are defined in `plain.mp`.
 
-```rust
-// token.rs
-struct Span { start: u32, end: u32 }   // byte offsets
-struct Token { kind: TokenKind, span: Span }
-enum TokenKind {
-    Symbolic(String),    // identifiers, operators, keywords (meaning from hash lookup)
-    Numeric(Scalar),     // non-negative f64
-    StringLit(String),   // "..." (no escapes)
-    Eof,
-}
-
-// scanner.rs
-struct ScanError { message: String, span: Span }
-struct Scanner<'src>
-  Scanner::new(source: &str)
-  scanner.next_token() -> Token
-  scanner.scan_all() -> Vec<Token>
-  scanner.errors() -> &[ScanError]
-```
-
-The scanner implements mp.web §64 character classes (21 classes). Same-class
-characters merge into single tokens (e.g. `<=`, `:=`, `..`, `+-+`). Isolated
-classes: `( ) , ;`. Period handling: `.5` → numeric, `..` → symbolic, lone
-`.` → ignored.
-
-The parser mirrors the original 4-level expression hierarchy:
-primary → secondary → tertiary → expression.
-
-Macro expansion happens at the token level (between scanner and parser).
-
-A `trait FileSystem` abstracts file access for WASM compatibility.
-
-### postmeta-cli
-
-Reads `lib/plain.mp`, then the user file. Outputs SVG files via
-`postmeta-svg`. Implements `OsFileSystem` for the `FileSystem` trait.
+- **Scanner**: mp.web §64 character classes (21 classes). Same-class
+  characters merge into tokens.
+- **Parser**: 4-level expression hierarchy
+  (primary → secondary → tertiary → expression).
+- **Macro expansion**: at the token level, between scanner and parser.
+- **Equation solver**: linear dependency lists for numeric equations.
+- **File system**: `trait FileSystem` for WASM compatibility.
 
 ## Key Decisions
 
-| Decision       | Choice                       | Rationale                          |
-|----------------|------------------------------|------------------------------------|
-| Arithmetic     | `f64`                        | Modern, kurbo-compatible, WASM-native |
-| Curves         | `kurbo` + custom Hobby's     | Leverages proven Bezier math       |
-| SVG            | `svg` crate                  | Zero-dep, WASM-compatible          |
-| Parser         | Hand-written recursive descent | Context-dependent grammar, macros |
-| Filesystem     | `trait FileSystem`           | WASM compatibility                 |
-| TFM commands   | Skipped                      | Not relevant for graphics          |
-| btex/etex      | Plain text initially         | MathML planned for later           |
+| Decision        | Choice                        | Rationale                              |
+|-----------------|-------------------------------|----------------------------------------|
+| Arithmetic      | `f64`                         | Modern, WASM-native                    |
+| Graphics deps   | Zero (own Point/Vec2)         | Full control, minimal binary size      |
+| Bezier math     | Hand-written de Casteljau     | Faithful to mp.web, zero deps          |
+| Spline curves   | Hobby's algorithm from mp.web | Exact MetaPost fidelity                |
+| SVG output      | `svg` crate                   | Structured SVG, WASM-compatible        |
+| Parser          | Recursive descent             | Context-dependent grammar, macros      |
+| Filesystem      | `trait FileSystem`            | WASM compatibility                     |
+| Transforms      | `Transformable` trait + `Mul` | Idiomatic Rust, clean API              |
+| Units           | Degrees at API boundary       | Matching MetaPost; radians internally  |
 
 ## Primitives vs Standard Library
 
@@ -274,9 +172,11 @@ Everything defined in `plain.mp` (draw, fill, --, fullcircle, etc.)
 runs as MetaPost macros through the interpreter. This keeps the engine
 minimal and faithful to the original design.
 
-## Quick References (from MetaPost User's Manual)
+## Reference
 
-- [ref-language.md](ref-language.md) — Data types, paths, equations, variables, macros, drawing model, scoping, control flow
-- [ref-operators.md](ref-operators.md) — All operators by category with types and precedence
-- [ref-internals.md](ref-internals.md) — Internal variables, constants, commands, drawing options
-- [ref-syntax.md](ref-syntax.md) — Complete BNF grammar, character classes, tokenization rules
+- `docs/mp.web` — original MetaPost WEB source (23K lines)
+- `lib/plain.mp` — standard library
+- [ref-language.md](ref-language.md) — Data types, paths, equations, variables
+- [ref-operators.md](ref-operators.md) — All operators by category
+- [ref-internals.md](ref-internals.md) — Internal variables, constants, commands
+- [ref-syntax.md](ref-syntax.md) — Complete BNF grammar, tokenization rules

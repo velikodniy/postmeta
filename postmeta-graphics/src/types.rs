@@ -4,9 +4,96 @@
 //! graphics model: paths, pens, pictures, transforms, and colors.
 
 use std::fmt;
+use std::ops;
 use std::sync::Arc;
 
-use kurbo::{Affine, Point};
+// ---------------------------------------------------------------------------
+// Point
+// ---------------------------------------------------------------------------
+
+/// A 2D point.
+///
+/// This is the fundamental position type used throughout `PostMeta`.
+/// Points represent locations; for displacements use [`Vec2`].
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Point {
+    /// The origin (0, 0).
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+
+    /// Create a new point.
+    #[inline]
+    #[must_use]
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+
+    /// Convert this point to a [`Vec2`] (displacement from the origin).
+    #[inline]
+    #[must_use]
+    pub const fn to_vec2(self) -> Vec2 {
+        Vec2 {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
+impl fmt::Debug for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "({:?}, {:?})", self.x, self.y)
+    }
+}
+
+/// `Point - Point = Vec2` (displacement between two points).
+impl ops::Sub for Point {
+    type Output = Vec2;
+
+    #[inline]
+    fn sub(self, rhs: Self) -> Vec2 {
+        Vec2 {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Vec2
+// ---------------------------------------------------------------------------
+
+/// A 2D vector (displacement).
+///
+/// Unlike [`Point`], a `Vec2` represents a direction and magnitude,
+/// not a location. `Point - Point` yields a `Vec2`.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct Vec2 {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Vec2 {
+    /// The zero vector.
+    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
+
+    /// Create a new vector.
+    #[inline]
+    #[must_use]
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+
+    /// Euclidean length (magnitude).
+    #[inline]
+    #[must_use]
+    pub fn length(self) -> f64 {
+        self.x.hypot(self.y)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Error
@@ -48,7 +135,7 @@ impl std::error::Error for GraphicsError {}
 // ---------------------------------------------------------------------------
 
 /// Convenience alias. `MetaPost` historically used 16.16 fixed-point;
-/// we use f64 for modern compatibility with `kurbo` and WASM.
+/// we use f64 for modern compatibility and WASM support.
 pub type Scalar = f64;
 
 /// Tolerance for floating-point comparisons.
@@ -335,7 +422,7 @@ impl Default for Path {
 pub enum Pen {
     /// An elliptical pen defined by an affine transform of the unit circle.
     /// The transform maps the unit circle to the pen shape.
-    Elliptical(Affine),
+    Elliptical(Transform),
     /// A convex polygonal pen defined by its vertices in counter-clockwise
     /// order.
     Polygonal(Vec<Point>),
@@ -344,14 +431,14 @@ pub enum Pen {
 impl Pen {
     /// Create a circular pen with the given diameter centered at origin.
     #[must_use]
-    pub fn circle(diameter: Scalar) -> Self {
+    pub const fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
-        Self::Elliptical(Affine::scale(r))
+        Self::Elliptical(Transform::scale(r))
     }
 
     /// The default pen: a circle of diameter 0.5bp.
     #[must_use]
-    pub fn default_pen() -> Self {
+    pub const fn default_pen() -> Self {
         Self::circle(0.5)
     }
 }
@@ -370,8 +457,6 @@ impl Default for Pen {
 ///
 /// Maps point (x, y) to:
 ///   (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
-///
-/// This directly wraps `kurbo::Affine` but with `MetaPost` naming.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
     pub tx: Scalar,
@@ -392,28 +477,44 @@ impl Transform {
         tyy: 1.0,
     };
 
-    /// Convert to a kurbo `Affine`.
-    ///
-    /// kurbo Affine coefficients: [a, b, c, d, e, f]
-    /// mapping: x' = a*x + c*y + e,  y' = b*x + d*y + f
+    /// The zero transform (all components zero). Used for the null pen.
+    pub const ZERO: Self = Self {
+        tx: 0.0,
+        ty: 0.0,
+        txx: 0.0,
+        txy: 0.0,
+        tyx: 0.0,
+        tyy: 0.0,
+    };
+
+    /// A uniform scale transform.
     #[inline]
     #[must_use]
-    pub const fn to_affine(self) -> Affine {
-        Affine::new([self.txx, self.tyx, self.txy, self.tyy, self.tx, self.ty])
+    pub const fn scale(s: Scalar) -> Self {
+        Self {
+            txx: s,
+            tyy: s,
+            ..Self::IDENTITY
+        }
     }
 
-    /// Create from a kurbo `Affine`.
+    /// Compose two transforms: `self` applied first, then `other`.
+    ///
+    /// Equivalent to matrix multiplication `other * self`.
     #[inline]
     #[must_use]
-    pub const fn from_affine(a: Affine) -> Self {
-        let c = a.as_coeffs();
+    pub fn then(&self, other: &Self) -> Self {
         Self {
-            txx: c[0],
-            tyx: c[1],
-            txy: c[2],
-            tyy: c[3],
-            tx: c[4],
-            ty: c[5],
+            txx: other.txx.mul_add(self.txx, other.txy * self.tyx),
+            txy: other.txx.mul_add(self.txy, other.txy * self.tyy),
+            tyx: other.tyx.mul_add(self.txx, other.tyy * self.tyx),
+            tyy: other.tyx.mul_add(self.txy, other.tyy * self.tyy),
+            tx: other
+                .txx
+                .mul_add(self.tx, other.txy.mul_add(self.ty, other.tx)),
+            ty: other
+                .tyx
+                .mul_add(self.tx, other.tyy.mul_add(self.ty, other.ty)),
         }
     }
 
@@ -425,6 +526,24 @@ impl Transform {
             self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
             self.tyy.mul_add(p.y, self.tyx.mul_add(p.x, self.ty)),
         )
+    }
+
+    /// Extract the six coefficients in row-major order:
+    /// `[txx, txy, tyx, tyy, tx, ty]`.
+    #[inline]
+    #[must_use]
+    pub const fn as_coeffs(&self) -> [Scalar; 6] {
+        [self.txx, self.txy, self.tyx, self.tyy, self.tx, self.ty]
+    }
+}
+
+/// `Transform * Transform` composes transforms (apply left, then right).
+impl ops::Mul for Transform {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Self) -> Self {
+        self.then(&rhs)
     }
 }
 
@@ -587,11 +706,20 @@ mod tests {
     }
 
     #[test]
-    fn transform_identity_roundtrip() {
-        let t = Transform::IDENTITY;
-        let a = t.to_affine();
-        let t2 = Transform::from_affine(a);
-        assert_eq!(t, t2);
+    fn transform_compose_identity() {
+        let t = Transform {
+            tx: 1.0,
+            ty: 2.0,
+            txx: 3.0,
+            txy: 4.0,
+            tyx: 5.0,
+            tyy: 6.0,
+        };
+        // Composing with identity should be a no-op
+        let r = t.then(&Transform::IDENTITY);
+        assert_eq!(t, r);
+        let r = Transform::IDENTITY.then(&t);
+        assert_eq!(t, r);
     }
 
     #[test]
@@ -613,10 +741,11 @@ mod tests {
     fn pen_circle() {
         let p = Pen::circle(2.0);
         match p {
-            Pen::Elliptical(a) => {
-                let c = a.as_coeffs();
-                assert!((c[0] - 1.0).abs() < EPSILON); // scale x
-                assert!((c[3] - 1.0).abs() < EPSILON); // scale y
+            Pen::Elliptical(t) => {
+                assert!((t.txx - 1.0).abs() < EPSILON); // scale x
+                assert!((t.tyy - 1.0).abs() < EPSILON); // scale y
+                assert!(t.txy.abs() < EPSILON);
+                assert!(t.tyx.abs() < EPSILON);
             }
             Pen::Polygonal(_) => panic!("expected elliptical"),
         }

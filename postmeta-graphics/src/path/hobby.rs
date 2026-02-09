@@ -22,9 +22,7 @@
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
-use kurbo::{Point, Vec2};
-
-use crate::types::{KnotDirection, Path, Scalar, EPSILON};
+use crate::types::{KnotDirection, Path, Point, Scalar, Vec2, EPSILON};
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;

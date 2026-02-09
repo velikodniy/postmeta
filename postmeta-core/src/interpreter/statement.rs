@@ -10,7 +10,7 @@ use std::sync::Arc;
 use postmeta_graphics::picture;
 use postmeta_graphics::transform;
 use postmeta_graphics::types::{
-    Color, DashPattern, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture,
+    Color, DashPattern, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture, Transform,
 };
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
@@ -386,7 +386,7 @@ impl Interpreter {
                     target,
                     path,
                     ds.color,
-                    if matches!(ds.pen, Pen::Elliptical(a) if a == kurbo::Affine::default()) {
+                    if matches!(ds.pen, Pen::Elliptical(t) if t == Transform::IDENTITY) {
                         None
                     } else {
                         Some(ds.pen)

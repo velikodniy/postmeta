@@ -10,11 +10,9 @@
 //! - `zscaled (a, b)` — complex multiplication (rotate + scale)
 //! - `transformed T` — apply an arbitrary 6-component transform
 
-use kurbo::{Point, Vec2};
-
 use crate::types::{
-    Color, FillObject, GraphicsObject, Knot, KnotDirection, Path, Pen, Picture, Scalar,
-    StrokeObject, TextObject, Transform,
+    Color, FillObject, GraphicsObject, Knot, KnotDirection, Path, Pen, Picture, Point, Scalar,
+    StrokeObject, TextObject, Transform, Vec2,
 };
 
 // ---------------------------------------------------------------------------
@@ -109,9 +107,7 @@ pub fn zscaled(a: Scalar, b: Scalar) -> Transform {
 /// Compose two transforms: apply `first`, then `second`.
 #[must_use]
 pub fn compose(first: &Transform, second: &Transform) -> Transform {
-    let a = first.to_affine();
-    let b = second.to_affine();
-    Transform::from_affine(b * a)
+    first.then(second)
 }
 
 /// Compute the inverse of a transform, if it exists.
@@ -199,9 +195,9 @@ pub fn transform_path(t: &Transform, path: &Path) -> Path {
 #[must_use]
 pub fn transform_pen(t: &Transform, pen: &Pen) -> Pen {
     match pen {
-        Pen::Elliptical(affine) => {
-            // Compose: the pen transform is applied after the affine
-            Pen::Elliptical(t.to_affine() * *affine)
+        Pen::Elliptical(pen_t) => {
+            // Compose: pen transform applied first, then the outer transform.
+            Pen::Elliptical(pen_t.then(t))
         }
         Pen::Polygonal(vertices) => {
             let new_verts: Vec<Point> = vertices.iter().map(|&v| transform_point(t, v)).collect();
@@ -460,11 +456,10 @@ mod tests {
         let t = scaled(3.0);
         let tp = transform_pen(&t, &pen);
         match tp {
-            Pen::Elliptical(a) => {
+            Pen::Elliptical(t2) => {
                 // Circle of diameter 2 scaled by 3 = circle of diameter 6 (radius 3)
-                let c = a.as_coeffs();
-                assert!((c[0] - 3.0).abs() < EPSILON);
-                assert!((c[3] - 3.0).abs() < EPSILON);
+                assert!((t2.txx - 3.0).abs() < EPSILON);
+                assert!((t2.tyy - 3.0).abs() < EPSILON);
             }
             Pen::Polygonal(_) => panic!("expected elliptical"),
         }

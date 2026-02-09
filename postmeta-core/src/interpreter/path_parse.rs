@@ -3,12 +3,10 @@
 //! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}`
 //! brace directions, and `cycle`.
 
-use kurbo::Point;
-
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::path::hobby;
-use postmeta_graphics::types::{Knot, KnotDirection, Path, Scalar};
+use postmeta_graphics::types::{Knot, KnotDirection, Path, Point, Scalar};
 
 use crate::command::Command;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};

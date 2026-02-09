@@ -328,11 +328,10 @@ fn color_to_svg(c: Color) -> String {
 /// Returns `(width, is_elliptical)`.
 fn pen_stroke_attrs(pen: &Pen) -> (Scalar, bool) {
     match pen {
-        Pen::Elliptical(affine) => {
-            let c = affine.as_coeffs();
-            // The two column vectors of the 2x2 part
-            let len1 = c[0].hypot(c[1]);
-            let len2 = c[2].hypot(c[3]);
+        Pen::Elliptical(t) => {
+            // The two column vectors of the 2×2 matrix part
+            let len1 = t.txx.hypot(t.tyx);
+            let len2 = t.txy.hypot(t.tyy);
             // Diameter = 2 * geometric mean of semi-axes
             let width = 2.0 * (len1 * len2).sqrt();
             (width, true)
@@ -474,9 +473,8 @@ fn build_document(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kurbo::Point;
     use postmeta_graphics::picture::{addto_contour, addto_doublepath};
-    use postmeta_graphics::types::{Knot, KnotDirection};
+    use postmeta_graphics::types::{Knot, KnotDirection, Point, Transform};
 
     /// Make a resolved line from (0,0) to (10,0).
     fn make_line() -> Path {
@@ -576,7 +574,7 @@ mod tests {
 
     #[test]
     fn test_pen_stroke_attrs_nullpen() {
-        let pen = Pen::Elliptical(kurbo::Affine::new([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
+        let pen = Pen::Elliptical(Transform::ZERO);
         let (width, _) = pen_stroke_attrs(&pen);
         assert!(width.abs() < 0.001);
     }

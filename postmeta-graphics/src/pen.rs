@@ -2,7 +2,7 @@
 //!
 //! `MetaPost` pens come in two forms:
 //! - **Elliptical**: a transformed unit circle (`pencircle scaled 2` etc.).
-//!   Stored as a `kurbo::Affine` mapping the unit circle to the pen shape.
+//!   Stored as an affine matrix mapping the unit circle to the pen shape.
 //! - **Polygonal**: a convex polygon of vertices (`makepen`).
 //!
 //! Key operations:
@@ -10,9 +10,9 @@
 //! - `makepath` — convert a pen back to a path
 //! - `penoffset` — find the pen offset in a given direction
 
-use kurbo::{Point, Vec2};
-
-use crate::types::{index_to_scalar, GraphicsError, Knot, Path, Pen, Scalar};
+use crate::types::{
+    index_to_scalar, GraphicsError, Knot, Path, Pen, Point, Scalar, Transform, Vec2,
+};
 
 // ---------------------------------------------------------------------------
 // pencircle / nullpen
@@ -20,14 +20,14 @@ use crate::types::{index_to_scalar, GraphicsError, Knot, Path, Pen, Scalar};
 
 /// Create a circular pen of the given diameter.
 #[must_use]
-pub fn pencircle(diameter: Scalar) -> Pen {
+pub const fn pencircle(diameter: Scalar) -> Pen {
     Pen::circle(diameter)
 }
 
 /// The null pen: a single point at the origin.
 #[must_use]
 pub const fn nullpen() -> Pen {
-    Pen::Elliptical(kurbo::Affine::new([0.0, 0.0, 0.0, 0.0, 0.0, 0.0]))
+    Pen::Elliptical(Transform::ZERO)
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +74,7 @@ pub fn makepen(path: &Path) -> Result<Pen, GraphicsError> {
 #[must_use]
 pub fn makepath(pen: &Pen) -> Path {
     match pen {
-        Pen::Elliptical(affine) => make_ellipse_path(affine),
+        Pen::Elliptical(t) => make_ellipse_path(t),
         Pen::Polygonal(vertices) => {
             let knots = vertices
                 .iter()
@@ -100,7 +100,7 @@ pub fn makepath(pen: &Pen) -> Path {
 /// The 8 points are at 0, 45, 90, ..., 315 degrees on the unit circle,
 /// transformed by the affine. Control points use the cubic Bezier
 /// approximation constant for 45° arcs: `kappa = (4/3) * tan(π/16)`.
-fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
+fn make_ellipse_path(t: &Transform) -> Path {
     // Cubic approximation constant for a 45° arc (8 segments per circle).
     // kappa = (4/3) * tan(π/16) ≈ 0.26520784
     const KAPPA: Scalar = 0.265_207_840_674;
@@ -118,18 +118,15 @@ fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
         // Tangent direction (perpendicular to radius)
         let tangent = Vec2::new(-sin_a, cos_a);
 
-        let on_curve = affine_transform_point(affine, p);
-        let right_cp = affine_transform_point(
-            affine,
-            Point::new(KAPPA.mul_add(tangent.x, p.x), KAPPA.mul_add(tangent.y, p.y)),
-        );
-        let left_cp = affine_transform_point(
-            affine,
-            Point::new(
-                KAPPA.mul_add(-tangent.x, p.x),
-                KAPPA.mul_add(-tangent.y, p.y),
-            ),
-        );
+        let on_curve = t.apply_to_point(p);
+        let right_cp = t.apply_to_point(Point::new(
+            KAPPA.mul_add(tangent.x, p.x),
+            KAPPA.mul_add(tangent.y, p.y),
+        ));
+        let left_cp = t.apply_to_point(Point::new(
+            KAPPA.mul_add(-tangent.x, p.x),
+            KAPPA.mul_add(-tangent.y, p.y),
+        ));
 
         knots.push(Knot::with_controls(on_curve, left_cp, right_cp));
     }
@@ -148,27 +145,29 @@ fn make_ellipse_path(affine: &kurbo::Affine) -> Path {
 #[must_use]
 pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
     match pen {
-        Pen::Elliptical(affine) => {
+        Pen::Elliptical(t) => {
             // For an elliptical pen: find the point on the transformed circle
             // that has the outward normal in direction `dir`.
             //
             // If T maps the unit circle to the pen, then the offset in direction
             // d is T * normalize(T^{-T} * d).
-            let coeffs = affine.as_coeffs();
-            let det = coeffs[0].mul_add(coeffs[3], -(coeffs[2] * coeffs[1]));
+            //
+            // Transform coefficients: txx, txy, tyx, tyy (2x2 part)
+            // Affine convention: x' = txx*x + txy*y, y' = tyx*x + tyy*y
+            let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
             if det.abs() < 1e-30 {
                 return Point::ZERO;
             }
-            // Inverse transpose
-            let inv_t_x = coeffs[3].mul_add(dir.x, -(coeffs[1] * dir.y)) / det;
-            let inv_t_y = (-coeffs[2]).mul_add(dir.x, coeffs[0] * dir.y) / det;
+            // Inverse transpose: columns of (T^{-1})^T = rows of T^{-1}
+            let inv_t_x = t.tyy.mul_add(dir.x, -(t.tyx * dir.y)) / det;
+            let inv_t_y = (-t.txy).mul_add(dir.x, t.txx * dir.y) / det;
             let len = inv_t_x.hypot(inv_t_y);
             if len < 1e-30 {
                 return Point::ZERO;
             }
             let unit_x = inv_t_x / len;
             let unit_y = inv_t_y / len;
-            affine_transform_point(affine, Point::new(unit_x, unit_y))
+            t.apply_to_point(Point::new(unit_x, unit_y))
         }
         Pen::Polygonal(vertices) => {
             // Find the vertex with the maximum dot product with dir
@@ -238,14 +237,6 @@ fn cross(o: Point, a: Point, b: Point) -> Scalar {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn affine_transform_point(a: &kurbo::Affine, p: Point) -> Point {
-    let c = a.as_coeffs();
-    Point::new(
-        c[0].mul_add(p.x, c[2].mul_add(p.y, c[4])),
-        c[1].mul_add(p.x, c[3].mul_add(p.y, c[5])),
-    )
-}
-
 fn lerp(a: Point, b: Point, t: Scalar) -> Point {
     Point::new(t.mul_add(b.x - a.x, a.x), t.mul_add(b.y - a.y, a.y))
 }
@@ -267,10 +258,9 @@ mod tests {
     fn test_pencircle_default() {
         let pen = pencircle(1.0);
         match pen {
-            Pen::Elliptical(a) => {
-                let c = a.as_coeffs();
-                assert!((c[0] - 0.5).abs() < EPSILON);
-                assert!((c[3] - 0.5).abs() < EPSILON);
+            Pen::Elliptical(t) => {
+                assert!((t.txx - 0.5).abs() < EPSILON);
+                assert!((t.tyy - 0.5).abs() < EPSILON);
             }
             Pen::Polygonal(_) => panic!("expected elliptical"),
         }
@@ -280,10 +270,9 @@ mod tests {
     fn test_nullpen() {
         let pen = nullpen();
         match pen {
-            Pen::Elliptical(a) => {
-                let c = a.as_coeffs();
-                assert!(c[0].abs() < EPSILON);
-                assert!(c[3].abs() < EPSILON);
+            Pen::Elliptical(t) => {
+                assert!(t.txx.abs() < EPSILON);
+                assert!(t.tyy.abs() < EPSILON);
             }
             Pen::Polygonal(_) => panic!("expected elliptical"),
         }

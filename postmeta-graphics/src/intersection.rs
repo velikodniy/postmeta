@@ -6,9 +6,7 @@
 //! The algorithm recursively bisects both curves and checks bounding-box
 //! overlap, stopping when the sub-curves are small enough.
 
-use kurbo::Point;
-
-use crate::types::{index_to_scalar, KnotDirection, Path, Scalar};
+use crate::types::{index_to_scalar, KnotDirection, Path, Point, Scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
