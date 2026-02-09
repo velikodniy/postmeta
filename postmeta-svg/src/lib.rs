@@ -196,7 +196,7 @@ fn render_fill(fill: &FillObject, opts: &RenderOptions) -> svg::node::element::P
 /// Render a stroked path to an SVG `<path>` element.
 fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::element::Path {
     let d = path_to_d(&stroke.path, opts.precision);
-    let (width, dash_scale) = pen_stroke_attrs(&stroke.pen);
+    let (width, _) = pen_stroke_attrs(&stroke.pen);
 
     let mut el = svg::node::element::Path::new()
         .set("d", d)
@@ -211,20 +211,9 @@ fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::elem
         );
 
     if let Some(ref dash) = stroke.dash {
-        // Scale dash values by the pen's dash scale factor.
-        // MetaPost dash-pattern pictures store values in abstract units;
-        // the actual SVG dasharray values need to be scaled by
-        // pen_width / pen_scale (see mp.web §21660-21664).
-        let scaled = DashPattern {
-            dashes: dash.dashes.iter().map(|v| v * dash_scale).collect(),
-            offset: dash.offset * dash_scale,
-        };
         el = el
-            .set("stroke-dasharray", dash_to_svg(&scaled, opts.precision))
-            .set(
-                "stroke-dashoffset",
-                fmt_scalar(scaled.offset, opts.precision),
-            );
+            .set("stroke-dasharray", dash_to_svg(dash, opts.precision))
+            .set("stroke-dashoffset", fmt_scalar(dash.offset, opts.precision));
     }
 
     el
@@ -330,42 +319,30 @@ fn color_to_svg(c: Color) -> String {
     }
 }
 
-/// Extract stroke width and dash scale factor from a pen.
+/// Extract stroke width from a pen.
 ///
-/// For elliptical pens, the stroke width is `2 * geometric_mean(axis_lengths)`,
-/// which equals the diameter for a circular pen.
+/// For elliptical pens, returns the geometric mean of the two axis lengths
+/// (which equals the diameter for a circular pen). For polygonal pens,
+/// returns the maximum vertex distance from the origin (approximation).
 ///
-/// The `dash_scale` is the factor by which dash pattern values (from the
-/// dash-pattern picture) must be multiplied to get SVG `stroke-dasharray`
-/// values. In MetaPost, this is `pen_width / pen_scale` where `pen_scale`
-/// is `sqrt(det)` of the pen's 2x2 matrix.
-///
-/// Returns `(width, dash_scale)`.
-fn pen_stroke_attrs(pen: &Pen) -> (Scalar, Scalar) {
+/// Returns `(width, is_elliptical)`.
+fn pen_stroke_attrs(pen: &Pen) -> (Scalar, bool) {
     match pen {
         Pen::Elliptical(affine) => {
             let c = affine.as_coeffs();
             // The two column vectors of the 2x2 part
             let len1 = c[0].hypot(c[1]);
             let len2 = c[2].hypot(c[3]);
-            // pen_scale = sqrt(det) of the 2x2 part = sqrt(len1 * len2)
-            let pen_scale = (len1 * len2).sqrt();
-            // Diameter = 2 * pen_scale
-            let width = 2.0 * pen_scale;
-            // MetaPost dash scale = pen_width / pen_scale
-            let dash_scale = if pen_scale > 1e-12 {
-                width / pen_scale
-            } else {
-                1.0
-            };
-            (width, dash_scale)
+            // Diameter = 2 * geometric mean of semi-axes
+            let width = 2.0 * (len1 * len2).sqrt();
+            (width, true)
         }
         Pen::Polygonal(vertices) => {
             let max_r = vertices
                 .iter()
                 .map(|v| v.to_vec2().length())
                 .fold(0.0, Scalar::max);
-            (2.0 * max_r, 1.0)
+            (2.0 * max_r, false)
         }
     }
 }
@@ -591,11 +568,10 @@ mod tests {
     #[test]
     fn test_pen_stroke_attrs_circle() {
         let pen = Pen::circle(2.0); // diameter 2 → radius 1
-        let (width, dash_scale) = pen_stroke_attrs(&pen);
+        let (width, is_ell) = pen_stroke_attrs(&pen);
+        assert!(is_ell);
         // scale(1) → len1=1, len2=1 → width = 2*sqrt(1*1) = 2
         assert!((width - 2.0).abs() < 0.01, "width = {width}");
-        // dash_scale = width / pen_scale = 2.0 / 1.0 = 2.0
-        assert!((dash_scale - 2.0).abs() < 0.01, "dash_scale = {dash_scale}");
     }
 
     #[test]
