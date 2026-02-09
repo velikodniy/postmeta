@@ -924,15 +924,16 @@ impl Interpreter {
                     return body;
                 }
                 _ => {
-                    // Check if this token matches a parameter name
+                    // Check if this token matches a parameter name.
+                    // Parameter substitution applies at ALL nesting depths
+                    // (inside nested def..enddef too), matching mp.web behaviour.
+                    // The depth counter only tracks def/enddef pairs to find the
+                    // outer body boundary.
                     if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
-                        if depth == 0 {
-                            // Only substitute at top level (not inside nested defs)
-                            if let Some(idx) = param_names.iter().position(|p| p == name) {
-                                body.push(StoredToken::Param(idx));
-                                self.get_next();
-                                continue;
-                            }
+                        if let Some(idx) = param_names.iter().position(|p| p == name) {
+                            body.push(StoredToken::Param(idx));
+                            self.get_next();
+                            continue;
                         }
                     }
                     self.store_current_token(&mut body);
@@ -1134,12 +1135,13 @@ impl Interpreter {
                     }
                 }
             }
-
-            // Note: do NOT advance past a trailing `)` here.  The token
-            // after the macro call (e.g. `;`) must survive until the body
-            // expansion completes.  The input stack will resume reading
-            // from the source level (past `)`) once the expansion is done.
         }
+
+        // TODO: When the macro's last parameter is undelimited, `self.cur`
+        // holds the first token AFTER the arguments.  This token is lost
+        // when the body is pushed (mp.web §389 does `back_input` here).
+        // Fixing this requires redesigning `back_input` to use the input
+        // stack rather than a priority slot, so it is deferred.
 
         // Build the expansion token list
         let mut expansion = macro_info.body.clone();
@@ -1152,7 +1154,7 @@ impl Interpreter {
             expansion.push(StoredToken::Symbol(eg));
         }
 
-        // Push the expansion with parameter bindings
+        // Push the expansion with parameter bindings (on top of trailing token)
         self.input
             .push_token_list(expansion, args, "macro expansion".into());
 
