@@ -15,12 +15,13 @@ use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
-use super::helpers::{value_to_bool, value_to_scalar};
+use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Parse and evaluate a primary expression.
     pub(super) fn scan_primary(&mut self) -> InterpResult<()> {
+        self.cur_pair_dep = None;
         match self.cur.command {
             Command::NumericToken => {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
@@ -36,7 +37,9 @@ impl Interpreter {
                     if let crate::token::TokenKind::Numeric(denom) = self.cur.token.kind {
                         if let Value::Numeric(numer) = self.cur_exp {
                             if denom.abs() > f64::EPSILON {
-                                self.cur_exp = Value::Numeric(numer / denom);
+                                let frac = numer / denom;
+                                self.cur_exp = Value::Numeric(frac);
+                                self.cur_dep = Some(const_dep(frac));
                             } else {
                                 self.report_error(ErrorKind::ArithmeticError, "Division by zero");
                             }
@@ -117,10 +120,12 @@ impl Interpreter {
 
                 if self.cur.command == Command::Comma {
                     // Pair or color
+                    let first_dep = self.take_cur_dep();
                     let first = self.take_cur_exp();
                     let first_binding = self.last_lhs_binding.clone();
                     self.get_x_next();
                     self.scan_expression()?;
+                    let second_dep = self.take_cur_dep();
                     let second = self.take_cur_exp();
                     let second_binding = self.last_lhs_binding.clone();
 
@@ -128,6 +133,7 @@ impl Interpreter {
                         // Color: (r, g, b)
                         self.get_x_next();
                         self.scan_expression()?;
+                        let third_dep = self.take_cur_dep();
                         let third = self.take_cur_exp();
                         let third_binding = self.last_lhs_binding.clone();
 
@@ -136,6 +142,7 @@ impl Interpreter {
                         let b = value_to_scalar(&third)?;
                         self.cur_exp = Value::Color(postmeta_graphics::types::Color::new(r, g, b));
                         self.cur_type = Type::ColorType;
+                        let _ = (first_dep, second_dep, third_dep);
                         self.last_lhs_binding = if first_binding.is_some()
                             || second_binding.is_some()
                             || third_binding.is_some()
@@ -154,6 +161,10 @@ impl Interpreter {
                         let y = value_to_scalar(&second)?;
                         self.cur_exp = Value::Pair(x, y);
                         self.cur_type = Type::PairType;
+                        self.cur_pair_dep = Some((
+                            first_dep.unwrap_or_else(|| const_dep(x)),
+                            second_dep.unwrap_or_else(|| const_dep(y)),
+                        ));
                         self.last_lhs_binding =
                             if first_binding.is_some() || second_binding.is_some() {
                                 Some(LhsBinding::Pair {
@@ -447,8 +458,10 @@ impl Interpreter {
         // Check for mediation: a[b,c] = (1-a)*b + a*c
         if self.cur.command == Command::LeftBracket {
             if let Value::Numeric(a) = self.cur_exp {
+                let a_dep = self.cur_dep.clone().unwrap_or_else(|| const_dep(a));
                 self.get_x_next();
                 self.scan_expression()?;
+                let b_pair_dep = self.take_cur_pair_dep();
                 let b = self.take_cur_exp();
                 if self.cur.command == Command::Comma {
                     self.get_x_next();
@@ -459,6 +472,7 @@ impl Interpreter {
                     ));
                 }
                 self.scan_expression()?;
+                let c_pair_dep = self.take_cur_pair_dep();
                 let c = self.take_cur_exp();
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
@@ -470,13 +484,18 @@ impl Interpreter {
                     (Value::Numeric(bn), Value::Numeric(cn)) => {
                         self.cur_exp = Value::Numeric(a.mul_add(cn - bn, bn));
                         self.cur_type = Type::Known;
-                        self.cur_dep = Some(const_dep(a.mul_add(cn - bn, bn)));
+                        self.cur_dep = Some(dep_add_scaled(&const_dep(bn), &a_dep, cn - bn));
+                        self.cur_pair_dep = None;
                     }
                     (Value::Pair(bx, by), Value::Pair(cx, cy)) => {
                         self.cur_exp =
                             Value::Pair(one_minus_a * bx + a * cx, one_minus_a * by + a * cy);
                         self.cur_type = Type::PairType;
                         self.cur_dep = None;
+                        let _ = (b_pair_dep, c_pair_dep);
+                        let dep_x = dep_add_scaled(&const_dep(bx), &a_dep, cx - bx);
+                        let dep_y = dep_add_scaled(&const_dep(by), &a_dep, cy - by);
+                        self.cur_pair_dep = Some((dep_x, dep_y));
                     }
                     (Value::Color(bc), Value::Color(cc)) => {
                         self.cur_exp = Value::Color(postmeta_graphics::types::Color::new(
@@ -486,6 +505,7 @@ impl Interpreter {
                         ));
                         self.cur_type = Type::ColorType;
                         self.cur_dep = None;
+                        self.cur_pair_dep = None;
                     }
                     (Value::Transform(bt), Value::Transform(ct)) => {
                         self.cur_exp = Value::Transform(postmeta_graphics::types::Transform {
@@ -498,6 +518,7 @@ impl Interpreter {
                         });
                         self.cur_type = Type::TransformType;
                         self.cur_dep = None;
+                        self.cur_pair_dep = None;
                     }
                     (bv, cv) => {
                         return Err(InterpreterError::new(
@@ -534,10 +555,14 @@ impl Interpreter {
 
             let op = self.cur.modifier;
             let left_dep = self.take_cur_dep();
+            let left_pair_dep = self.take_cur_pair_dep();
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_primary()?;
+            let right_val = self.cur_exp.clone();
             let right_dep = self.cur_dep.clone();
+            let right_pair_dep = self.cur_pair_dep.clone();
+            let right_binding = self.last_lhs_binding.clone();
 
             match cmd {
                 Command::SecondaryBinary => {
@@ -546,50 +571,269 @@ impl Interpreter {
                     if op == crate::command::SecondaryBinaryOp::Times as u16 {
                         let left_const = left_dep.as_ref().and_then(constant_value);
                         let right_const = right_dep.as_ref().and_then(constant_value);
-                        self.cur_dep = left_const.map_or_else(
-                            || {
-                                right_const.and_then(|factor| {
-                                    left_dep.map(|mut d| {
-                                        dep_scale(&mut d, factor);
-                                        d
-                                    })
-                                })
-                            },
-                            |factor| {
-                                right_dep.map(|mut d| {
-                                    dep_scale(&mut d, factor);
-                                    d
-                                })
-                            },
-                        );
+
+                        match self.cur_exp {
+                            Value::Numeric(_) => {
+                                self.cur_dep = left_const.map_or_else(
+                                    || {
+                                        right_const.and_then(|factor| {
+                                            left_dep.map(|mut d| {
+                                                dep_scale(&mut d, factor);
+                                                d
+                                            })
+                                        })
+                                    },
+                                    |factor| {
+                                        right_dep.clone().map(|mut d| {
+                                            dep_scale(&mut d, factor);
+                                            d
+                                        })
+                                    },
+                                );
+                                self.cur_pair_dep = None;
+                            }
+                            Value::Pair(_, _) => {
+                                self.cur_dep = None;
+
+                                let pair_deps = match (&left, &right_val) {
+                                    (Value::Numeric(_), Value::Pair(rx, ry)) => {
+                                        let left_linear = left_dep
+                                            .as_ref()
+                                            .is_some_and(|d| constant_value(d).is_none());
+                                        let right_linear = right_pair_dep.as_ref().is_some_and(
+                                            |(dx, dy)| {
+                                                constant_value(dx).is_none()
+                                                    || constant_value(dy).is_none()
+                                            },
+                                        );
+
+                                        if left_linear && right_linear {
+                                            None
+                                        } else if left_linear {
+                                            let mut dx = left_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            let mut dy = left_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            dep_scale(&mut dx, *rx);
+                                            dep_scale(&mut dy, *ry);
+                                            Some((dx, dy))
+                                        } else {
+                                            let scalar = left_const
+                                                .unwrap_or_else(|| value_to_scalar(&left).unwrap_or(0.0));
+                                            let (mut dx, mut dy) = right_pair_dep
+                                                .clone()
+                                                .unwrap_or_else(|| (const_dep(*rx), const_dep(*ry)));
+                                            dep_scale(&mut dx, scalar);
+                                            dep_scale(&mut dy, scalar);
+                                            Some((dx, dy))
+                                        }
+                                    }
+                                    (Value::Pair(lx, ly), Value::Numeric(_)) => {
+                                        let left_linear = left_pair_dep.as_ref().is_some_and(
+                                            |(dx, dy)| {
+                                                constant_value(dx).is_none()
+                                                    || constant_value(dy).is_none()
+                                            },
+                                        );
+                                        let right_linear = right_dep
+                                            .as_ref()
+                                            .is_some_and(|d| constant_value(d).is_none());
+
+                                        if left_linear && right_linear {
+                                            None
+                                        } else if right_linear {
+                                            let mut dx =
+                                                right_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            let mut dy =
+                                                right_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            dep_scale(&mut dx, *lx);
+                                            dep_scale(&mut dy, *ly);
+                                            Some((dx, dy))
+                                        } else {
+                                            let scalar = right_const
+                                                .unwrap_or_else(|| value_to_scalar(&right_val).unwrap_or(0.0));
+                                            let (mut dx, mut dy) = left_pair_dep
+                                                .clone()
+                                                .unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
+                                            dep_scale(&mut dx, scalar);
+                                            dep_scale(&mut dy, scalar);
+                                            Some((dx, dy))
+                                        }
+                                    }
+                                    _ => None,
+                                };
+
+                                self.cur_pair_dep = pair_deps;
+                            }
+                            _ => {
+                                self.cur_dep = None;
+                                self.cur_pair_dep = None;
+                            }
+                        }
                     } else {
                         self.cur_dep = None;
+                        if matches!(self.cur_exp, Value::Pair(_, _)) {
+                            let base_dep = left_pair_dep.or_else(|| {
+                                if let Value::Pair(lx, ly) = left {
+                                    Some((const_dep(lx), const_dep(ly)))
+                                } else {
+                                    None
+                                }
+                            });
+
+                            self.cur_pair_dep = base_dep.map(|(ldx, ldy)| {
+                                if op == crate::command::SecondaryBinaryOp::Transformed as u16
+                                    && let Some(LhsBinding::Variable { id, .. }) = right_binding.clone()
+                                    && let VarValue::Transform {
+                                        tx,
+                                        ty,
+                                        txx,
+                                        txy,
+                                        tyx,
+                                        tyy,
+                                    } = self.variables.get(id).clone()
+                                {
+                                    let (lx, ly) = if let Value::Pair(lx, ly) = left {
+                                        (lx, ly)
+                                    } else {
+                                        (0.0, 0.0)
+                                    };
+
+                                    let mut dep_x = self.numeric_dep_for_var(tx);
+                                    dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txx), lx);
+                                    dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txy), ly);
+
+                                    let mut dep_y = self.numeric_dep_for_var(ty);
+                                    dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyx), lx);
+                                    dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyy), ly);
+
+                                    return (dep_x, dep_y);
+                                }
+
+                                let t = match op {
+                                    x if x == crate::command::SecondaryBinaryOp::Scaled as u16 => {
+                                        let f = value_to_scalar(&right_val).unwrap_or(1.0);
+                                        postmeta_graphics::transform::scaled(f)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::Shifted as u16 => {
+                                        let (dx, dy) =
+                                            value_to_pair(&right_val).unwrap_or((0.0, 0.0));
+                                        postmeta_graphics::transform::shifted(dx, dy)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::Rotated as u16 => {
+                                        let a = value_to_scalar(&right_val).unwrap_or(0.0);
+                                        postmeta_graphics::transform::rotated(a)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::XScaled as u16 => {
+                                        let f = value_to_scalar(&right_val).unwrap_or(1.0);
+                                        postmeta_graphics::transform::xscaled(f)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::YScaled as u16 => {
+                                        let f = value_to_scalar(&right_val).unwrap_or(1.0);
+                                        postmeta_graphics::transform::yscaled(f)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::Slanted as u16 => {
+                                        let f = value_to_scalar(&right_val).unwrap_or(0.0);
+                                        postmeta_graphics::transform::slanted(f)
+                                    }
+                                    x if x == crate::command::SecondaryBinaryOp::ZScaled as u16 => {
+                                        let (a, b) =
+                                            value_to_pair(&right_val).unwrap_or((1.0, 0.0));
+                                        postmeta_graphics::transform::zscaled(a, b)
+                                    }
+                                    x if x
+                                        == crate::command::SecondaryBinaryOp::Transformed
+                                            as u16 =>
+                                    {
+                                        value_to_transform(&right_val).unwrap_or(
+                                            postmeta_graphics::types::Transform::IDENTITY,
+                                        )
+                                    }
+                                    _ => postmeta_graphics::types::Transform::IDENTITY,
+                                };
+
+                                let mut new_x = ldx.clone();
+                                dep_scale(&mut new_x, t.txx);
+                                new_x = dep_add_scaled(&new_x, &ldy, t.txy);
+                                new_x = dep_add_scaled(&new_x, &const_dep(t.tx), 1.0);
+
+                                let mut new_y = ldx;
+                                dep_scale(&mut new_y, t.tyx);
+                                new_y = dep_add_scaled(&new_y, &ldy, t.tyy);
+                                new_y = dep_add_scaled(&new_y, &const_dep(t.ty), 1.0);
+
+                                (new_x, new_y)
+                            });
+                        } else {
+                            self.cur_pair_dep = None;
+                        }
                     }
                 }
                 Command::Slash => {
                     // Division
                     let right = self.take_cur_exp();
-                    let a = value_to_scalar(&left)?;
                     let b = value_to_scalar(&right)?;
                     if b.abs() < f64::EPSILON {
                         self.report_error(ErrorKind::ArithmeticError, "Division by zero");
-                        self.cur_exp = Value::Numeric(0.0);
-                        self.cur_dep = Some(const_dep(0.0));
-                    } else {
-                        self.cur_exp = Value::Numeric(a / b);
-                        let right_const = right_dep.as_ref().and_then(constant_value);
-                        self.cur_dep = right_const.and_then(|c| {
-                            if c.abs() < f64::EPSILON {
-                                None
-                            } else {
-                                left_dep.map(|mut d| {
-                                    dep_scale(&mut d, 1.0 / c);
-                                    d
-                                })
+                        match left {
+                            Value::Numeric(_) => {
+                                self.cur_exp = Value::Numeric(0.0);
+                                self.cur_type = Type::Known;
+                                self.cur_dep = Some(const_dep(0.0));
+                                self.cur_pair_dep = None;
                             }
-                        });
+                            Value::Pair(_, _) => {
+                                self.cur_exp = Value::Pair(0.0, 0.0);
+                                self.cur_type = Type::PairType;
+                                self.cur_dep = None;
+                                self.cur_pair_dep = Some((const_dep(0.0), const_dep(0.0)));
+                            }
+                            _ => {
+                                self.cur_exp = Value::Numeric(0.0);
+                                self.cur_type = Type::Known;
+                                self.cur_dep = Some(const_dep(0.0));
+                                self.cur_pair_dep = None;
+                            }
+                        }
+                    } else {
+                        match left {
+                            Value::Numeric(a) => {
+                                self.cur_exp = Value::Numeric(a / b);
+                                let right_const = right_dep.as_ref().and_then(constant_value);
+                                self.cur_dep = right_const.and_then(|c| {
+                                    if c.abs() < f64::EPSILON {
+                                        None
+                                    } else {
+                                        left_dep.map(|mut d| {
+                                            dep_scale(&mut d, 1.0 / c);
+                                            d
+                                        })
+                                    }
+                                });
+                                self.cur_pair_dep = None;
+                            }
+                            Value::Pair(x, y) => {
+                                self.cur_exp = Value::Pair(x / b, y / b);
+                                self.cur_dep = None;
+                                let (mut dx, mut dy) =
+                                    left_pair_dep.unwrap_or_else(|| (const_dep(x), const_dep(y)));
+                                dep_scale(&mut dx, 1.0 / b);
+                                dep_scale(&mut dy, 1.0 / b);
+                                self.cur_pair_dep = Some((dx, dy));
+                            }
+                            _ => {
+                                return Err(InterpreterError::new(
+                                    ErrorKind::TypeError,
+                                    format!(
+                                        "Invalid types for /: {} and {}",
+                                        left.ty(),
+                                        right.ty()
+                                    ),
+                                ));
+                            }
+                        }
                     }
-                    self.cur_type = Type::Known;
+                    if !matches!(self.cur_exp, Value::Pair(_, _)) {
+                        self.cur_type = Type::Known;
+                    }
                     self.last_lhs_binding = None;
                 }
                 Command::And => {
@@ -601,6 +845,7 @@ impl Interpreter {
                     self.cur_type = Type::Boolean;
                     self.last_lhs_binding = None;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                 }
                 _ => {}
             }
@@ -624,33 +869,63 @@ impl Interpreter {
 
             let op = self.cur.modifier;
             let left_dep = self.take_cur_dep();
+            let left_pair_dep = self.take_cur_pair_dep();
             let left = self.take_cur_exp();
             self.get_x_next();
             self.scan_secondary()?;
             let right_dep = self.cur_dep.clone();
+            let right_pair_dep = self.cur_pair_dep.clone();
 
             match cmd {
                 Command::PlusOrMinus => {
+                    let right_pair_dep_taken = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
                     self.last_lhs_binding = None;
                     self.do_plus_minus(op, &left, &right)?;
-                    self.cur_dep = match (left_dep.as_ref(), right_dep.as_ref()) {
-                        (Some(ld), Some(rd)) => {
-                            let factor = if op == PlusMinusOp::Plus as u16 {
-                                1.0
-                            } else {
-                                -1.0
-                            };
-                            Some(dep_add_scaled(ld, rd, factor))
-                        }
-                        _ => None,
+                    let factor = if op == PlusMinusOp::Plus as u16 {
+                        1.0
+                    } else {
+                        -1.0
                     };
+
+                    if matches!(self.cur_exp, Value::Pair(_, _)) {
+                        self.cur_dep = None;
+                        let (lx, ly) = if let Value::Pair(x, y) = left {
+                            (x, y)
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        let (rx, ry) = if let Value::Pair(x, y) = right {
+                            (x, y)
+                        } else {
+                            (0.0, 0.0)
+                        };
+
+                        let (ldx, ldy) =
+                            left_pair_dep.unwrap_or_else(|| (const_dep(lx), const_dep(ly)));
+                        let (rdx, rdy) = right_pair_dep_taken
+                            .or(right_pair_dep)
+                            .unwrap_or_else(|| (const_dep(rx), const_dep(ry)));
+
+                        self.cur_pair_dep = Some((
+                            dep_add_scaled(&ldx, &rdx, factor),
+                            dep_add_scaled(&ldy, &rdy, factor),
+                        ));
+                    } else {
+                        self.cur_dep = match (left_dep.as_ref(), right_dep.as_ref()) {
+                            (Some(ld), Some(rd)) => Some(dep_add_scaled(ld, rd, factor)),
+                            _ => None,
+                        };
+                        self.cur_pair_dep = None;
+                    }
                 }
                 Command::TertiaryBinary => {
+                    let _ = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
                     self.last_lhs_binding = None;
                     self.do_tertiary_binary(op, &left, &right)?;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                 }
                 _ => {}
             }
@@ -678,6 +953,7 @@ impl Interpreter {
                     // Path construction
                     self.scan_path_construction()?;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                     break;
                 }
                 Command::Ampersand => {
@@ -692,6 +968,7 @@ impl Interpreter {
                         self.last_lhs_binding = None;
                         self.do_expression_binary(ExpressionBinaryOp::Concatenate as u16, &left)?;
                         self.cur_dep = None;
+                        self.cur_pair_dep = None;
                     }
                     break;
                 }
@@ -700,6 +977,7 @@ impl Interpreter {
                     let left = self.take_cur_exp();
                     self.expand_binary_macro(&left)?;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                     break;
                 }
                 Command::ExpressionBinary => {
@@ -709,11 +987,13 @@ impl Interpreter {
                     self.last_lhs_binding = None;
                     self.do_expression_binary(op, &left)?;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                 }
                 Command::LeftBrace => {
                     // Direction specification — start of path construction
                     self.scan_path_construction()?;
                     self.cur_dep = None;
+                    self.cur_pair_dep = None;
                     break;
                 }
                 _ => break,

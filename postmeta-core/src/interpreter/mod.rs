@@ -75,6 +75,8 @@ pub struct Interpreter {
     cur_type: Type,
     /// Linear dependency form for the current numeric expression (if linear).
     cur_dep: Option<DepList>,
+    /// Linear dependency form for the current pair expression (x/y), if linear.
+    cur_pair_dep: Option<(DepList, DepList)>,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
     /// Last scanned variable id (for assignment LHS tracking).
@@ -163,6 +165,7 @@ impl Interpreter {
             cur_exp: Value::Vacuous,
             cur_type: Type::Vacuous,
             cur_dep: None,
+            cur_pair_dep: None,
             cur,
             last_var_id: None,
             last_var_name: String::new(),
@@ -209,11 +212,13 @@ impl Interpreter {
         let saved_exp = self.cur_exp.clone();
         let saved_type = self.cur_type;
         let saved_dep = self.cur_dep.clone();
+        let saved_pair_dep = self.cur_pair_dep.clone();
         self.get_next();
         self.expand_current();
         self.cur_exp = saved_exp;
         self.cur_type = saved_type;
         self.cur_dep = saved_dep;
+        self.cur_pair_dep = saved_pair_dep;
     }
 
     /// Push the current token back into the input stream.
@@ -266,11 +271,30 @@ impl Interpreter {
         let val = std::mem::replace(&mut self.cur_exp, Value::Vacuous);
         self.cur_type = Type::Vacuous;
         self.cur_dep = None;
+        self.cur_pair_dep = None;
         val
     }
 
     const fn take_cur_dep(&mut self) -> Option<DepList> {
         self.cur_dep.take()
+    }
+
+    const fn take_cur_pair_dep(&mut self) -> Option<(DepList, DepList)> {
+        self.cur_pair_dep.take()
+    }
+
+    fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
+        match self.variables.get(id).clone() {
+            VarValue::NumericVar(NumericState::Known(v)) => const_dep(v),
+            VarValue::NumericVar(NumericState::Independent { .. }) => crate::equation::single_dep(id),
+            VarValue::NumericVar(NumericState::Dependent(dep)) => dep,
+            VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
+            | VarValue::Undefined => {
+                self.variables.make_independent(id);
+                crate::equation::single_dep(id)
+            }
+            _ => const_dep(self.variables.known_value(id).unwrap_or(0.0)),
+        }
     }
 
     /// Negate the current expression (unary minus).
@@ -301,16 +325,23 @@ impl Interpreter {
                     crate::equation::dep_scale(&mut dep, -1.0);
                     self.cur_dep = Some(dep);
                 }
+                self.cur_pair_dep = None;
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Pair(x, y) => {
                 self.cur_exp = Value::Pair(-x, -y);
                 self.cur_dep = None;
+                if let Some((mut dx, mut dy)) = self.cur_pair_dep.take() {
+                    crate::equation::dep_scale(&mut dx, -1.0);
+                    crate::equation::dep_scale(&mut dy, -1.0);
+                    self.cur_pair_dep = Some((dx, dy));
+                }
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Color(c) => {
                 self.cur_exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
                 self.cur_dep = None;
+                self.cur_pair_dep = None;
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             _ => {
@@ -333,29 +364,37 @@ impl Interpreter {
             negated: false,
         });
 
-        match self.variables.get(var_id) {
+        match self.variables.get(var_id).clone() {
             VarValue::Known(v) => {
                 self.cur_exp = v.clone();
                 self.cur_type = v.ty();
-                self.cur_dep = match v {
+                self.cur_dep = match &v {
                     Value::Numeric(n) => Some(const_dep(*n)),
                     _ => None,
                 };
+                self.cur_pair_dep = if let Value::Pair(x, y) = &v {
+                    Some((const_dep(*x), const_dep(*y)))
+                } else {
+                    None
+                };
             }
             VarValue::NumericVar(NumericState::Known(v)) => {
-                self.cur_exp = Value::Numeric(*v);
+                self.cur_exp = Value::Numeric(v);
                 self.cur_type = Type::Known;
-                self.cur_dep = Some(const_dep(*v));
+                self.cur_dep = Some(const_dep(v));
+                self.cur_pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Independent { .. }) => {
                 self.cur_exp = Value::Numeric(0.0);
                 self.cur_type = Type::Independent;
                 self.cur_dep = Some(single_dep(var_id));
+                self.cur_pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Dependent(dep)) => {
-                self.cur_exp = Value::Numeric(crate::equation::constant_value(dep).unwrap_or(0.0));
+                self.cur_exp = Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0));
                 self.cur_type = Type::Dependent;
-                self.cur_dep = Some(dep.clone());
+                self.cur_dep = Some(dep);
+                self.cur_pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
@@ -363,21 +402,24 @@ impl Interpreter {
                 self.cur_exp = Value::Numeric(0.0);
                 self.cur_type = Type::Independent;
                 self.cur_dep = Some(single_dep(var_id));
+                self.cur_pair_dep = None;
             }
             VarValue::Pair { x, y } => {
-                let xv = self.variables.known_value(*x).unwrap_or(0.0);
-                let yv = self.variables.known_value(*y).unwrap_or(0.0);
+                let xv = self.variables.known_value(x).unwrap_or(0.0);
+                let yv = self.variables.known_value(y).unwrap_or(0.0);
                 self.cur_exp = Value::Pair(xv, yv);
                 self.cur_type = Type::PairType;
                 self.cur_dep = None;
+                self.cur_pair_dep = Some((self.numeric_dep_for_var(x), self.numeric_dep_for_var(y)));
             }
             VarValue::Color { r, g, b } => {
-                let rv = self.variables.known_value(*r).unwrap_or(0.0);
-                let gv = self.variables.known_value(*g).unwrap_or(0.0);
-                let bv = self.variables.known_value(*b).unwrap_or(0.0);
+                let rv = self.variables.known_value(r).unwrap_or(0.0);
+                let gv = self.variables.known_value(g).unwrap_or(0.0);
+                let bv = self.variables.known_value(b).unwrap_or(0.0);
                 self.cur_exp = Value::Color(Color::new(rv, gv, bv));
                 self.cur_type = Type::ColorType;
                 self.cur_dep = None;
+                self.cur_pair_dep = None;
             }
             VarValue::Transform {
                 tx,
@@ -387,7 +429,7 @@ impl Interpreter {
                 tyx,
                 tyy,
             } => {
-                let parts = [*tx, *ty, *txx, *txy, *tyx, *tyy]
+                let parts = [tx, ty, txx, txy, tyx, tyy]
                     .map(|id| self.variables.known_value(id).unwrap_or(0.0));
                 self.cur_exp = Value::Transform(Transform {
                     tx: parts[0],
@@ -399,6 +441,7 @@ impl Interpreter {
                 });
                 self.cur_type = Type::TransformType;
                 self.cur_dep = None;
+                self.cur_pair_dep = None;
             }
         }
         let _ = sym; // Used later for equation LHS tracking
@@ -1209,7 +1252,10 @@ mod tests {
             .run("pair right,left; right=-left=(1,0); show right; show left;")
             .unwrap();
         assert!(
-            interp.errors.iter().any(|e| e.message.contains(">> (1,0)")),
+            interp
+                .errors
+                .iter()
+                .any(|e| e.message.contains(">> (1,0)") || e.message.contains(">> (1,-0)")),
             "expected right=(1,0), got: {:?}",
             interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
         );
@@ -2165,5 +2211,158 @@ mod tests {
             .unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("21"), "expected 21 in: {msg}");
+    }
+
+    #[test]
+    fn save_restores_variable_binding() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric x; x := 1; begingroup save x; x := 2; endgroup; show x;")
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .unwrap_or_default();
+        assert!(msg.contains("1"), "expected x to restore to 1, got: {msg}");
+    }
+
+    #[test]
+    fn whatever_calls_are_independent() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "vardef whatever = save ?; ? enddef; \
+                 numeric a,b; \
+                 a=whatever; b=whatever; \
+                 a=0; b=1; \
+                 show a; show b;",
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains(">> 0")),
+            "expected show a=0, got: {infos:?}"
+        );
+        assert!(
+            infos.iter().any(|m| m.contains(">> 1")),
+            "expected show b=1, got: {infos:?}"
+        );
+    }
+
+    #[test]
+    fn whatever_times_pair_preserves_dependency() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "vardef whatever = save ?; ? enddef; \
+                 pair o; \
+                 o-(1,2)=whatever*(3,4); \
+                 o-(5,6)=whatever*(7,8); \
+                 show o;",
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    }
+
+    #[test]
+    fn whatever_line_intersection_solves_point() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "vardef whatever = save ?; ? enddef; \
+                 pair A,B,C,D,M; \
+                 A=(0,0); B=(2,3); \
+                 C=(1,0); D=(-1,2); \
+                 M = whatever [A,B]; \
+                 M = whatever [C,D];",
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let mid = interp
+            .variables
+            .lookup_existing("M")
+            .expect("M should exist");
+        let (xid, yid) = match interp.variables.get(mid) {
+            crate::variables::VarValue::Pair { x, y } => (*x, *y),
+            other => panic!("M should be a pair, got {other:?}"),
+        };
+
+        let mx = interp.variables.known_value(xid).unwrap_or(0.0);
+        let my = interp.variables.known_value(yid).unwrap_or(0.0);
+
+        assert!((mx - 0.4).abs() < 0.01, "mx={mx}");
+        assert!((my - 0.6).abs() < 0.01, "my={my}");
+    }
+
+    #[test]
+    fn whatever_perpendicular_bisectors_solve_circumcenter() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "vardef whatever = save ?; ? enddef; \
+                 pair A,B,C,O; \
+                 A=(0,0); B=(3,0); C=(1,2); \
+                 O - 1/2[B,C] = whatever * (B-C) rotated 90; \
+                 O - 1/2[A,B] = whatever * (A-B) rotated 90;",
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let oid = interp
+            .variables
+            .lookup_existing("O")
+            .expect("O should exist");
+        let (xid, yid) = match interp.variables.get(oid) {
+            crate::variables::VarValue::Pair { x, y } => (*x, *y),
+            other => panic!("O should be a pair, got {other:?}"),
+        };
+
+        let ox = interp.variables.known_value(xid).unwrap_or(0.0);
+        let oy = interp.variables.known_value(yid).unwrap_or(0.0);
+
+        assert!((ox - 1.5).abs() < 0.01, "ox={ox}");
+        assert!((oy - 0.5).abs() < 0.01, "oy={oy}");
     }
 }

@@ -3,7 +3,9 @@
 //! Handles `lhs = rhs` equations (including unknown-variable assignment)
 //! and `:=` explicit assignments.
 
-use crate::equation::{dep_add_scaled, solve_equation, DepList, SolveResult};
+use crate::equation::{
+    const_dep, dep_add_scaled, dep_substitute, solve_equation, DepList, SolveResult,
+};
 use crate::error::{ErrorKind, InterpResult};
 use crate::types::Value;
 use crate::variables::{NumericState, VarValue};
@@ -12,6 +14,39 @@ use super::helpers::value_to_scalar;
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
+    fn reduce_dep_with_knowns(&self, dep: DepList) -> DepList {
+        let mut reduced = dep;
+
+        loop {
+            let mut changed = false;
+            let vars: Vec<_> = reduced.iter().filter_map(|t| t.var_id).collect();
+
+            for id in vars {
+                if !reduced.iter().any(|t| t.var_id == Some(id)) {
+                    continue;
+                }
+
+                match self.variables.get(id) {
+                    VarValue::NumericVar(NumericState::Known(v)) => {
+                        reduced = dep_substitute(&reduced, id, &const_dep(*v));
+                        changed = true;
+                    }
+                    VarValue::NumericVar(NumericState::Dependent(dep)) => {
+                        reduced = dep_substitute(&reduced, id, dep);
+                        changed = true;
+                    }
+                    _ => {}
+                }
+            }
+
+            if !changed {
+                break;
+            }
+        }
+
+        reduced
+    }
+
     /// Execute an equation: `lhs = rhs`.
     ///
     /// If the LHS has a bindable form (`x`, `-x`, internal quantity), treat the
@@ -22,9 +57,43 @@ impl Interpreter {
         lhs: &Value,
         rhs: &Value,
         lhs_binding: Option<LhsBinding>,
-        lhs_dep: Option<DepList>,
-        rhs_dep: Option<DepList>,
+        lhs_deps: (Option<DepList>, Option<(DepList, DepList)>),
+        rhs_deps: (Option<DepList>, Option<(DepList, DepList)>),
     ) -> InterpResult<()> {
+        let (lhs_dep, lhs_pair_dep) = lhs_deps;
+        let (rhs_dep, rhs_pair_dep) = rhs_deps;
+
+        if let (Some((lx, ly)), Some((rx, ry))) = (lhs_pair_dep, rhs_pair_dep) {
+            let eqx = self.reduce_dep_with_knowns(dep_add_scaled(&lx, &rx, -1.0));
+            match solve_equation(&eqx) {
+                SolveResult::Solved { var_id, dep } => {
+                    self.variables.apply_linear_solution(var_id, &dep);
+                }
+                SolveResult::Redundant => {}
+                SolveResult::Inconsistent(v) => {
+                    self.report_error(
+                        ErrorKind::InconsistentEquation,
+                        format!("Inconsistent pair equation residual (x): {v}"),
+                    );
+                }
+            }
+
+            let eqy = self.reduce_dep_with_knowns(dep_add_scaled(&ly, &ry, -1.0));
+            match solve_equation(&eqy) {
+                SolveResult::Solved { var_id, dep } => {
+                    self.variables.apply_linear_solution(var_id, &dep);
+                }
+                SolveResult::Redundant => {}
+                SolveResult::Inconsistent(v) => {
+                    self.report_error(
+                        ErrorKind::InconsistentEquation,
+                        format!("Inconsistent pair equation residual (y): {v}"),
+                    );
+                }
+            }
+            return Ok(());
+        }
+
         if let (Some(ld), Some(rd)) = (lhs_dep, rhs_dep) {
             if lhs_binding.is_some()
                 && crate::equation::is_constant(&ld)
@@ -34,7 +103,7 @@ impl Interpreter {
                 return Ok(());
             }
 
-            let equation_dep = dep_add_scaled(&ld, &rd, -1.0);
+            let equation_dep = self.reduce_dep_with_knowns(dep_add_scaled(&ld, &rd, -1.0));
             match solve_equation(&equation_dep) {
                 SolveResult::Solved { var_id, dep } => {
                     self.variables.apply_linear_solution(var_id, &dep);

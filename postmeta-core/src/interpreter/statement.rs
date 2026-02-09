@@ -71,29 +71,34 @@ impl Interpreter {
                 if self.cur.command == Command::Equals {
                     // Equation chain: lhs = mid = ... = rhs.
                     // All left-hand sides are equated to the FINAL rightmost value.
-                    let mut pending_lhs: Vec<(
+                    type PendingEquationLhs = (
                         Value,
                         Option<LhsBinding>,
                         Option<crate::equation::DepList>,
-                    )> = Vec::new();
+                        Option<(crate::equation::DepList, crate::equation::DepList)>,
+                    );
+
+                    let mut pending_lhs: Vec<PendingEquationLhs> = Vec::new();
                     while self.cur.command == Command::Equals {
                         let lhs_dep = self.cur_dep.clone();
+                        let lhs_pair_dep = self.cur_pair_dep.clone();
                         let lhs = self.take_cur_exp();
                         let lhs_binding = self.last_lhs_binding.clone();
-                        pending_lhs.push((lhs, lhs_binding, lhs_dep));
+                        pending_lhs.push((lhs, lhs_binding, lhs_dep, lhs_pair_dep));
                         self.get_x_next();
                         self.scan_expression()?;
                     }
 
                     let rhs_clone = self.cur_exp.clone();
                     let rhs_dep = self.cur_dep.clone();
-                    for (lhs, lhs_binding, lhs_dep) in &pending_lhs {
+                    let rhs_pair_dep = self.cur_pair_dep.clone();
+                    for (lhs, lhs_binding, lhs_dep, lhs_pair_dep) in &pending_lhs {
                         self.do_equation(
                             lhs,
                             &rhs_clone,
                             lhs_binding.clone(),
-                            lhs_dep.clone(),
-                            rhs_dep.clone(),
+                            (lhs_dep.clone(), lhs_pair_dep.clone()),
+                            (rhs_dep.clone(), rhs_pair_dep.clone()),
                         )?;
                     }
                 } else if self.cur.command == Command::Assignment {
@@ -583,6 +588,9 @@ impl Interpreter {
             if let Some(id) = self.cur.sym {
                 let entry = self.symbols.get(id);
                 self.save_stack.save_symbol(id, entry);
+                let name = self.symbols.name(id).to_owned();
+                let prev = self.variables.unbind_name(&name);
+                self.save_stack.save_name_binding(name, prev);
                 self.symbols.clear(id);
             }
             self.get_x_next();
@@ -783,6 +791,9 @@ impl Interpreter {
                 }
                 SaveEntry::Symbol { id, entry } => {
                     self.symbols.set(id, entry);
+                }
+                SaveEntry::NameBinding { name, prev } => {
+                    self.variables.restore_name_binding(&name, prev);
                 }
                 SaveEntry::Boundary => {} // shouldn't happen
             }

@@ -137,6 +137,20 @@ impl Variables {
         self.name_to_id.insert(name.to_owned(), id);
     }
 
+    /// Remove a name binding and return the previously bound variable id.
+    pub fn unbind_name(&mut self, name: &str) -> Option<VarId> {
+        self.name_to_id.remove(name)
+    }
+
+    /// Restore a name binding to a previous state.
+    pub fn restore_name_binding(&mut self, name: &str, prev: Option<VarId>) {
+        if let Some(id) = prev {
+            self.name_to_id.insert(name.to_owned(), id);
+        } else {
+            self.name_to_id.remove(name);
+        }
+    }
+
     /// Look up a variable by name without creating it.
     #[must_use]
     pub fn lookup_existing(&self, name: &str) -> Option<VarId> {
@@ -517,6 +531,8 @@ pub enum SaveEntry {
         id: crate::symbols::SymbolId,
         entry: crate::symbols::SymbolEntry,
     },
+    /// Saved variable name binding for `save` scoping.
+    NameBinding { name: String, prev: Option<VarId> },
 }
 
 /// The save stack for scoping.
@@ -556,6 +572,11 @@ impl SaveStack {
         entry: crate::symbols::SymbolEntry,
     ) {
         self.entries.push(SaveEntry::Symbol { id, entry });
+    }
+
+    /// Save a variable name binding.
+    pub fn save_name_binding(&mut self, name: String, prev: Option<VarId>) {
+        self.entries.push(SaveEntry::NameBinding { name, prev });
     }
 
     /// Restore all entries back to the last boundary.
