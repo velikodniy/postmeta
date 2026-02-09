@@ -91,6 +91,10 @@ pub struct Interpreter {
     pub pictures: Vec<Picture>,
     /// Current picture being built.
     pub current_picture: Picture,
+    /// Temporary buffer for `addto` targeting a named picture variable.
+    /// Used to avoid borrow conflicts: the picture is extracted from the
+    /// variable, modified here, then flushed back.
+    named_pic_buf: Option<Picture>,
     /// Current figure number (from `beginfig`).
     pub current_fig: Option<i32>,
     /// Drawing state.
@@ -162,6 +166,7 @@ impl Interpreter {
             macros: std::collections::HashMap::new(),
             pictures: Vec::new(),
             current_picture: Picture::new(),
+            named_pic_buf: None,
             current_fig: None,
             drawing_state: DrawingState::default(),
             random_seed: 0,
@@ -1398,19 +1403,21 @@ mod tests {
             tertiarydef p _on_ d =
               begingroup save pic;
               picture pic; pic=p;
-              addto pic doublepath (0,0)..(d,0);
+              addto pic doublepath (w,w)..(w+d,w);
+              w := w+d;
               pic shifted (0,d)
               endgroup
             enddef;
             tertiarydef p _off_ d =
-              begingroup
+              begingroup w:=w+d;
               p shifted (0,d)
               endgroup
             enddef;
             vardef dashpattern(text t) =
-              save on, off;
+              save on, off, w;
               let on=_on_;
               let off=_off_;
+              w = 0;
               nullpicture t
             enddef;
             show dashpattern(on 3 off 3);
@@ -1427,6 +1434,73 @@ mod tests {
             eprintln!("  dashpattern error: {}", e.message);
         }
         assert!(errors.is_empty(), "dashpattern had {} errors", errors.len());
+    }
+
+    #[test]
+    fn dashed_line_produces_dash_pattern() {
+        // Verify that `dashed dashpattern(...)` applies stroke-dasharray to the
+        // output picture and doesn't leak intermediate strokes.
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                r#"
+            delimiters ();
+            tertiarydef p _on_ d =
+              begingroup save pic;
+              picture pic; pic=p;
+              addto pic doublepath (w,w)..(w+d,w);
+              w := w+d;
+              pic shifted (0,d)
+              endgroup
+            enddef;
+            tertiarydef p _off_ d =
+              begingroup w:=w+d;
+              p shifted (0,d)
+              endgroup
+            enddef;
+            vardef dashpattern(text t) =
+              save on, off, w;
+              let on=_on_;
+              let off=_off_;
+              w = 0;
+              nullpicture t
+            enddef;
+            addto currentpicture doublepath (0,0)..(30,0)
+              dashed dashpattern(on 2 off 3);
+        "#,
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "errors: {errors:?}");
+
+        // The picture should have exactly one Stroke object (the dashed line).
+        let objects = &interp.current_picture.objects;
+        assert_eq!(
+            objects.len(),
+            1,
+            "expected 1 object, got {}: {:?}",
+            objects.len(),
+            objects
+        );
+
+        if let postmeta_graphics::types::GraphicsObject::Stroke(ref stroke) = objects[0] {
+            let dash = stroke.dash.as_ref().expect("expected dash pattern");
+            // on 2, off 3 → dashes = [2.0, 3.0]
+            assert_eq!(dash.dashes.len(), 2, "dashes: {:?}", dash.dashes);
+            assert!((dash.dashes[0] - 2.0).abs() < 0.01, "on={}", dash.dashes[0]);
+            assert!(
+                (dash.dashes[1] - 3.0).abs() < 0.01,
+                "off={}",
+                dash.dashes[1]
+            );
+        } else {
+            panic!("expected Stroke, got {:?}", objects[0]);
+        }
     }
 
     #[test]

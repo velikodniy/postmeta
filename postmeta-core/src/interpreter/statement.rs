@@ -9,7 +9,9 @@ use std::sync::Arc;
 
 use postmeta_graphics::picture;
 use postmeta_graphics::transform;
-use postmeta_graphics::types::{Color, LineCap, LineJoin, Path, Pen, Picture};
+use postmeta_graphics::types::{
+    Color, DashPattern, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture,
+};
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
 use crate::error::{ErrorKind, InterpResult};
@@ -316,6 +318,45 @@ impl Interpreter {
         }
     }
 
+    /// Get a mutable reference to the target picture for `addto`/`clip`/`setbounds`.
+    ///
+    /// For `currentpicture`, returns `&mut self.current_picture` directly.
+    /// For named pictures, extracts the picture from the variable into
+    /// `self.named_pic_buf`, returning a mutable reference to it.
+    /// After modification, call [`Self::flush_target_picture`] to write it back.
+    fn get_target_picture(&mut self, pic_name: &str) -> &mut Picture {
+        if pic_name == "currentpicture" {
+            &mut self.current_picture
+        } else {
+            // Extract picture from the named variable (or create empty).
+            let pic = if let Some(var_id) = self.variables.lookup_existing(pic_name) {
+                if let VarValue::Known(Value::Picture(p)) = self.variables.get(var_id) {
+                    p.clone()
+                } else {
+                    Picture::default()
+                }
+            } else {
+                Picture::default()
+            };
+            self.named_pic_buf = Some(pic);
+            // SAFETY: we just assigned `Some` above, so `unwrap` cannot fail.
+            // This pattern avoids holding a borrow on `self.variables` across
+            // the mutable return.
+            #[allow(clippy::unwrap_used)]
+            self.named_pic_buf.as_mut().unwrap()
+        }
+    }
+
+    /// Write the temporary named picture buffer back to the variable.
+    fn flush_target_picture(&mut self, pic_name: &str) {
+        if pic_name == "currentpicture" {
+            self.sync_currentpicture_variable();
+        } else if let Some(pic) = self.named_pic_buf.take() {
+            let var_id = self.variables.lookup(pic_name);
+            self.variables.set_known(var_id, Value::Picture(pic));
+        }
+    }
+
     /// Execute `addto` statement.
     fn do_addto(&mut self) -> InterpResult<()> {
         self.get_x_next();
@@ -332,16 +373,17 @@ impl Interpreter {
         let thing = self.cur.modifier;
         self.get_x_next();
 
+        // Parse expressions and options first, then apply to the target picture.
         match thing {
             x if x == ThingToAddOp::Contour as u16 => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
                 let path = value_to_path_owned(path_val)?;
-
                 let ds = self.scan_with_options()?;
 
+                let target = self.get_target_picture(&pic_name);
                 picture::addto_contour(
-                    &mut self.current_picture,
+                    target,
                     path,
                     ds.color,
                     if matches!(ds.pen, Pen::Elliptical(a) if a == kurbo::Affine::default()) {
@@ -356,9 +398,9 @@ impl Interpreter {
             x if x == ThingToAddOp::DoublePath as u16 => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
-
                 let ds = self.scan_with_options()?;
 
+                let target = self.get_target_picture(&pic_name);
                 match path_val {
                     Value::Pair(x, y) => {
                         // `draw <pair> withpen <pen>` draws a dot-like mark.
@@ -367,7 +409,7 @@ impl Interpreter {
                         let dot = postmeta_graphics::pen::makepath(&ds.pen);
                         let shifted = transform::transform_path(&transform::shifted(x, y), &dot);
                         picture::addto_contour(
-                            &mut self.current_picture,
+                            target,
                             shifted,
                             ds.color,
                             None,
@@ -378,7 +420,7 @@ impl Interpreter {
                     other => {
                         let path = value_to_path_owned(other)?;
                         picture::addto_doublepath(
-                            &mut self.current_picture,
+                            target,
                             path,
                             ds.pen,
                             ds.color,
@@ -394,7 +436,8 @@ impl Interpreter {
                 self.scan_expression()?;
                 let pic_val = self.take_cur_exp();
                 if let Value::Picture(p) = pic_val {
-                    picture::addto_also(&mut self.current_picture, &p);
+                    let target = self.get_target_picture(&pic_name);
+                    picture::addto_also(target, &p);
                 }
             }
             _ => {
@@ -405,9 +448,7 @@ impl Interpreter {
             }
         }
 
-        let _ = pic_name; // TODO: support named pictures
-
-        self.sync_currentpicture_variable();
+        self.flush_target_picture(&pic_name);
 
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
@@ -446,7 +487,9 @@ impl Interpreter {
                     }
                 }
                 x if x == WithOptionOp::Dashed as u16 => {
-                    // For now, ignore dash pattern (complex to extract)
+                    if let Value::Picture(ref pic) = val {
+                        ds.dash = extract_dash_pattern(pic);
+                    }
                 }
                 _ => {}
             }
@@ -461,7 +504,7 @@ impl Interpreter {
         self.get_x_next();
 
         // Get picture name
-        let _pic_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+        let pic_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
             s.clone()
         } else {
             "currentpicture".to_owned()
@@ -477,13 +520,14 @@ impl Interpreter {
         let val = self.take_cur_exp();
         let clip_path = value_to_path_owned(val)?;
 
+        let target = self.get_target_picture(&pic_name);
         if is_clip {
-            picture::clip(&mut self.current_picture, clip_path);
+            picture::clip(target, clip_path);
         } else {
-            picture::setbounds(&mut self.current_picture, clip_path);
+            picture::setbounds(target, clip_path);
         }
 
-        self.sync_currentpicture_variable();
+        self.flush_target_picture(&pic_name);
 
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
@@ -746,4 +790,92 @@ impl Interpreter {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dash pattern extraction
+// ---------------------------------------------------------------------------
+
+/// Extract a [`DashPattern`] from a dash-pattern picture.
+///
+/// In `MetaPost`, `dashpattern(on a off b on c off d ...)` produces a
+/// picture where each `_on_` segment is encoded as a horizontal stroke.
+/// The x-range of each stroke gives the on-segment, and the y-coordinate
+/// of every stroke equals the total pattern length (because each `_on_`
+/// and `_off_` operation shifts the entire picture upward by its distance).
+///
+/// Returns `None` if the picture contains no strokes.
+fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
+    // Collect (xmin, xmax) of each stroke and the y-coordinate (total length).
+    let mut on_segments: Vec<(f64, f64)> = Vec::new();
+    let mut total_length: f64 = 0.0;
+
+    for obj in &pic.objects {
+        if let GraphicsObject::Stroke(stroke) = obj {
+            let knots = &stroke.path.knots;
+            if knots.is_empty() {
+                continue;
+            }
+            // The x-range of this stroke path gives the on-segment.
+            let mut xmin = f64::INFINITY;
+            let mut xmax = f64::NEG_INFINITY;
+            for k in knots {
+                xmin = xmin.min(k.point.x);
+                xmax = xmax.max(k.point.x);
+            }
+            // The y-coordinate is the total pattern length.
+            total_length = total_length.max(knots[0].point.y);
+
+            on_segments.push((xmin, xmax));
+        }
+    }
+
+    if on_segments.is_empty() {
+        return None;
+    }
+
+    // Sort by starting x position.
+    on_segments.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Build alternating on/off dashes.
+    // Walk from x=0 to x=total_length, emitting on and off segments.
+    let mut dashes: Vec<f64> = Vec::new();
+    let mut pos: f64 = 0.0;
+
+    for (xmin, xmax) in &on_segments {
+        let gap = xmin - pos;
+        if gap > 1e-6 {
+            // Off segment before this on segment.
+            // If dashes is empty and there's a leading gap, it means the
+            // pattern starts with an off segment. Encode as on=0, off=gap.
+            if dashes.is_empty() {
+                dashes.push(0.0);
+            }
+            dashes.push(gap);
+        } else if dashes.is_empty() {
+            // First on segment starts at or before 0 — no leading gap.
+        }
+        let on_len = xmax - xmin;
+        dashes.push(on_len);
+        pos = *xmax;
+    }
+
+    // Trailing off segment (from last on-end to total_length).
+    let trailing = total_length - pos;
+    if trailing > 1e-6 {
+        dashes.push(trailing);
+    }
+
+    // SVG stroke-dasharray needs an even number of values (on, off pairs).
+    // If odd, we need to handle wrap-around.  For MetaPost, the pattern
+    // repeats, so if it ends with an on-segment (no trailing off), we can
+    // append a 0-length off segment.
+    if dashes.len() % 2 != 0 {
+        dashes.push(0.0);
+    }
+
+    Some(DashPattern {
+        dashes,
+        offset: 0.0,
+    })
 }
