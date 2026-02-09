@@ -94,3 +94,37 @@ fn plain_mp_loads_and_eval_continues() {
         "did not expect runtime errors, got stderr: {stderr}"
     );
 }
+
+#[test]
+fn plain_beginfig_draw_endfig_writes_svg() {
+    let dir = TestDir::new("plain_beginfig");
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("workspace root from crate dir");
+    let plain_src = workspace_root.join("lib/plain.mp");
+    let plain_dst = dir.path.join("plain.mp");
+    fs::copy(&plain_src, &plain_dst).expect("copy plain.mp into test dir");
+
+    let out_dir = dir.path.join("out");
+    fs::create_dir_all(&out_dir).expect("create output dir");
+
+    let output = run_postmeta(
+        &[
+            "-e",
+            "input plain; beginfig(1); draw (0,0)..(10,10); endfig; end;",
+            "-o",
+            "out",
+        ],
+        &dir.path,
+    );
+
+    assert!(output.status.success(), "process failed: {output:?}");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(!stderr.contains("Error:"), "unexpected stderr: {stderr}");
+
+    let svg_path = out_dir.join("output.svg");
+    assert!(svg_path.is_file(), "expected output file at {svg_path:?}");
+    let svg = fs::read_to_string(svg_path).expect("read svg output");
+    assert!(svg.contains("<svg"), "expected svg root element");
+}

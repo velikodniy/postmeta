@@ -1584,6 +1584,43 @@ mod tests {
         interp.run("input plain;").unwrap();
     }
 
+    #[test]
+    fn plain_beginfig_draw_endfig() {
+        use crate::filesystem::FileSystem;
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run("input plain; beginfig(1); draw (0,0)..(10,10); endfig; end;")
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
+    }
+
     // -----------------------------------------------------------------------
     // Type tests (numeric, pen, etc. as unary operators)
     // -----------------------------------------------------------------------

@@ -108,6 +108,9 @@ impl Interpreter {
                 } else if self.cur.command == Command::EndGroup || self.cur.command == Command::Stop
                 {
                     // OK — endgroup or end terminates too
+                } else if self.cur.command == Command::MacroSpecial && self.cur.modifier == 0 {
+                    // Allow an implicit terminator before `enddef` in macro bodies.
+                    self.get_x_next();
                 } else {
                     self.report_error(
                         ErrorKind::MissingToken,
