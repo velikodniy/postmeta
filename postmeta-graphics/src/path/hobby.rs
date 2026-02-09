@@ -568,17 +568,29 @@ fn solve_two_knots_range(
             set_controls_given_given(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
-        (KnotDirection::Given(a1), KnotDirection::Curl(_)) => {
-            // Given start, curl end: theta determined, phi = -theta
+        (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
+            // Given start, curl end: theta from given, phi from general solver.
+            // mp.web: theta[0] = given - chord_angle, uu[0] = 0.
+            // Right curl boundary: ff = curl_ratio(gamma, lt_j, rt_i),
+            //   theta[1] = -ff * theta[0]. phi = -theta[1] = ff * theta.
             let theta = reduce_angle(*a1 - chord_angle);
-            let phi = -theta;
+            let lt_j = path.knots[j].left_tension.abs();
+            let rt_i = path.knots[i].right_tension.abs();
+            let ff = curl_ratio(*gamma, lt_j, rt_i);
+            let phi = ff * theta;
             set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
-        (KnotDirection::Curl(_), KnotDirection::Given(a2)) => {
-            // Curl start, given end: phi determined, theta = -phi
+        (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
+            // Curl start, given end: phi from given, theta from general solver.
+            // mp.web: theta[n] = given - chord_angle.
+            // Left curl boundary: ff = curl_ratio(gamma, rt_i, lt_j),
+            //   theta[0] = -ff * theta[n]. phi = -(given - chord) = -theta_n.
             let phi = reduce_angle(-(*a2 - chord_angle));
-            let theta = -phi;
+            let rt_i = path.knots[i].right_tension.abs();
+            let lt_j = path.knots[j].left_tension.abs();
+            let ff = curl_ratio(*gamma, rt_i, lt_j);
+            let theta = ff * phi;
             set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
@@ -796,24 +808,20 @@ fn solve_choices_cyclic(path: &mut Path) {
     }
 
     // Cyclic closure: solve for theta[0] = theta[n].
-    // mp.web lines 6701-6712: backward iteration from k=n down to 1,
-    // wrapping k=0→k=n, processing all n indices once.
-    //
-    // In our indexing, the arrays go 0..n. We iterate k from n-1 down to 0,
-    // then wrap to process k=n.
-    // Actually: mp.web starts at k=n, then: decr(k) → n-1, ..., 1, then
-    // k=0→k=n, process, stop. That's n iterations: n-1, n-2, ..., 1, n.
-    //
-    // In our (n+1)-element arrays: iterate k = n-1, n-2, ..., 1, 0 (wrapping
-    // 0 to n via the array). Wait — we already have index n in the arrays.
-    // mp.web iterates: {n-1, n-2, ..., 1, n}. We do: {n, n-1, ..., 1}.
+    // mp.web lines 6701-6712: backward iteration starting at k=n, then
+    // decr(k) before each step, wrapping k=0→k=n. This processes
+    // indices {n-1, n-2, ..., 1, n} in that order (n iterations).
+    // The order matters because this is a sequential recurrence.
     let mut aa_val = 0.0_f64;
     let mut bb_val = 1.0_f64;
-    // Process k = n, n-1, ..., 1 (that's n iterations)
-    for k in (1..=n).rev() {
+    // Process k = n-1, n-2, ..., 1
+    for k in (1..n).rev() {
         aa_val = aa_val.mul_add(-uu[k], vv[k]);
         bb_val = bb_val.mul_add(-uu[k], ww[k]);
     }
+    // Final step: process k = n (mp.web: k=0 wraps to k=n)
+    aa_val = aa_val.mul_add(-uu[n], vv[n]);
+    bb_val = bb_val.mul_add(-uu[n], ww[n]);
 
     // theta[0] = aa / (1 - bb)
     let theta0 = if (1.0 - bb_val).abs() < 1e-30 {
@@ -999,11 +1007,10 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
         return 0.0;
     }
 
-    let result = num / denom;
-
-    // Cap and apply tension
-    let result = result.min(4.0);
-    result / tension
+    // mp.web line 2656-2659: divide num by tension FIRST, then cap at 4.
+    // velocity = min(num / (tension * denom), 4)
+    let result = num / (denom * tension);
+    result.min(4.0)
 }
 
 /// Compute the curl ratio for endpoint curl handling.
@@ -1775,5 +1782,196 @@ mod tests {
             (d0 - d2).abs() < 0.01,
             "symmetric curl path should have equal handle lengths: d0={d0:.4}, d2={d2:.4}"
         );
+    }
+
+    /// Helper to assert a control point matches MetaPost reference (tolerance 0.01).
+    fn assert_cp(label: &str, actual: Point, ex: f64, ey: f64) {
+        let tol = 0.01;
+        assert!(
+            (actual.x - ex).abs() < tol && (actual.y - ey).abs() < tol,
+            "{label}: expected ({ex}, {ey}), got ({:.5}, {:.5})",
+            actual.x,
+            actual.y,
+        );
+    }
+
+    // -------------------------------------------------------------------
+    // MetaPost-validated regression tests (mpost 2.11)
+    // -------------------------------------------------------------------
+
+    /// Test 1: Symmetric 4-knot cyclic path (square).
+    /// Verified against: (0,0)..(100,0)..(100,100)..(0,100)..cycle
+    #[test]
+    fn test_mpost_cyclic_square() {
+        let mut path = Path::from_knots(
+            vec![
+                Knot::new(Point::new(0.0, 0.0)),
+                Knot::new(Point::new(100.0, 0.0)),
+                Knot::new(Point::new(100.0, 100.0)),
+                Knot::new(Point::new(0.0, 100.0)),
+            ],
+            true,
+        );
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // Segment 0→1: (0,0)..controls (27.61424,-27.61424) and (72.38576,-27.61424)..(100,0)
+        assert_cp("s0 rcp", right_cp(&path, 0), 27.61424, -27.61424);
+        assert_cp("s0 lcp", left_cp(&path, 1), 72.38576, -27.61424);
+        // Segment 1→2: (100,0)..controls (127.61424,27.61424) and (127.61424,72.38576)..(100,100)
+        assert_cp("s1 rcp", right_cp(&path, 1), 127.61424, 27.61424);
+        assert_cp("s1 lcp", left_cp(&path, 2), 127.61424, 72.38576);
+        // Segment 2→3: (100,100)..controls (72.38576,127.61424) and (27.61424,127.61424)..(0,100)
+        assert_cp("s2 rcp", right_cp(&path, 2), 72.38576, 127.61424);
+        assert_cp("s2 lcp", left_cp(&path, 3), 27.61424, 127.61424);
+        // Segment 3→0: (0,100)..controls (-27.61424,72.38576) and (-27.61424,27.61424)..cycle
+        assert_cp("s3 rcp", right_cp(&path, 3), -27.61424, 72.38576);
+        assert_cp("s3 lcp", left_cp(&path, 0), -27.61424, 27.61424);
+    }
+
+    /// Test 2: Asymmetric 5-knot cyclic path (tests cyclic closure order).
+    /// Verified against: (0,0)..(50,30)..(100,0)..(80,70)..(20,80)..cycle
+    #[test]
+    fn test_mpost_cyclic_asymmetric() {
+        let mut path = Path::from_knots(
+            vec![
+                Knot::new(Point::new(0.0, 0.0)),
+                Knot::new(Point::new(50.0, 30.0)),
+                Knot::new(Point::new(100.0, 0.0)),
+                Knot::new(Point::new(80.0, 70.0)),
+                Knot::new(Point::new(20.0, 80.0)),
+            ],
+            true,
+        );
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // Segment 0→1
+        assert_cp("s0 rcp", right_cp(&path, 0), 21.04861, -0.46582);
+        assert_cp("s0 lcp", left_cp(&path, 1), 28.84277, 30.84305);
+        // Segment 1→2
+        assert_cp("s1 rcp", right_cp(&path, 1), 70.55287, 29.18105);
+        assert_cp("s1 lcp", left_cp(&path, 2), 78.0607, -4.02469);
+        // Segment 2→3
+        assert_cp("s2 rcp", right_cp(&path, 2), 126.56914, 4.87402);
+        assert_cp("s2 lcp", left_cp(&path, 3), 125.06877, 51.75462);
+        // Segment 3→4
+        assert_cp("s3 rcp", right_cp(&path, 3), 60.86385, 77.74696);
+        assert_cp("s3 lcp", left_cp(&path, 4), 40.43141, 83.09282);
+        // Segment 4→0
+        assert_cp("s4 rcp", right_cp(&path, 4), -43.09167, 70.44946);
+        assert_cp("s4 lcp", left_cp(&path, 0), -35.95712, 0.79576);
+    }
+
+    /// Test 3: Two-knot Given+Curl path.
+    /// Verified against: (0,0){dir 45}..(100,0)
+    #[test]
+    fn test_mpost_given_curl() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Given(45.0_f64.to_radians());
+        let mut k1 = Knot::new(Point::new(100.0, 0.0));
+        k1.left = KnotDirection::Curl(1.0);
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // (0,0)..controls (27.61424,27.61424) and (72.38576,27.61424)..(100,0)
+        assert_cp("rcp", right_cp(&path, 0), 27.61424, 27.61424);
+        assert_cp("lcp", left_cp(&path, 1), 72.38576, 27.61424);
+    }
+
+    /// Test 4: Two-knot Curl+Given path.
+    /// Verified against: (0,0)..{dir 135}(100,0)
+    #[test]
+    fn test_mpost_curl_given() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Curl(1.0);
+        let mut k1 = Knot::new(Point::new(100.0, 0.0));
+        k1.left = KnotDirection::Given(135.0_f64.to_radians());
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // (0,0)..controls (-160.94757,-160.94757) and (260.94757,-160.94757)..(100,0)
+        assert_cp("rcp", right_cp(&path, 0), -160.94757, -160.94757);
+        assert_cp("lcp", left_cp(&path, 1), 260.94757, -160.94757);
+    }
+
+    /// Test 5: Two-knot Given+Curl with non-default curl value.
+    /// Verified against: (0,0){dir 60}..{curl 2}(100,50)
+    #[test]
+    fn test_mpost_given_curl2() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Given(60.0_f64.to_radians());
+        let mut k1 = Knot::new(Point::new(100.0, 50.0));
+        k1.left = KnotDirection::Curl(2.0);
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // (0,0)..controls (21.11732,36.57639) and (60.40417,60.77927)..(100,50)
+        assert_cp("rcp", right_cp(&path, 0), 21.11732, 36.57639);
+        assert_cp("lcp", left_cp(&path, 1), 60.40417, 60.77927);
+    }
+
+    /// Test 6: Two-knot Given+Given path.
+    /// Verified against: (0,0){dir 30}..{dir 150}(100,0)
+    #[test]
+    fn test_mpost_given_given() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Given(30.0_f64.to_radians());
+        let mut k1 = Knot::new(Point::new(100.0, 0.0));
+        k1.left = KnotDirection::Given(150.0_f64.to_radians());
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // (0,0)..controls (31.36617,18.1092) and (197.65642,-56.3818)..(100,0)
+        assert_cp("rcp", right_cp(&path, 0), 31.36617, 18.1092);
+        assert_cp("lcp", left_cp(&path, 1), 197.65642, -56.3818);
+    }
+
+    /// Test 7: Two-knot path with tension 0.75.
+    /// Verified against: (0,0) .. tension 0.75 .. (100,0)
+    #[test]
+    fn test_mpost_tension_075() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 0.75;
+        let mut k1 = Knot::new(Point::new(100.0, 0.0));
+        k1.left_tension = 0.75;
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // (0,0)..controls (44.44444,0) and (55.55556,0)..(100,0)
+        assert_cp("rcp", right_cp(&path, 0), 44.44444, 0.0);
+        assert_cp("lcp", left_cp(&path, 1), 55.55556, 0.0);
+    }
+
+    /// Test 8: 3-knot path with direction constraints.
+    /// Verified against: (0,0){dir 45}..(100,50)..{dir -30}(200,0)
+    #[test]
+    fn test_mpost_3knot_directions() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Given(45.0_f64.to_radians());
+        let k1 = Knot::new(Point::new(100.0, 50.0));
+        let mut k2 = Knot::new(Point::new(200.0, 0.0));
+        k2.left = KnotDirection::Given((-30.0_f64).to_radians());
+
+        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // Segment 0→1: controls (27.73624,27.73622) and (61.09705,52.54985)
+        assert_cp("s0 rcp", right_cp(&path, 0), 27.73624, 27.73622);
+        assert_cp("s0 lcp", left_cp(&path, 1), 61.09705, 52.54985);
+        // Segment 1→2: controls (138.09456,47.50314) and (167.19278,18.9412)
+        assert_cp("s1 rcp", right_cp(&path, 1), 138.09456, 47.50314);
+        assert_cp("s1 lcp", left_cp(&path, 2), 167.19278, 18.9412);
     }
 }
