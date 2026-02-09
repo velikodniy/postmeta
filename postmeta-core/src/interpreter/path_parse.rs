@@ -234,12 +234,47 @@ impl Interpreter {
     /// Convert a value to a direction for path construction.
     fn value_to_direction(&self, val: &Value) -> InterpResult<KnotDirection> {
         match val {
-            Value::Pair(x, y) => Ok(KnotDirection::Given(math::angle(*x, *y))),
-            Value::Numeric(v) => Ok(KnotDirection::Given(*v)),
+            Value::Pair(x, y) => Ok(KnotDirection::Given(math::angle(*x, *y).to_radians())),
+            Value::Numeric(v) => Ok(KnotDirection::Given(v.to_radians())),
             _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
                 format!("Expected direction, got {}", val.ty()),
             )),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direction_numeric_is_degrees_in_input() {
+        let interp = Interpreter::new();
+        let dir = interp
+            .value_to_direction(&Value::Numeric(90.0))
+            .expect("numeric direction should parse");
+
+        match dir {
+            KnotDirection::Given(angle) => {
+                assert!((angle - core::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            }
+            _ => panic!("expected given direction"),
+        }
+    }
+
+    #[test]
+    fn direction_pair_is_converted_to_radians() {
+        let interp = Interpreter::new();
+        let dir = interp
+            .value_to_direction(&Value::Pair(0.0, 1.0))
+            .expect("pair direction should parse");
+
+        match dir {
+            KnotDirection::Given(angle) => {
+                assert!((angle - core::f64::consts::FRAC_PI_2).abs() < 1e-12);
+            }
+            _ => panic!("expected given direction"),
         }
     }
 }

@@ -211,7 +211,7 @@ pub struct DashPattern {
 pub enum KnotDirection {
     /// Control point has been explicitly computed as a Bezier handle.
     Explicit(Point),
-    /// A specific direction angle (in degrees).
+    /// A specific direction angle (in radians).
     Given(Scalar),
     /// Curl parameter (default 1.0 at open-path endpoints).
     Curl(Scalar),
