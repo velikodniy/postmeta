@@ -168,13 +168,7 @@ fn solve_cyclic_segment(
 
     // For two knots, use the two-knot special case.
     if seg_len == 2 {
-        let i = indices[0];
-        let j = indices[1];
-        let di = i; // delta/dist index for segment i→j
-        solve_two_knots_range(path, i, j, delta, dist);
-        // Correct: solve_two_knots_range uses delta[i] and dist[i],
-        // which for a cyclic path is the segment from knot i to knot (i+1)%n = j.
-        let _ = di;
+        solve_two_knots_range(path, indices[0], indices[1], delta, dist);
         return;
     }
 
@@ -184,12 +178,7 @@ fn solve_cyclic_segment(
 
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for li in 1..(seg_len - 1) {
-        let prev_global = indices[li - 1];
-        let cur_global = indices[li];
-        // delta[prev_global] = knots[cur_global] - knots[prev_global]
-        // delta[cur_global]  = knots[next_global] - knots[cur_global]
-        let _ = cur_global;
-        psi[li] = turning_angle(delta[prev_global], delta[indices[li]]);
+        psi[li] = turning_angle(delta[indices[li - 1]], delta[indices[li]]);
     }
 
     let mut theta = vec![0.0; seg_len];
@@ -198,20 +187,20 @@ fn solve_cyclic_segment(
 
     // Left boundary (knot at `start`)
     let gi = indices[0];
-    let gj = indices[1];
-    let alpha0 = tension_val(path.knots[gi].right_tension);
-    let beta0 = tension_val(path.knots[gj].left_tension);
+    let rt0 = path.knots[gi].right_tension;
+    let lt1 = path.knots[indices[1]].left_tension;
 
     match path.knots[gi].right {
         KnotDirection::Given(angle) => {
-            theta[0] = angle - angle_of(delta[gi]);
+            let th = reduce_angle(angle - angle_of(delta[gi]));
+            theta[0] = th;
             uu[0] = 0.0;
-            vv[0] = theta[0];
+            vv[0] = th;
         }
         KnotDirection::Curl(gamma) => {
-            let ct = curl_ratio(gamma, alpha0, beta0);
-            uu[0] = ct;
-            vv[0] = 0.0;
+            let cr = curl_ratio(gamma, rt0, lt1);
+            uu[0] = cr;
+            vv[0] = -cr * psi[1]; // C2 fix
         }
         _ => {
             uu[0] = 0.0;
@@ -219,34 +208,63 @@ fn solve_cyclic_segment(
         }
     }
 
-    // Forward sweep for interior knots
+    // Forward sweep for interior knots (same ratio-based approach as open solver)
     for li in 1..(seg_len - 1) {
         let gk = indices[li];
         let gk_prev = indices[li - 1];
-        let alpha_k = tension_val(path.knots[gk].right_tension);
-        let beta_prev = tension_val(path.knots[gk].left_tension);
+        let gk_next = indices[li + 1];
 
-        let dk_prev = dist[gk_prev];
-        let dk = dist[gk];
+        let rt_prev = tension_val(path.knots[gk_prev].right_tension);
+        let alpha_prev = 1.0 / rt_prev;
+        let lt_next = tension_val(path.knots[gk_next].left_tension);
+        let beta_next = 1.0 / lt_next;
+        let lt_k = tension_val(path.knots[gk].left_tension);
+        let rt_k = tension_val(path.knots[gk].right_tension);
 
-        let a_coeff = inv_tension_cubed(beta_prev) / dk_prev;
-        let b_coeff = (3.0 - inv_tension(beta_prev)) * inv_tension_sq(beta_prev) / dk_prev;
-        let c_coeff = (3.0 - inv_tension(alpha_k)) * inv_tension_sq(alpha_k) / dk;
-        let d_coeff = inv_tension_cubed(alpha_k) / dk;
-
-        let rhs = if li + 1 < seg_len - 1 {
-            (-b_coeff).mul_add(psi[li], -(d_coeff * psi[li + 1]))
+        let aa = if (rt_prev - 1.0).abs() < EPSILON {
+            0.5
         } else {
-            -b_coeff * psi[li]
+            alpha_prev / (3.0 - alpha_prev)
+        };
+        let dd = (3.0 - alpha_prev) * dist[gk];
+
+        let bb = if (lt_next - 1.0).abs() < EPSILON {
+            0.5
+        } else {
+            beta_next / (3.0 - beta_next)
+        };
+        let ee = (3.0 - beta_next) * dist[gk_prev];
+
+        let cc = uu[li - 1].mul_add(-aa, 1.0);
+
+        let (dd_adj, ee_adj) = if (lt_k - rt_k).abs() < EPSILON {
+            (cc * dd, ee)
+        } else if lt_k < rt_k {
+            let ratio = lt_k / rt_k;
+            (cc * dd * ratio * ratio, ee)
+        } else {
+            let ratio = rt_k / lt_k;
+            (cc * dd, ee * ratio * ratio)
         };
 
-        let denom = a_coeff.mul_add(uu[li - 1], b_coeff + c_coeff);
-        if denom.abs() < 1e-30 {
+        let denom_ff = ee_adj + dd_adj;
+        if denom_ff.abs() < 1e-30 {
             uu[li] = 0.0;
             vv[li] = 0.0;
         } else {
-            uu[li] = -d_coeff / denom;
-            vv[li] = a_coeff.mul_add(-vv[li - 1], rhs) / denom;
+            let ff = ee_adj / denom_ff;
+            uu[li] = ff * bb;
+            let acc = if li + 1 < seg_len - 1 {
+                -psi[li + 1] * uu[li]
+            } else {
+                0.0
+            };
+            let bk_frac = if cc.abs() < 1e-30 {
+                0.0
+            } else {
+                (1.0 - ff) / cc
+            };
+            vv[li] = (vv[li - 1] * bk_frac).mul_add(-aa, psi[li].mul_add(-bk_frac, acc));
         }
     }
 
@@ -254,20 +272,22 @@ fn solve_cyclic_segment(
     let last = seg_len - 1;
     let ge = indices[last];
     let ge_prev = indices[last - 1];
-    let alpha_last = tension_val(path.knots[ge_prev].right_tension);
-    let beta_last = tension_val(path.knots[ge].left_tension);
+    let lt_end = path.knots[ge].left_tension;
+    let rt_prev_end = path.knots[ge_prev].right_tension;
 
     match path.knots[ge].left {
         KnotDirection::Given(angle) => {
-            theta[last] = angle - angle_of(delta[ge_prev]) - psi.get(last).copied().unwrap_or(0.0);
+            theta[last] = reduce_angle(
+                angle - angle_of(delta[ge_prev]) - psi.get(last).copied().unwrap_or(0.0),
+            );
         }
         KnotDirection::Curl(gamma) => {
-            let ct = curl_ratio(gamma, beta_last, alpha_last);
-            let denom = ct.mul_add(uu[last - 1], 1.0);
+            let ff = curl_ratio(gamma, lt_end, rt_prev_end);
+            let denom = ff.mul_add(uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
             } else {
-                theta[last] = ct * vv[last - 1] / denom;
+                theta[last] = -(ff * vv[last - 1]) / denom; // C3 fix
             }
         }
         _ => {
@@ -277,7 +297,7 @@ fn solve_cyclic_segment(
 
     // Back-substitution
     for li in (0..last).rev() {
-        theta[li] = uu[li].mul_add(theta[li + 1], vv[li]);
+        theta[li] = uu[li].mul_add(-theta[li + 1], vv[li]);
     }
 
     // Compute phi values and set control points
@@ -337,6 +357,13 @@ fn solve_choices_open(path: &mut Path) {
 ///
 /// This applies Hobby's algorithm with the boundary conditions from the
 /// endpoint knots' `right` (at `start`) and `left` (at `end`) directions.
+///
+/// Follows mp.web's `make_choices` structure: ratio-based tridiagonal
+/// coefficients (aa=A/B, bb=D/C) with correct tension sourcing.
+#[expect(
+    clippy::too_many_lines,
+    reason = "tridiagonal solver with boundary conditions mirrors mp.web structure"
+)]
 fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2], dist: &[Scalar]) {
     let seg_len = end - start + 1; // number of knots in this segment
     if seg_len < 2 {
@@ -350,7 +377,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
     }
 
     // Compute turning angles for this sub-segment.
-    // psi[i] corresponds to the turning angle at local knot index i (global index start + i).
+    // psi[i] corresponds to the turning angle at local index i.
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for (i, psi_i) in psi.iter_mut().enumerate().take(seg_len - 1).skip(1) {
         let k = start + i;
@@ -362,19 +389,22 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
     let mut vv = vec![0.0; seg_len];
 
     // Left boundary condition (knot at `start`)
-    let alpha0 = tension_val(path.knots[start].right_tension);
-    let beta0 = tension_val(path.knots[start + 1].left_tension);
+    // mp.web: rt = right_tension(start), lt = left_tension(start+1)
+    let rt0 = path.knots[start].right_tension;
+    let lt1 = path.knots[start + 1].left_tension;
 
     match path.knots[start].right {
         KnotDirection::Given(angle) => {
-            theta[0] = angle - angle_of(delta[start]);
+            let th = reduce_angle(angle - angle_of(delta[start]));
+            theta[0] = th;
             uu[0] = 0.0;
-            vv[0] = theta[0];
+            vv[0] = th;
         }
         KnotDirection::Curl(gamma) => {
-            let ct = curl_ratio(gamma, alpha0, beta0);
-            uu[0] = ct;
-            vv[0] = 0.0;
+            // mp.web: uu[0] = curl_ratio(cc, rt, lt); vv[0] = -psi[1]*uu[0]
+            let cr = curl_ratio(gamma, rt0, lt1);
+            uu[0] = cr;
+            vv[0] = -cr * psi[1]; // C2 fix: was 0.0
         }
         _ => {
             uu[0] = 0.0;
@@ -382,53 +412,107 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
     }
 
-    // Forward sweep for interior knots
+    // Forward sweep for interior knots (k = 1..seg_len-2)
+    //
+    // Following mp.web's ratio-based approach:
+    //   aa = A_k/B_k = alpha_{k-1} / (3 - alpha_{k-1})
+    //     where alpha_{k-1} = 1/|right_tension(prev_knot)|
+    //   bb = D_k/C_k = beta_{k+1} / (3 - beta_{k+1})
+    //     where beta_{k+1} = 1/|left_tension(next_knot)|
+    //   dd = (3 - alpha_{k-1}) * dist[k]    (forward chord length)
+    //   ee = (3 - beta_{k+1}) * dist[k-1]   (backward chord length)
+    //   cc = 1 - uu[k-1] * aa
+    //   Adjust dd,ee by (lt/rt)^2 or (rt/lt)^2 for asymmetric tensions at k.
+    //   ff = ee / (ee + cc*dd_adj)
+    //   uu[k] = ff * bb
+    //   vv[k] = -psi[k+1]*uu[k] - (1-ff)*psi[k] - ff*aa*vv[k-1]  (for non-curl previous)
     for i in 1..(seg_len - 1) {
         let k = start + i;
-        let alpha_k = tension_val(path.knots[k].right_tension);
-        let beta_prev = tension_val(path.knots[k].left_tension);
 
-        let dk_prev = dist[k - 1];
-        let dk = dist[k];
+        // Tensions for the A/B ratio (uses previous knot's right tension)
+        let rt_prev = tension_val(path.knots[k - 1].right_tension);
+        let alpha_prev = 1.0 / rt_prev;
 
-        // Coefficients for the tridiagonal system
-        let a_coeff = inv_tension_cubed(beta_prev) / dk_prev;
-        let b_coeff = (3.0 - inv_tension(beta_prev)) * inv_tension_sq(beta_prev) / dk_prev;
-        let c_coeff = (3.0 - inv_tension(alpha_k)) * inv_tension_sq(alpha_k) / dk;
-        let d_coeff = inv_tension_cubed(alpha_k) / dk;
+        // Tensions for the D/C ratio (uses next knot's left tension)
+        let lt_next = tension_val(path.knots[k + 1].left_tension);
+        let beta_next = 1.0 / lt_next;
 
-        let rhs = if i + 1 < seg_len - 1 {
-            (-b_coeff).mul_add(psi[i], -(d_coeff * psi[i + 1]))
+        // Tensions at the current knot (for scaling between the two sides)
+        let lt_k = tension_val(path.knots[k].left_tension);
+        let rt_k = tension_val(path.knots[k].right_tension);
+
+        // aa = alpha_{k-1} / (3 - alpha_{k-1}); mp.web: 1/(3*rt_prev - 1)
+        let aa = if (rt_prev - 1.0).abs() < EPSILON {
+            0.5
         } else {
-            -b_coeff * psi[i]
+            alpha_prev / (3.0 - alpha_prev)
+        };
+        let dd = (3.0 - alpha_prev) * dist[k]; // forward chord scaled
+
+        // bb = beta_{k+1} / (3 - beta_{k+1}); mp.web: 1/(3*lt_next - 1)
+        let bb = if (lt_next - 1.0).abs() < EPSILON {
+            0.5
+        } else {
+            beta_next / (3.0 - beta_next)
+        };
+        let ee = (3.0 - beta_next) * dist[k - 1]; // backward chord scaled
+
+        let cc = uu[i - 1].mul_add(-aa, 1.0);
+
+        // Scale dd or ee for asymmetric tensions at the current knot.
+        // mp.web: if lt_k != rt_k, multiply dd by (lt_k/rt_k)^2 or ee by (rt_k/lt_k)^2.
+        let (dd_adj, ee_adj) = if (lt_k - rt_k).abs() < EPSILON {
+            (cc * dd, ee)
+        } else if lt_k < rt_k {
+            let ratio = lt_k / rt_k;
+            (cc * dd * ratio * ratio, ee)
+        } else {
+            let ratio = rt_k / lt_k;
+            (cc * dd, ee * ratio * ratio)
         };
 
-        let denom = a_coeff.mul_add(uu[i - 1], b_coeff + c_coeff);
-        if denom.abs() < 1e-30 {
+        // ff = C_k / (C_k + B_k - u_{k-1}*A_k)
+        let denom_ff = ee_adj + dd_adj;
+        if denom_ff.abs() < 1e-30 {
             uu[i] = 0.0;
             vv[i] = 0.0;
         } else {
-            uu[i] = -d_coeff / denom;
-            vv[i] = a_coeff.mul_add(-vv[i - 1], rhs) / denom;
+            let ff = ee_adj / denom_ff;
+            uu[i] = ff * bb;
+
+            // Compute vv[i]: the particular solution.
+            let acc = if i + 1 < seg_len - 1 {
+                -psi[i + 1] * uu[i]
+            } else {
+                0.0
+            };
+            let bk_frac = if cc.abs() < 1e-30 {
+                0.0
+            } else {
+                (1.0 - ff) / cc
+            };
+            vv[i] = (vv[i - 1] * bk_frac).mul_add(-aa, psi[i].mul_add(-bk_frac, acc));
         }
     }
 
     // Right boundary condition (knot at `end`)
     let last = seg_len - 1;
-    let alpha_last = tension_val(path.knots[end - 1].right_tension);
-    let beta_last = tension_val(path.knots[end].left_tension);
+    let lt_end = path.knots[end].left_tension;
+    let rt_prev_end = path.knots[end - 1].right_tension;
 
     match path.knots[end].left {
         KnotDirection::Given(angle) => {
-            theta[last] = angle - angle_of(delta[end - 1]) - psi.get(last).copied().unwrap_or(0.0);
+            theta[last] = reduce_angle(
+                angle - angle_of(delta[end - 1]) - psi.get(last).copied().unwrap_or(0.0),
+            );
         }
         KnotDirection::Curl(gamma) => {
-            let ct = curl_ratio(gamma, beta_last, alpha_last);
-            let denom = ct.mul_add(uu[last - 1], 1.0);
+            let ff = curl_ratio(gamma, lt_end, rt_prev_end);
+            let denom = ff.mul_add(uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
             } else {
-                theta[last] = ct * vv[last - 1] / denom;
+                theta[last] = -(ff * vv[last - 1]) / denom;
             }
         }
         _ => {
@@ -436,9 +520,9 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
     }
 
-    // Back-substitution
+    // Back-substitution: theta[k] = vv[k] - uu[k]*theta[k+1]
     for i in (0..last).rev() {
-        theta[i] = uu[i].mul_add(theta[i + 1], vv[i]);
+        theta[i] = uu[i].mul_add(-theta[i + 1], vv[i]);
     }
 
     // Compute phi values and set control points
@@ -456,6 +540,9 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
 }
 
 /// Two-knot special case for a sub-segment range.
+///
+/// Handles the four combinations of boundary conditions at a two-knot segment.
+/// Follows mp.web's "Reduce to simple case" sections.
 fn solve_two_knots_range(
     path: &mut Path,
     i: usize,
@@ -463,44 +550,127 @@ fn solve_two_knots_range(
     full_delta: &[Vec2],
     full_dist: &[Scalar],
 ) {
-    let _alpha = tension_val(path.knots[i].right_tension);
-    let _beta = tension_val(path.knots[j].left_tension);
-    let d = full_delta[i];
-
-    let mut theta = 0.0;
-    let mut phi = 0.0;
+    let seg = i.min(full_delta.len() - 1);
+    let d = full_delta[seg];
+    let chord_angle = angle_of(d);
 
     match (&path.knots[i].right, &path.knots[j].left) {
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
-            theta = *a1 - angle_of(d);
-            phi = *a2 - angle_of(d) - std::f64::consts::PI;
+            // mp.web: theta = given_right - chord_angle
+            //         phi computed via sin/cos: sf = -sin(given_left - chord_angle)
+            // i.e., phi = -(given_left - chord_angle)
+            let theta = reduce_angle(*a1 - chord_angle);
+            let phi = reduce_angle(-(*a2 - chord_angle));
+            set_controls_given_given(path, i, j, full_delta, full_dist, theta, phi);
+            return;
         }
-        (KnotDirection::Given(a1), KnotDirection::Curl(_gamma)) => {
-            theta = *a1 - angle_of(d);
-            phi = -theta;
+        (KnotDirection::Given(a1), KnotDirection::Curl(_)) => {
+            // Given start, curl end: theta determined, phi = -theta
+            let theta = reduce_angle(*a1 - chord_angle);
+            let phi = -theta;
+            set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
+            return;
         }
-        (KnotDirection::Curl(_gamma1), KnotDirection::Given(a2)) => {
-            phi = *a2 - angle_of(d) - std::f64::consts::PI;
-            theta = -phi;
+        (KnotDirection::Curl(_), KnotDirection::Given(a2)) => {
+            // Curl start, given end: phi determined, theta = -phi
+            let phi = reduce_angle(-(*a2 - chord_angle));
+            let theta = -phi;
+            set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
+            return;
         }
-        (KnotDirection::Curl(_gamma1), KnotDirection::Curl(_gamma2)) => {
-            // Both curls with default curl=1: theta=phi=0 gives straight line
-            theta = 0.0;
-            phi = 0.0;
+        (KnotDirection::Curl(_), KnotDirection::Curl(_)) => {
+            // Both curls: straight line.
+            // mp.web directly sets controls at 1/3 and 2/3 of the chord,
+            // adjusted by tension. Our velocity function handles this correctly
+            // with theta=phi=0.
+            set_controls_for_segment(path, i, j, full_delta, full_dist, 0.0, 0.0);
+            return;
         }
         _ => {}
     }
 
-    set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
+    set_controls_for_segment(path, i, j, full_delta, full_dist, 0.0, 0.0);
+}
+
+/// Set controls for the two-knot given+given case.
+///
+/// mp.web computes sin/cos directly: `sf = -sin(phi_raw)`, `cf = cos(phi_raw)`,
+/// so the effective phi angle passed to the velocity function is negated relative
+/// to the raw direction difference. This is handled by passing (st,ct,sf,cf) to
+/// `velocity` and `set_controls` directly.
+fn set_controls_given_given(
+    path: &mut Path,
+    i: usize,
+    j: usize,
+    delta: &[Vec2],
+    dist: &[Scalar],
+    theta: Scalar,
+    phi: Scalar,
+) {
+    let seg = i.min(delta.len() - 1);
+    let d = delta[seg];
+    let dd = dist[seg];
+
+    if dd < EPSILON {
+        let p = path.knots[i].point;
+        path.knots[i].right = KnotDirection::Explicit(p);
+        path.knots[j].left = KnotDirection::Explicit(p);
+        return;
+    }
+
+    let alpha = tension_val(path.knots[i].right_tension);
+    let beta = tension_val(path.knots[j].left_tension);
+
+    let st = theta.sin();
+    let ct = theta.cos();
+    let sf = phi.sin();
+    let cf = phi.cos();
+
+    let rr = velocity(st, ct, sf, cf, alpha);
+    let ss = velocity(sf, cf, st, ct, beta);
+
+    // Apply at_least clamping
+    let (rr, ss) = clamp_at_least(
+        rr,
+        ss,
+        st,
+        ct,
+        sf,
+        cf,
+        path.knots[i].right_tension,
+        path.knots[j].left_tension,
+    );
+
+    let right_cp = Point::new(
+        rr.mul_add(d.x.mul_add(ct, -(d.y * st)), path.knots[i].point.x),
+        rr.mul_add(d.y.mul_add(ct, d.x * st), path.knots[i].point.y),
+    );
+    let left_cp = Point::new(
+        ss.mul_add(-d.x.mul_add(cf, d.y * sf), path.knots[j].point.x),
+        ss.mul_add(-d.y.mul_add(cf, -(d.x * sf)), path.knots[j].point.y),
+    );
+
+    path.knots[i].right = KnotDirection::Explicit(right_cp);
+    path.knots[j].left = KnotDirection::Explicit(left_cp);
 }
 
 // ---------------------------------------------------------------------------
 // Cyclic path solver
 // ---------------------------------------------------------------------------
 
+/// Solve a purely cyclic path (all Open directions, no breakpoints).
+///
+/// Follows mp.web's cyclic tridiagonal solver (lines 6590-6712, 6778-6788):
+/// - Forward sweep with uu[k], vv[k], ww[k] (ww tracks theta[0] coefficient)
+/// - Backward iteration closure to solve for theta[0] = theta[n]
+/// - Standard back-substitution
+///
+/// The coefficient computation uses the same ratio-based approach as the
+/// open solver (aa=A/B, bb=D/C, etc.), since the cyclic and open cases
+/// share the same mock-curvature equation structure.
 #[expect(
-    clippy::needless_range_loop,
-    reason = "loops use modular index arithmetic and cross-element dependencies"
+    clippy::too_many_lines,
+    reason = "cyclic tridiagonal solver mirrors mp.web structure"
 )]
 fn solve_choices_cyclic(path: &mut Path) {
     let n = path.knots.len();
@@ -508,7 +678,7 @@ fn solve_choices_cyclic(path: &mut Path) {
         return;
     }
 
-    // Compute distances and turning angles
+    // Compute delta vectors and distances for all n cyclic segments
     let mut delta: Vec<Vec2> = Vec::with_capacity(n);
     let mut dist: Vec<Scalar> = Vec::with_capacity(n);
     let mut psi: Vec<Scalar> = Vec::with_capacity(n);
@@ -520,113 +690,159 @@ fn solve_choices_cyclic(path: &mut Path) {
         dist.push(d.length());
     }
 
+    // Turning angles: psi[k] = turning angle at knot k (between chords k-1 and k)
     for k in 0..n {
         let prev = if k == 0 { n - 1 } else { k - 1 };
         psi.push(turning_angle(delta[prev], delta[k]));
     }
 
-    // For a cyclic path we need to solve a cyclic tridiagonal system.
-    // We use the approach from mp.web: forward sweep with extra tracking
-    // of the theta[0] coefficient.
+    // Forward sweep: compute uu[k], vv[k], ww[k] for k=1..n.
+    //
+    // mp.web processes k=1..n (1-based), where k=n is the end_cycle knot (same as
+    // knot 0). The recurrence is: theta[k-1] + uu[k-1]*theta[k] = vv[k-1] + ww[k-1]*theta[0]
+    //
+    // We use arrays of size n+1 (indices 0..n), where index n corresponds to knot 0.
+    let mut uu = vec![0.0_f64; n + 1];
+    let mut vv = vec![0.0_f64; n + 1];
+    let mut ww = vec![0.0_f64; n + 1];
 
-    let mut uu = vec![0.0; n];
-    let mut vv = vec![0.0; n];
-    let mut ww = vec![0.0; n]; // coefficient of theta[0]
-
-    // First knot
-    let _alpha0 = tension_val(path.knots[0].right_tension);
-    let _beta0 = tension_val(path.knots[0].left_tension);
-    let _alpha_last = tension_val(path.knots[n - 1].right_tension);
-    let _beta_last_prev = tension_val(path.knots[0].left_tension);
-
-    // Start with theta[0] as the free variable
     uu[0] = 0.0;
     vv[0] = 0.0;
-    ww[0] = 1.0; // theta[0] = theta[0]
+    ww[0] = 1.0;
 
-    for k in 1..n {
+    for k in 1..=n {
         let prev = k - 1;
-        let alpha_k = tension_val(path.knots[k].right_tension);
-        let beta_k = tension_val(path.knots[k].left_tension);
-        let _alpha_prev = tension_val(path.knots[prev].right_tension);
+        // Map array indices to knot indices (cyclic)
+        let knot_k = k % n;
+        let knot_prev = prev % n;
+        let knot_next = (k + 1) % n;
 
-        let dk_prev = dist[prev];
-        let dk = dist[k % n];
-
-        let a_coeff = inv_tension_cubed(beta_k) / dk_prev;
-        let b_coeff = (3.0 - inv_tension(beta_k)) * inv_tension_sq(beta_k) / dk_prev;
-        let c_coeff = if k < n {
-            (3.0 - inv_tension(alpha_k)) * inv_tension_sq(alpha_k) / dk
+        // aa = A_k/B_k = alpha_{k-1} / (3 - alpha_{k-1})
+        //   where alpha_{k-1} = 1/|right_tension(prev knot)|
+        let rt_prev = tension_val(path.knots[knot_prev].right_tension);
+        let (aa, dd) = if (rt_prev - 1.0).abs() < EPSILON {
+            (0.5, 2.0 * dist[knot_k])
         } else {
-            0.0
-        };
-        let d_coeff = if k < n {
-            inv_tension_cubed(alpha_k) / dk
-        } else {
-            0.0
+            let alpha_prev = 1.0 / rt_prev;
+            (
+                alpha_prev / (3.0 - alpha_prev),
+                (3.0 - alpha_prev) * dist[knot_k],
+            )
         };
 
-        let psi_next = psi[(k + 1) % n];
-        let rhs = (-b_coeff).mul_add(psi[k], -(d_coeff * psi_next));
+        // bb = D_k/C_k = beta_{k+1} / (3 - beta_{k+1})
+        //   where beta_{k+1} = 1/|left_tension(next knot)|
+        let lt_next = tension_val(path.knots[knot_next].left_tension);
+        let (bb, ee) = if (lt_next - 1.0).abs() < EPSILON {
+            (0.5, 2.0 * dist[knot_prev])
+        } else {
+            let beta_next = 1.0 / lt_next;
+            (
+                beta_next / (3.0 - beta_next),
+                (3.0 - beta_next) * dist[knot_prev],
+            )
+        };
 
-        let denom = a_coeff.mul_add(uu[prev], b_coeff + c_coeff);
+        // cc = 1 - uu[k-1]*aa
+        let cc = uu[prev].mul_add(-aa, 1.0);
+
+        // ff = C_k / (C_k + B_k - u_{k-1}*A_k)
+        let dd = dd * cc;
+        let lt_k = tension_val(path.knots[knot_k].left_tension);
+        let rt_k = tension_val(path.knots[knot_k].right_tension);
+
+        let (dd, ee) = if (lt_k - rt_k).abs() < EPSILON {
+            (dd, ee)
+        } else if lt_k < rt_k {
+            let ratio = lt_k / rt_k;
+            (dd * ratio * ratio, ee)
+        } else {
+            let ratio = rt_k / lt_k;
+            (dd, ee * ratio * ratio)
+        };
+
+        let denom = ee + dd;
         if denom.abs() < 1e-30 {
             uu[k] = 0.0;
             vv[k] = 0.0;
             ww[k] = 0.0;
+            continue;
+        }
+
+        let ff = ee / denom;
+        uu[k] = ff * bb;
+
+        // Compute vv[k] and ww[k] (mp.web lines 6674-6687)
+        let psi_next = psi[knot_next];
+        let acc = -psi_next * uu[k];
+
+        let bk_ratio = if cc.abs() < 1e-30 {
+            0.0
         } else {
-            uu[k] = -d_coeff / denom;
-            vv[k] = a_coeff.mul_add(-vv[prev], rhs) / denom;
-            ww[k] = (-a_coeff * ww[prev]) / denom;
+            (1.0 - ff) / cc
+        };
+        let acc = psi[knot_k].mul_add(-bk_ratio, acc);
+        let ak_ratio = bk_ratio * aa;
+        vv[k] = vv[prev].mul_add(-ak_ratio, acc);
+        if ww[prev] == 0.0 {
+            ww[k] = 0.0;
+        } else {
+            ww[k] = -ww[prev] * ak_ratio;
         }
     }
 
-    // Close the cycle: theta[0] = theta[0]
-    // Using the last equation: theta[n-1] + uu[n-1]*theta[0] = vv[n-1] + ww[n-1]*theta[0]
-    // Also, theta[n-1] = vv[n-1] + ww[n-1]*theta[0] (from back-substitution into first eq)
-    // We need: theta[0] = vv_final + ww_final * theta[0]
-    // So: theta[0] * (1 - ww_final) = vv_final
-    // where vv_final and ww_final come from back-substituting the last equation.
-
-    // Back-substitute to find theta[0]:
-    // theta[n-1] = vv[n-1] + ww[n-1]*theta[0]
-    // From the cyclic closure, we need the equation connecting theta[n-1] back to theta[0].
-    // In the simplified approach, theta[0] is determined by:
-    let last = n - 1;
-    let w_total = ww[last] + uu[last]; // uu[last] feeds back to theta[0]
-    let v_total = vv[last];
-
-    let theta0 = if (1.0 - w_total).abs() < 1e-30 {
-        0.0
-    } else {
-        v_total / (1.0 - w_total)
-    };
-
-    let mut theta = vec![0.0; n];
-    theta[0] = theta0;
-
-    // Back-substitute
-    theta[last] = ww[last].mul_add(theta0, vv[last]);
-    for k in (1..last).rev() {
-        theta[k] = ww[k].mul_add(theta0, uu[k].mul_add(theta[k + 1], vv[k]));
+    // Cyclic closure: solve for theta[0] = theta[n].
+    // mp.web lines 6701-6712: backward iteration from k=n down to 1,
+    // wrapping k=0→k=n, processing all n indices once.
+    //
+    // In our indexing, the arrays go 0..n. We iterate k from n-1 down to 0,
+    // then wrap to process k=n.
+    // Actually: mp.web starts at k=n, then: decr(k) → n-1, ..., 1, then
+    // k=0→k=n, process, stop. That's n iterations: n-1, n-2, ..., 1, n.
+    //
+    // In our (n+1)-element arrays: iterate k = n-1, n-2, ..., 1, 0 (wrapping
+    // 0 to n via the array). Wait — we already have index n in the arrays.
+    // mp.web iterates: {n-1, n-2, ..., 1, n}. We do: {n, n-1, ..., 1}.
+    let mut aa_val = 0.0_f64;
+    let mut bb_val = 1.0_f64;
+    // Process k = n, n-1, ..., 1 (that's n iterations)
+    for k in (1..=n).rev() {
+        aa_val = aa_val.mul_add(-uu[k], vv[k]);
+        bb_val = bb_val.mul_add(-uu[k], ww[k]);
     }
 
-    // Compute phi values
-    let phi: Vec<Scalar> = (0..n).map(|k| -(psi[k] + theta[k])).collect();
+    // theta[0] = aa / (1 - bb)
+    let theta0 = if (1.0 - bb_val).abs() < 1e-30 {
+        0.0
+    } else {
+        aa_val / (1.0 - bb_val)
+    };
 
-    // Set control points for all segments
+    // Adjust vv to eliminate ww dependency: vv[k] += theta0 * ww[k]
+    // mp.web: theta[n] = aa; vv[0] = aa; for k:=1 to n-1 do vv[k] += aa*ww[k];
+    vv[0] = theta0;
+    for k in 1..n {
+        vv[k] += theta0 * ww[k];
+    }
+
+    // Back-substitution: theta[k] = vv[k] - uu[k]*theta[k+1]
+    // mp.web line 6781: for k:=n-1 downto 0 do theta[k]:=vv[k]-take_fraction(theta[k+1],uu[k])
+    let mut theta = vec![0.0_f64; n + 1];
+    theta[n] = theta0;
+    for k in (0..n).rev() {
+        theta[k] = uu[k].mul_add(-theta[k + 1], vv[k]);
+    }
+
+    // Set control points for all segments (mp.web lines 6782-6788)
     for k in 0..n {
-        let j = (k + 1) % n;
-        set_controls_for_segment(path, k, j, &delta, &dist, theta[k], phi[j]);
+        let next = (k + 1) % n;
+        let phi_next = -(psi[next] + theta[next]);
+        set_controls_for_segment(path, k, next, &delta, &dist, theta[k], phi_next);
     }
 }
 
 // ---------------------------------------------------------------------------
-// Two-knot special case
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Control point computation (the velocity function)
+// Control point computation
 // ---------------------------------------------------------------------------
 
 /// Set cubic Bezier control points for the segment from knot `i` to knot `j`,
@@ -664,24 +880,96 @@ fn set_controls_for_segment(
     let rr = velocity(st, ct, sf, cf, alpha);
     let ss = velocity(sf, cf, st, ct, beta);
 
-    // Compute control points
+    // Apply at_least clamping (mp.web lines 6806-6807, 6825-6837)
+    let (rr, ss) = clamp_at_least(
+        rr,
+        ss,
+        st,
+        ct,
+        sf,
+        cf,
+        path.knots[i].right_tension,
+        path.knots[j].left_tension,
+    );
+
+    // Compute control points (mp.web lines 6808-6815)
     // right_cp = knot[i] + rr * (delta rotated by theta)
     // left_cp  = knot[j] - ss * (delta rotated by -phi)
-    let rr_scaled = rr * dd;
-    let ss_scaled = ss * dd;
-
     let right_cp = Point::new(
-        path.knots[i].point.x + rr_scaled * d.x.mul_add(ct, -(d.y * st)) / dd,
-        path.knots[i].point.y + rr_scaled * d.y.mul_add(ct, d.x * st) / dd,
+        rr.mul_add(d.x.mul_add(ct, -(d.y * st)), path.knots[i].point.x),
+        rr.mul_add(d.y.mul_add(ct, d.x * st), path.knots[i].point.y),
     );
 
     let left_cp = Point::new(
-        path.knots[j].point.x - ss_scaled * d.x.mul_add(cf, d.y * sf) / dd,
-        path.knots[j].point.y - ss_scaled * d.y.mul_add(cf, -(d.x * sf)) / dd,
+        ss.mul_add(-d.x.mul_add(cf, d.y * sf), path.knots[j].point.x),
+        ss.mul_add(-d.y.mul_add(cf, -(d.x * sf)), path.knots[j].point.y),
     );
 
     path.knots[i].right = KnotDirection::Explicit(right_cp);
     path.knots[j].left = KnotDirection::Explicit(left_cp);
+}
+
+/// Clamp velocities for "at least" tension (bounding triangle constraint).
+///
+/// From mp.web lines 6819-6837: When `sin(theta)` and `sin(phi)` have the
+/// same sign, the bounding triangle condition limits velocities so that the
+/// curve stays inside the triangle formed by the tangent lines.
+///
+/// Arguments:
+/// - `rr`, `ss`: computed velocities
+/// - `st`, `ct`, `sf`, `cf`: sin/cos of theta and phi
+/// - `right_t`: raw right tension (negative means "at least")
+/// - `left_t`: raw left tension (negative means "at least")
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors mp.web set_controls which requires all sin/cos and tension values"
+)]
+fn clamp_at_least(
+    rr: Scalar,
+    ss: Scalar,
+    st: Scalar,
+    ct: Scalar,
+    sf: Scalar,
+    cf: Scalar,
+    right_t: Scalar,
+    left_t: Scalar,
+) -> (Scalar, Scalar) {
+    // Only applies if sin(theta) and sin(phi) have the same sign
+    if !((st >= 0.0 && sf >= 0.0) || (st <= 0.0 && sf <= 0.0)) {
+        return (rr, ss);
+    }
+
+    // sine = |sin(theta)| * cos(phi) + |sin(phi)| * cos(theta)
+    //      = sin(|theta| + |phi|) when both have the same sign
+    let sine = st.abs().mul_add(cf, sf.abs() * ct);
+    if sine <= 0.0 {
+        return (rr, ss);
+    }
+
+    // Safety factor: multiply by (1 + epsilon). mp.web uses (fraction_one + unity),
+    // which in fixed-point is (1 + 1/65536). We use a small factor.
+    let sine = sine * (1.0 + 1.0 / 65536.0);
+
+    let mut rr = rr;
+    let mut ss = ss;
+
+    // Clamp rr if right tension is "at least" (negative)
+    if right_t < 0.0 {
+        let bound = sf.abs() / sine;
+        if rr > bound {
+            rr = bound;
+        }
+    }
+
+    // Clamp ss if left tension is "at least" (negative)
+    if left_t < 0.0 {
+        let bound = st.abs() / sine;
+        if ss > bound {
+            ss = bound;
+        }
+    }
+
+    (rr, ss)
 }
 
 /// Hobby's velocity function.
@@ -716,9 +1004,24 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
 
 /// Compute the curl ratio for endpoint curl handling.
 ///
-/// This is from mp.web's `curl_ratio(gamma, a, b)`:
-///   ((3 - a) * a^2 * gamma + b^3) / (a^3 * gamma + (3 - b) * b^2)
-fn curl_ratio(gamma: Scalar, alpha: Scalar, beta: Scalar) -> Scalar {
+/// From mp.web's `curl_ratio(gamma, a_tension, b_tension)`.
+/// Arguments are the raw tension values (not reciprocals).
+///
+/// With `alpha = 1/a_tension` and `beta = 1/b_tension`, the formula is:
+///   ((3 - alpha) * alpha^2 * gamma + beta^3) / (alpha^3 * gamma + (3 - beta) * beta^2)
+///
+/// Result is capped at 4.0.
+fn curl_ratio(gamma: Scalar, a_tension: Scalar, b_tension: Scalar) -> Scalar {
+    let at = tension_val(a_tension);
+    let bt = tension_val(b_tension);
+
+    // Fast path for unit tensions: (2*gamma + 1) / (gamma + 2)
+    if (at - 1.0).abs() < EPSILON && (bt - 1.0).abs() < EPSILON {
+        return 2.0f64.mul_add(gamma, 1.0) / (gamma + 2.0);
+    }
+
+    let alpha = 1.0 / at;
+    let beta = 1.0 / bt;
     let a3 = alpha * alpha * alpha;
     let b3 = beta * beta * beta;
     let num = ((3.0 - alpha) * alpha * alpha).mul_add(gamma, b3);
@@ -726,7 +1029,7 @@ fn curl_ratio(gamma: Scalar, alpha: Scalar, beta: Scalar) -> Scalar {
     if denom.abs() < 1e-30 {
         0.0
     } else {
-        num / denom
+        (num / denom).min(4.0)
     }
 }
 
@@ -737,21 +1040,13 @@ fn curl_ratio(gamma: Scalar, alpha: Scalar, beta: Scalar) -> Scalar {
 /// Get the effective tension value, clamping at minimum and handling
 /// "at least" (negative values).
 const fn tension_val(t: Scalar) -> Scalar {
+    // Negative means "at least" — take absolute value, clamp to minimum.
     t.abs().max(MIN_TENSION)
 }
 
-fn inv_tension(t: Scalar) -> Scalar {
-    1.0 / tension_val(t)
-}
-
-fn inv_tension_sq(t: Scalar) -> Scalar {
-    let it = inv_tension(t);
-    it * it
-}
-
-fn inv_tension_cubed(t: Scalar) -> Scalar {
-    let it = inv_tension(t);
-    it * it * it
+/// Reduce an angle to the range [-π, π].
+fn reduce_angle(a: Scalar) -> Scalar {
+    a.sin().atan2(a.cos())
 }
 
 /// Compute the angle (in radians) of a 2D vector.
@@ -1073,6 +1368,356 @@ mod tests {
         }
         if let KnotDirection::Explicit(cp) = path.knots[0].left {
             assert!(cp.x.abs() < 0.01, "C→A left cp should be on x=0: {cp:?}");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Non-unit tension tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: extract explicit control point.
+    fn right_cp(path: &Path, k: usize) -> Point {
+        match path.knots[k].right {
+            KnotDirection::Explicit(p) => p,
+            ref other => panic!("knot {k} right is not Explicit: {other:?}"),
+        }
+    }
+
+    fn left_cp(path: &Path, k: usize) -> Point {
+        match path.knots[k].left {
+            KnotDirection::Explicit(p) => p,
+            ref other => panic!("knot {k} left is not Explicit: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_tension_2_shortens_handles() {
+        // Straight line with tension 2 vs tension 1.
+        // Higher tension → control points closer to knots.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 2.0;
+        let mut k1 = Knot::new(Point::new(10.0, 0.0));
+        k1.left_tension = 2.0;
+        let mut t2 = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut t2);
+
+        let mut t1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        make_choices(&mut t1);
+
+        let d1 = (right_cp(&t1, 0) - t1.knots[0].point).length();
+        let d2 = (right_cp(&t2, 0) - t2.knots[0].point).length();
+        assert!(
+            d2 < d1 * 0.6,
+            "tension 2 handles ({d2:.4}) should be much shorter than tension 1 ({d1:.4})"
+        );
+    }
+
+    #[test]
+    fn test_tension_075_lengthens_handles() {
+        // Minimum tension (0.75) should produce longer handles than default (1.0).
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 0.75;
+        let mut k1 = Knot::new(Point::new(10.0, 0.0));
+        k1.left_tension = 0.75;
+        let mut t075 = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut t075);
+
+        let mut t1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        make_choices(&mut t1);
+
+        let d1 = (right_cp(&t1, 0) - t1.knots[0].point).length();
+        let d075 = (right_cp(&t075, 0) - t075.knots[0].point).length();
+        assert!(
+            d075 > d1 * 1.2,
+            "tension 0.75 handles ({d075:.4}) should be longer than tension 1 ({d1:.4})"
+        );
+    }
+
+    #[test]
+    fn test_asymmetric_tension() {
+        // tension 1 and 3: right handle normal length, left handle short.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 1.0;
+        let mut k1 = Knot::new(Point::new(10.0, 0.0));
+        k1.left_tension = 3.0;
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        let d_right = (right_cp(&path, 0) - path.knots[0].point).length();
+        let d_left = (left_cp(&path, 1) - path.knots[1].point).length();
+        assert!(
+            d_left < d_right * 0.5,
+            "left tension 3 handle ({d_left:.4}) should be much shorter \
+             than right tension 1 handle ({d_right:.4})"
+        );
+    }
+
+    #[test]
+    fn test_three_knots_with_tension_2() {
+        // Three-knot open path with all tensions = 2.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 2.0;
+        let mut k1 = Knot::new(Point::new(5.0, 5.0));
+        k1.left_tension = 2.0;
+        k1.right_tension = 2.0;
+        let mut k2 = Knot::new(Point::new(10.0, 0.0));
+        k2.left_tension = 2.0;
+        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // The curve should still pass through the middle knot exactly.
+        let mid = crate::path::point_of(&path, 1.0);
+        assert!(
+            (mid.x - 5.0).abs() < EPSILON && (mid.y - 5.0).abs() < EPSILON,
+            "middle knot not hit: {mid:?}"
+        );
+
+        // With higher tension, the curve should be tighter (closer to straight lines
+        // between knots). Check that the midpoint of segment 0 is closer to the
+        // chord midpoint than with default tension.
+        let seg0_mid = crate::path::point_of(&path, 0.5);
+        let chord_mid = Point::new(2.5, 2.5);
+        let dev = (seg0_mid - chord_mid).length();
+        assert!(
+            dev < 1.0,
+            "tension 2 should keep curve close to chord, deviation = {dev:.4}"
+        );
+    }
+
+    #[test]
+    fn test_cyclic_with_tension_2() {
+        // Cyclic triangle with all tensions = 2.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.left_tension = 2.0;
+        k0.right_tension = 2.0;
+        let mut k1 = Knot::new(Point::new(10.0, 0.0));
+        k1.left_tension = 2.0;
+        k1.right_tension = 2.0;
+        let mut k2 = Knot::new(Point::new(5.0, 8.66));
+        k2.left_tension = 2.0;
+        k2.right_tension = 2.0;
+        let mut path = Path::from_knots(vec![k0, k1, k2], true);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // All handles should be shorter than with default tension.
+        let mut default = make_cyclic_path(&[
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(5.0, 8.66),
+        ]);
+        make_choices(&mut default);
+
+        for k in 0..3 {
+            let d_tight = (right_cp(&path, k) - path.knots[k].point).length();
+            let d_normal = (right_cp(&default, k) - default.knots[k].point).length();
+            assert!(
+                d_tight < d_normal,
+                "knot {k}: tension 2 handle ({d_tight:.4}) should be shorter than default ({d_normal:.4})"
+            );
+        }
+    }
+
+    #[test]
+    fn test_curl_ratio_with_non_unit_tensions() {
+        // curl_ratio(gamma, a_tension, b_tension) with non-unit tensions.
+        // With gamma=1, a_tension=2, b_tension=1:
+        // alpha = 0.5, beta = 1
+        // num = (3-0.5)*0.25*1 + 1 = 2.5*0.25 + 1 = 1.625
+        // denom = 0.125*1 + (3-1)*1 = 0.125 + 2 = 2.125
+        // result = 1.625/2.125 ≈ 0.7647
+        let cr = curl_ratio(1.0, 2.0, 1.0);
+        assert!(
+            (cr - 1.625 / 2.125).abs() < 0.001,
+            "curl_ratio(1,2,1) = {cr}, expected {:.4}",
+            1.625 / 2.125
+        );
+
+        // With gamma=2, a_tension=1, b_tension=1 (fast path):
+        // (2*2+1)/(2+2) = 5/4 = 1.25
+        let cr2 = curl_ratio(2.0, 1.0, 1.0);
+        assert!(
+            (cr2 - 1.25).abs() < EPSILON,
+            "curl_ratio(2,1,1) = {cr2}, expected 1.25"
+        );
+    }
+
+    #[test]
+    fn test_curl_2_at_endpoints() {
+        // curl 2 should produce a more "curled" start than curl 1.
+        // With curl > 1, theta[0] increases, so the first control point
+        // deviates more from the chord direction.
+        let mut k0_c2 = Knot::new(Point::new(0.0, 0.0));
+        k0_c2.right = KnotDirection::Curl(2.0);
+        let mut k1_c2 = Knot::new(Point::new(5.0, 5.0));
+        k1_c2.left = KnotDirection::Curl(1.0);
+        k1_c2.right = KnotDirection::Curl(1.0);
+        let mut k2_c2 = Knot::new(Point::new(10.0, 0.0));
+        k2_c2.left = KnotDirection::Curl(1.0);
+        let mut path_c2 = Path::from_knots(vec![k0_c2, k1_c2, k2_c2], false);
+        make_choices(&mut path_c2);
+        assert_all_explicit(&path_c2);
+
+        let mut path_c1 = make_open_path(&[
+            Point::new(0.0, 0.0),
+            Point::new(5.0, 5.0),
+            Point::new(10.0, 0.0),
+        ]);
+        make_choices(&mut path_c1);
+
+        // The first segment's right control point should differ between curl 2 and curl 1.
+        let cp_c2 = right_cp(&path_c2, 0);
+        let cp_c1 = right_cp(&path_c1, 0);
+        let diff = (cp_c2 - cp_c1).length();
+        assert!(
+            diff > 0.01,
+            "curl 2 should produce different control point than curl 1, diff = {diff:.6}"
+        );
+    }
+
+    #[test]
+    fn test_at_least_tension_stores_negative() {
+        // "tension atleast 1" is stored as negative tension.
+        // With a straight line (theta=phi=0), at_least should have no effect
+        // because the bounding triangle condition is trivially satisfied.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = -1.0; // atleast 1
+        let mut k1 = Knot::new(Point::new(10.0, 0.0));
+        k1.left_tension = -1.0; // atleast 1
+        let mut path_al = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path_al);
+        assert_all_explicit(&path_al);
+
+        // Should be identical to normal tension 1 for a straight line.
+        let mut path_n = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        make_choices(&mut path_n);
+
+        let cp_al = right_cp(&path_al, 0);
+        let cp_n = right_cp(&path_n, 0);
+        assert!(
+            (cp_al.x - cp_n.x).abs() < 0.01 && (cp_al.y - cp_n.y).abs() < 0.01,
+            "atleast on straight line should match normal: al={cp_al:?} n={cp_n:?}"
+        );
+    }
+
+    #[test]
+    fn test_velocity_with_tension() {
+        // velocity at tension 2 should be half of velocity at tension 1
+        // (for same angles), since velocity divides by tension.
+        let v1 = velocity(0.0, 1.0, 0.0, 1.0, 1.0);
+        let v2 = velocity(0.0, 1.0, 0.0, 1.0, 2.0);
+        assert!(
+            (v2 - v1 / 2.0).abs() < 0.001,
+            "velocity(t=2) = {v2:.4}, expected {:.4}",
+            v1 / 2.0
+        );
+    }
+
+    #[test]
+    fn test_clamp_at_least_no_effect_same_sign_large_velocity() {
+        // When theta=30° and phi=30° (same sign sines), and velocity is
+        // already within bounds, clamp should have no effect.
+        let theta = 30.0_f64.to_radians();
+        let phi = 30.0_f64.to_radians();
+        let st = theta.sin();
+        let ct = theta.cos();
+        let sf = phi.sin();
+        let cf = phi.cos();
+
+        // Small velocities that are within bounds
+        let (rr, ss) = clamp_at_least(0.1, 0.1, st, ct, sf, cf, -1.0, -1.0);
+        assert!(
+            (rr - 0.1).abs() < EPSILON && (ss - 0.1).abs() < EPSILON,
+            "small velocities should not be clamped: rr={rr}, ss={ss}"
+        );
+    }
+
+    #[test]
+    fn test_clamp_at_least_reduces_large_velocity() {
+        // When velocity is very large, at_least clamping should reduce it.
+        let theta = 30.0_f64.to_radians();
+        let phi = 30.0_f64.to_radians();
+        let st = theta.sin();
+        let ct = theta.cos();
+        let sf = phi.sin();
+        let cf = phi.cos();
+
+        // Large velocities that should be clamped
+        let (rr, ss) = clamp_at_least(10.0, 10.0, st, ct, sf, cf, -1.0, -1.0);
+        assert!(rr < 10.0, "large rr should be clamped: rr={rr}");
+        assert!(ss < 10.0, "large ss should be clamped: ss={ss}");
+    }
+
+    #[test]
+    fn test_clamp_at_least_opposite_signs_no_effect() {
+        // When sin(theta) and sin(phi) have opposite signs,
+        // there's no bounding triangle, so no clamping.
+        let theta = 30.0_f64.to_radians();
+        let phi = -30.0_f64.to_radians();
+        let st = theta.sin();
+        let ct = theta.cos();
+        let sf = phi.sin();
+        let cf = phi.cos();
+
+        let (rr, ss) = clamp_at_least(10.0, 10.0, st, ct, sf, cf, -1.0, -1.0);
+        assert!(
+            (rr - 10.0).abs() < EPSILON && (ss - 10.0).abs() < EPSILON,
+            "opposite sign sines should not clamp: rr={rr}, ss={ss}"
+        );
+    }
+
+    #[test]
+    fn test_three_knot_asymmetric_tension_open() {
+        // Three-knot path with different tensions on each side of the middle knot.
+        // This exercises the asymmetric scaling code in the forward sweep.
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right_tension = 1.0;
+        let mut k1 = Knot::new(Point::new(5.0, 5.0));
+        k1.left_tension = 1.0;
+        k1.right_tension = 3.0;
+        let mut k2 = Knot::new(Point::new(10.0, 0.0));
+        k2.left_tension = 3.0;
+        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // The second segment's handles should be shorter due to high tension.
+        let d_seg1 = (right_cp(&path, 1) - path.knots[1].point).length();
+        let d_seg0 = (right_cp(&path, 0) - path.knots[0].point).length();
+        assert!(
+            d_seg1 < d_seg0,
+            "segment 1 (tension 3) handle ({d_seg1:.4}) should be shorter \
+             than segment 0 (tension 1) handle ({d_seg0:.4})"
+        );
+    }
+
+    #[test]
+    fn test_cyclic_symmetry_preserved() {
+        // A regular polygon path should produce symmetric control points.
+        // Regular triangle: the handle lengths at all three knots should be equal.
+        let r = 10.0;
+        let points: Vec<Point> = (0..3)
+            .map(|i| {
+                let angle = 2.0 * std::f64::consts::PI * (i as f64) / 3.0;
+                Point::new(r * angle.cos(), r * angle.sin())
+            })
+            .collect();
+        let mut path = make_cyclic_path(&points);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        let lengths: Vec<f64> = (0..3)
+            .map(|k| (right_cp(&path, k) - path.knots[k].point).length())
+            .collect();
+
+        // All three handle lengths should be approximately equal.
+        for i in 1..3 {
+            assert!(
+                (lengths[i] - lengths[0]).abs() < 0.01,
+                "cyclic symmetry broken: lengths = {lengths:?}"
+            );
         }
     }
 }
