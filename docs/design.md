@@ -273,3 +273,10 @@ Only the ~210 engine primitives from `mp.web` are implemented in Rust.
 Everything defined in `plain.mp` (draw, fill, --, fullcircle, etc.)
 runs as MetaPost macros through the interpreter. This keeps the engine
 minimal and faithful to the original design.
+
+## Quick References (from MetaPost User's Manual)
+
+- [ref-language.md](ref-language.md) — Data types, paths, equations, variables, macros, drawing model, scoping, control flow
+- [ref-operators.md](ref-operators.md) — All operators by category with types and precedence
+- [ref-internals.md](ref-internals.md) — Internal variables, constants, commands, drawing options
+- [ref-syntax.md](ref-syntax.md) — Complete BNF grammar, character classes, tokenization rules
