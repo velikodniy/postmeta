@@ -1553,12 +1553,8 @@ mod tests {
             .iter()
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
-        // plain.mp currently loads with at most one known non-fatal assignment
-        // issue during initialization.
-        assert!(
-            error_count <= 1,
-            "expected at most 1 error, got {error_count}"
-        );
+        // plain.mp should load without errors.
+        assert!(error_count == 0, "expected 0 errors, got {error_count}");
     }
 
     #[test]

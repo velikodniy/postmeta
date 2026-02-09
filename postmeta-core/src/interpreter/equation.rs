@@ -92,7 +92,9 @@ impl Interpreter {
                 }
             },
             None => {
-                self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");
+                if !matches!(rhs, Value::Vacuous) {
+                    self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");
+                }
             }
         }
         Ok(())
