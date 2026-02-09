@@ -283,11 +283,13 @@ fn solve_cyclic_segment(
         }
         KnotDirection::Curl(gamma) => {
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            let denom = ff.mul_add(uu[last - 1], 1.0);
+            // mp.web line 6742-6743:
+            //   theta[n] := -(ff * vv[n-1]) / (1 - ff * uu[n-1])
+            let denom = ff.mul_add(-uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
             } else {
-                theta[last] = -(ff * vv[last - 1]) / denom; // C3 fix
+                theta[last] = -(ff * vv[last - 1]) / denom;
             }
         }
         _ => {
@@ -508,7 +510,9 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
         KnotDirection::Curl(gamma) => {
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            let denom = ff.mul_add(uu[last - 1], 1.0);
+            // mp.web line 6742-6743:
+            //   theta[n] := -(ff * vv[n-1]) / (1 - ff * uu[n-1])
+            let denom = ff.mul_add(-uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
             } else {
@@ -1719,5 +1723,57 @@ mod tests {
                 "cyclic symmetry broken: lengths = {lengths:?}"
             );
         }
+    }
+
+    /// Regression test for right curl boundary sign bug (C8 fix).
+    ///
+    /// mp.web line 6742-6743 uses `(1 - ff*uu)` in the denominator, not
+    /// `(1 + ff*uu)`. The sign error produced asymmetric curves when both
+    /// endpoints had curl boundaries.
+    ///
+    /// MetaPost reference output verified with `mpost` version 2.11:
+    ///   (0,0)..controls (-19.4835,-0.59496) and (-19.4835,28.9414)
+    ///    ..(0,28.34645)..controls (15.4556,27.87448) and (12.89085,0.47195)
+    ///    ..(28.34645,0)..controls (47.82996,-0.59496) and (47.82996,28.9414)
+    ///    ..(28.34645,28.34645)
+    #[test]
+    fn test_curl_boundary_sign_regression() {
+        let cm = 28.34645;
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Curl(1.0);
+        let k1 = Knot::new(Point::new(0.0, cm));
+        let k2 = Knot::new(Point::new(cm, 0.0));
+        let k3 = Knot::new(Point::new(cm, cm));
+
+        let mut path = Path::from_knots(vec![k0, k1, k2, k3], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        // Verify control points match MetaPost's output (tolerance ~0.01)
+        let tol = 0.01;
+
+        let rcp0 = right_cp(&path, 0);
+        assert!((rcp0.x - (-19.4835)).abs() < tol, "seg0 rcp.x: {}", rcp0.x);
+        assert!((rcp0.y - (-0.59496)).abs() < tol, "seg0 rcp.y: {}", rcp0.y);
+
+        let lcp1 = left_cp(&path, 1);
+        assert!((lcp1.x - (-19.4835)).abs() < tol, "seg0 lcp.x: {}", lcp1.x);
+        assert!((lcp1.y - 28.9414).abs() < tol, "seg0 lcp.y: {}", lcp1.y);
+
+        let rcp2 = right_cp(&path, 2);
+        assert!((rcp2.x - 47.82996).abs() < tol, "seg2 rcp.x: {}", rcp2.x);
+        assert!((rcp2.y - (-0.59496)).abs() < tol, "seg2 rcp.y: {}", rcp2.y);
+
+        let lcp3 = left_cp(&path, 3);
+        assert!((lcp3.x - 47.82996).abs() < tol, "seg2 lcp.x: {}", lcp3.x);
+        assert!((lcp3.y - 28.9414).abs() < tol, "seg2 lcp.y: {}", lcp3.y);
+
+        // Segments 0 and 2 should be symmetric: equal handle lengths
+        let d0 = (rcp0 - path.knots[0].point).length();
+        let d2 = (rcp2 - path.knots[2].point).length();
+        assert!(
+            (d0 - d2).abs() < 0.01,
+            "symmetric curl path should have equal handle lengths: d0={d0:.4}, d2={d2:.4}"
+        );
     }
 }
