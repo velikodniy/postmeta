@@ -118,30 +118,52 @@ impl Interpreter {
                 if self.cur.command == Command::Comma {
                     // Pair or color
                     let first = self.take_cur_exp();
+                    let first_binding = self.last_lhs_binding.clone();
                     self.get_x_next();
                     self.scan_expression()?;
+                    let second = self.take_cur_exp();
+                    let second_binding = self.last_lhs_binding.clone();
 
                     if self.cur.command == Command::Comma {
                         // Color: (r, g, b)
-                        let second = self.take_cur_exp();
                         self.get_x_next();
                         self.scan_expression()?;
                         let third = self.take_cur_exp();
+                        let third_binding = self.last_lhs_binding.clone();
 
                         let r = value_to_scalar(&first)?;
                         let g = value_to_scalar(&second)?;
                         let b = value_to_scalar(&third)?;
                         self.cur_exp = Value::Color(postmeta_graphics::types::Color::new(r, g, b));
                         self.cur_type = Type::ColorType;
+                        self.last_lhs_binding = if first_binding.is_some()
+                            || second_binding.is_some()
+                            || third_binding.is_some()
+                        {
+                            Some(LhsBinding::Color {
+                                r: first_binding.map(Box::new),
+                                g: second_binding.map(Box::new),
+                                b: third_binding.map(Box::new),
+                            })
+                        } else {
+                            None
+                        };
                     } else {
                         // Pair: (x, y)
-                        let second = self.take_cur_exp();
                         let x = value_to_scalar(&first)?;
                         let y = value_to_scalar(&second)?;
                         self.cur_exp = Value::Pair(x, y);
                         self.cur_type = Type::PairType;
+                        self.last_lhs_binding =
+                            if first_binding.is_some() || second_binding.is_some() {
+                                Some(LhsBinding::Pair {
+                                    x: first_binding.map(Box::new),
+                                    y: second_binding.map(Box::new),
+                                })
+                            } else {
+                                None
+                            };
                     }
-                    self.last_lhs_binding = None;
                     self.cur_dep = None;
                 }
 

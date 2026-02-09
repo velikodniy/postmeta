@@ -79,7 +79,7 @@ impl Interpreter {
                     while self.cur.command == Command::Equals {
                         let lhs_dep = self.cur_dep.clone();
                         let lhs = self.take_cur_exp();
-                        let lhs_binding = self.last_lhs_binding;
+                        let lhs_binding = self.last_lhs_binding.clone();
                         pending_lhs.push((lhs, lhs_binding, lhs_dep));
                         self.get_x_next();
                         self.scan_expression()?;
@@ -91,7 +91,7 @@ impl Interpreter {
                         self.do_equation(
                             lhs,
                             &rhs_clone,
-                            *lhs_binding,
+                            lhs_binding.clone(),
                             lhs_dep.clone(),
                             rhs_dep.clone(),
                         )?;
@@ -101,7 +101,7 @@ impl Interpreter {
                     // All left-hand sides receive the final rhs value.
                     let mut pending_lhs: Vec<Option<LhsBinding>> = Vec::new();
                     while self.cur.command == Command::Assignment {
-                        pending_lhs.push(self.last_lhs_binding);
+                        pending_lhs.push(self.last_lhs_binding.clone());
                         self.get_x_next();
                         self.scan_expression()?;
                     }
@@ -379,18 +379,14 @@ impl Interpreter {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
                 let path = value_to_path_owned(path_val)?;
-                let ds = self.scan_with_options()?;
+                let (ds, pen_specified) = self.scan_with_options()?;
 
                 let target = self.get_target_picture(&pic_name);
                 picture::addto_contour(
                     target,
                     path,
                     ds.color,
-                    if matches!(ds.pen, Pen::Elliptical(t) if t == Transform::IDENTITY) {
-                        None
-                    } else {
-                        Some(ds.pen)
-                    },
+                    if pen_specified { Some(ds.pen) } else { None },
                     ds.line_join,
                     ds.miter_limit,
                 );
@@ -398,7 +394,7 @@ impl Interpreter {
             x if x == ThingToAddOp::DoublePath as u16 => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
-                let ds = self.scan_with_options()?;
+                let (ds, _) = self.scan_with_options()?;
 
                 let target = self.get_target_picture(&pic_name);
                 match path_val {
@@ -457,7 +453,7 @@ impl Interpreter {
     }
 
     /// Scan `withpen`, `withcolor`, `dashed` options.
-    fn scan_with_options(&mut self) -> InterpResult<DrawingState> {
+    fn scan_with_options(&mut self) -> InterpResult<(DrawingState, bool)> {
         let mut ds = DrawingState {
             pen: Pen::default_pen(),
             color: Color::BLACK,
@@ -466,6 +462,7 @@ impl Interpreter {
             line_join: LineJoin::from_f64(self.internals.get(InternalId::LineJoin as u16)),
             miter_limit: self.internals.get(InternalId::MiterLimit as u16),
         };
+        let mut pen_specified = false;
 
         while self.cur.command == Command::WithOption {
             let opt = self.cur.modifier;
@@ -477,6 +474,7 @@ impl Interpreter {
                 x if x == WithOptionOp::WithPen as u16 => {
                     if let Value::Pen(p) = val {
                         ds.pen = p;
+                        pen_specified = true;
                     }
                 }
                 x if x == WithOptionOp::WithColor as u16 => {
@@ -495,7 +493,7 @@ impl Interpreter {
             }
         }
 
-        Ok(ds)
+        Ok((ds, pen_specified))
     }
 
     /// Execute `clip`/`setbounds` statement.

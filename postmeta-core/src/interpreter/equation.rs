@@ -91,6 +91,39 @@ impl Interpreter {
                     );
                 }
             },
+            Some(LhsBinding::Pair { x, y }) => {
+                if let Value::Pair(rx, ry) = rhs {
+                    if let Some(bx) = x {
+                        self.assign_binding(Some(*bx), &Value::Numeric(*rx))?;
+                    }
+                    if let Some(by) = y {
+                        self.assign_binding(Some(*by), &Value::Numeric(*ry))?;
+                    }
+                } else {
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        format!("Pair equation requires pair RHS, got {}", rhs.ty()),
+                    );
+                }
+            }
+            Some(LhsBinding::Color { r, g, b }) => {
+                if let Value::Color(c) = rhs {
+                    if let Some(br) = r {
+                        self.assign_binding(Some(*br), &Value::Numeric(c.r))?;
+                    }
+                    if let Some(bg) = g {
+                        self.assign_binding(Some(*bg), &Value::Numeric(c.g))?;
+                    }
+                    if let Some(bb) = b {
+                        self.assign_binding(Some(*bb), &Value::Numeric(c.b))?;
+                    }
+                } else {
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        format!("Color equation requires color RHS, got {}", rhs.ty()),
+                    );
+                }
+            }
             None => {
                 if !matches!(rhs, Value::Vacuous) {
                     self.report_error(ErrorKind::InvalidExpression, "Assignment to non-variable");

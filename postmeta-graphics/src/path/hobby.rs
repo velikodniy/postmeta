@@ -90,7 +90,7 @@ pub fn make_choices(path: &mut Path) {
 /// Check if a knot direction is a breakpoint (non-Open, i.e., has an explicit
 /// constraint that should split the path into independent sub-segments).
 const fn is_breakpoint_dir(dir: &KnotDirection) -> bool {
-    matches!(dir, KnotDirection::Curl(_) | KnotDirection::Given(_))
+    !matches!(dir, KnotDirection::Open)
 }
 
 /// Decompose a cyclic path with breakpoints into independent open segments
@@ -2156,5 +2156,38 @@ mod tests {
         assert_cp("s0 lcp", left_cp(&path, 1), 56.6929, -37.79527);
         assert_cp("s1 rcp", right_cp(&path, 1), 56.6929, 37.79527);
         assert_cp("s1 lcp", left_cp(&path, 0), 0.0, -37.79527);
+    }
+
+    /// Regression: explicit controls must act as cyclic breakpoints.
+    ///
+    /// This matches the arrowhead path from plain.mp example 17:
+    /// (3.69557,1.53079)..controls (2.46371,1.02052) and (1.23186,0.51027)
+    ///  ..(0,0)..controls (1.23186,-0.51027) and (2.46371,-1.02052)
+    ///  ..(3.69557,-1.53079)..controls (3.69557,-0.51027) and (3.69557,0.51027)
+    ///  ..cycle
+    #[test]
+    fn test_mpost_example_17_arrowhead_breakpoints() {
+        let mut k0 = Knot::new(Point::new(3.69557, 1.53079));
+        k0.right = KnotDirection::Explicit(Point::new(2.46371, 1.02052));
+        k0.left = KnotDirection::Curl(1.0);
+
+        let mut k1 = Knot::new(Point::new(0.0, 0.0));
+        k1.left = KnotDirection::Explicit(Point::new(1.23186, 0.51027));
+        k1.right = KnotDirection::Explicit(Point::new(1.23186, -0.51027));
+
+        let mut k2 = Knot::new(Point::new(3.69557, -1.53079));
+        k2.left = KnotDirection::Explicit(Point::new(2.46371, -1.02052));
+        k2.right = KnotDirection::Curl(1.0);
+
+        let mut path = Path::from_knots(vec![k0, k1, k2], true);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        assert_cp("s0 rcp", right_cp(&path, 0), 2.46371, 1.02052);
+        assert_cp("s0 lcp", left_cp(&path, 1), 1.23186, 0.51027);
+        assert_cp("s1 rcp", right_cp(&path, 1), 1.23186, -0.51027);
+        assert_cp("s1 lcp", left_cp(&path, 2), 2.46371, -1.02052);
+        assert_cp("s2 rcp", right_cp(&path, 2), 3.69557, -0.51027);
+        assert_cp("s2 lcp", left_cp(&path, 0), 3.69557, 0.51027);
     }
 }

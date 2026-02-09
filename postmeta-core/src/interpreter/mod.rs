@@ -35,10 +35,19 @@ use crate::variables::{NumericState, SaveStack, VarTrie, VarValue, Variables};
 
 use expand::{IfState, MacroInfo};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
     Variable { id: VarId, negated: bool },
     Internal { idx: u16 },
+    Pair {
+        x: Option<Box<Self>>,
+        y: Option<Box<Self>>,
+    },
+    Color {
+        r: Option<Box<Self>>,
+        g: Option<Box<Self>>,
+        b: Option<Box<Self>>,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +275,25 @@ impl Interpreter {
 
     /// Negate the current expression (unary minus).
     fn negate_cur_exp(&mut self) {
+        fn negate_binding(binding: &LhsBinding) -> Option<LhsBinding> {
+            match binding {
+                LhsBinding::Variable { id, negated } => Some(LhsBinding::Variable {
+                    id: *id,
+                    negated: !negated,
+                }),
+                LhsBinding::Internal { .. } => None,
+                LhsBinding::Pair { x, y } => Some(LhsBinding::Pair {
+                    x: x.as_ref().and_then(|b| negate_binding(b).map(Box::new)),
+                    y: y.as_ref().and_then(|b| negate_binding(b).map(Box::new)),
+                }),
+                LhsBinding::Color { r, g, b } => Some(LhsBinding::Color {
+                    r: r.as_ref().and_then(|bb| negate_binding(bb).map(Box::new)),
+                    g: g.as_ref().and_then(|bb| negate_binding(bb).map(Box::new)),
+                    b: b.as_ref().and_then(|bb| negate_binding(bb).map(Box::new)),
+                }),
+            }
+        }
+
         match &self.cur_exp {
             Value::Numeric(v) => {
                 self.cur_exp = Value::Numeric(-v);
@@ -273,38 +301,17 @@ impl Interpreter {
                     crate::equation::dep_scale(&mut dep, -1.0);
                     self.cur_dep = Some(dep);
                 }
-                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
-                    self.last_lhs_binding = Some(LhsBinding::Variable {
-                        id,
-                        negated: !negated,
-                    });
-                } else {
-                    self.last_lhs_binding = None;
-                }
+                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Pair(x, y) => {
                 self.cur_exp = Value::Pair(-x, -y);
                 self.cur_dep = None;
-                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
-                    self.last_lhs_binding = Some(LhsBinding::Variable {
-                        id,
-                        negated: !negated,
-                    });
-                } else {
-                    self.last_lhs_binding = None;
-                }
+                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Color(c) => {
                 self.cur_exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
                 self.cur_dep = None;
-                if let Some(LhsBinding::Variable { id, negated }) = self.last_lhs_binding {
-                    self.last_lhs_binding = Some(LhsBinding::Variable {
-                        id,
-                        negated: !negated,
-                    });
-                } else {
-                    self.last_lhs_binding = None;
-                }
+                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             _ => {
                 self.last_lhs_binding = None;
@@ -1661,6 +1668,29 @@ mod tests {
         assert!(msg.contains("1"), "expected 1 in: {msg}");
     }
 
+    #[test]
+    fn pair_equation_assigns_components() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric t, u; (t,u) = (3.5, -2); show t; show u;")
+            .unwrap();
+
+        let messages: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            messages.iter().any(|m| m.contains("3.5")),
+            "expected t=3.5 in messages: {messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("-2")),
+            "expected u=-2 in messages: {messages:?}"
+        );
+    }
+
     // -----------------------------------------------------------------------
     // plain.mp loads without hard error
     // -----------------------------------------------------------------------
@@ -1807,6 +1837,108 @@ mod tests {
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
         assert!(interp.pictures.len() >= 2, "expected shipped pictures");
+    }
+
+    #[test]
+    fn plain_fill_has_no_stroke_pen() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run("input plain; beginfig(1); fill fullcircle scaled 10bp; endfig; end;")
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+
+        let pic = interp.pictures.last().expect("expected shipped picture");
+        let fill = match pic.objects.first().expect("expected one object") {
+            postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
+            other => panic!("expected Fill object, got {other:?}"),
+        };
+        assert!(fill.pen.is_none(), "fill should not carry stroke pen");
+    }
+
+    #[test]
+    fn plain_filldraw_withpen_sets_stroke_pen() {
+        use crate::filesystem::FileSystem;
+
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run(
+                "input plain;
+                 beginfig(1);
+                   filldraw fullcircle scaled 10bp withpen pencircle scaled 2bp;
+                 endfig;
+                 end;",
+            )
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+
+        let pic = interp.pictures.last().expect("expected shipped picture");
+        let fill = match pic.objects.first().expect("expected one object") {
+            postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
+            other => panic!("expected Fill object, got {other:?}"),
+        };
+
+        let pen = fill.pen.as_ref().expect("filldraw should keep stroke pen");
+        match pen {
+            postmeta_graphics::types::Pen::Elliptical(t) => {
+                assert!((t.txx - 1.0).abs() < 1e-9, "unexpected txx={}", t.txx);
+                assert!((t.tyy - 1.0).abs() < 1e-9, "unexpected tyy={}", t.tyy);
+            }
+            other => panic!("expected elliptical pen, got {other:?}"),
+        }
     }
 
     #[test]
