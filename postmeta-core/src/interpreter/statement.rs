@@ -8,6 +8,7 @@
 use std::sync::Arc;
 
 use postmeta_graphics::picture;
+use postmeta_graphics::transform;
 use postmeta_graphics::types::{Color, LineCap, LineJoin, Path, Pen, Picture};
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
@@ -20,6 +21,13 @@ use super::helpers::{value_to_path_owned, value_to_scalar};
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
+    fn sync_currentpicture_variable(&mut self) {
+        if let Some(var_id) = self.variables.lookup_existing("currentpicture") {
+            self.variables
+                .set_known(var_id, Value::Picture(self.current_picture.clone()));
+        }
+    }
+
     /// Execute one statement.
     pub fn do_statement(&mut self) -> InterpResult<()> {
         match self.cur.command {
@@ -348,20 +356,39 @@ impl Interpreter {
             x if x == ThingToAddOp::DoublePath as u16 => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
-                let path = value_to_path_owned(path_val)?;
 
                 let ds = self.scan_with_options()?;
 
-                picture::addto_doublepath(
-                    &mut self.current_picture,
-                    path,
-                    ds.pen,
-                    ds.color,
-                    ds.dash,
-                    ds.line_cap,
-                    ds.line_join,
-                    ds.miter_limit,
-                );
+                match path_val {
+                    Value::Pair(x, y) => {
+                        // `draw <pair> withpen <pen>` draws a dot-like mark.
+                        // Emulate this via the pen outline path shifted to the
+                        // pair position, then filled.
+                        let dot = postmeta_graphics::pen::makepath(&ds.pen);
+                        let shifted = transform::transform_path(&transform::shifted(x, y), &dot);
+                        picture::addto_contour(
+                            &mut self.current_picture,
+                            shifted,
+                            ds.color,
+                            None,
+                            ds.line_join,
+                            ds.miter_limit,
+                        );
+                    }
+                    other => {
+                        let path = value_to_path_owned(other)?;
+                        picture::addto_doublepath(
+                            &mut self.current_picture,
+                            path,
+                            ds.pen,
+                            ds.color,
+                            ds.dash,
+                            ds.line_cap,
+                            ds.line_join,
+                            ds.miter_limit,
+                        );
+                    }
+                }
             }
             x if x == ThingToAddOp::Also as u16 => {
                 self.scan_expression()?;
@@ -379,6 +406,8 @@ impl Interpreter {
         }
 
         let _ = pic_name; // TODO: support named pictures
+
+        self.sync_currentpicture_variable();
 
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
@@ -453,6 +482,8 @@ impl Interpreter {
         } else {
             picture::setbounds(&mut self.current_picture, clip_path);
         }
+
+        self.sync_currentpicture_variable();
 
         if self.cur.command == Command::Semicolon {
             self.get_x_next();

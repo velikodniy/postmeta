@@ -120,6 +120,8 @@ impl Interpreter {
 
     /// Assign a value to a variable, handling compound types (Pair, Color).
     pub(super) fn assign_to_variable(&mut self, var_id: crate::equation::VarId, value: &Value) {
+        let currentpicture_id = self.variables.lookup_existing("currentpicture");
+
         match value {
             Value::Numeric(v) => {
                 self.variables
@@ -151,6 +153,12 @@ impl Interpreter {
             }
             _ => {
                 self.variables.set_known(var_id, value.clone());
+            }
+        }
+
+        if Some(var_id) == currentpicture_id {
+            if let Value::Picture(p) = value {
+                self.current_picture = p.clone();
             }
         }
     }
