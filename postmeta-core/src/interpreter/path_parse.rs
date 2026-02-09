@@ -45,13 +45,6 @@ impl Interpreter {
                 None
             };
 
-            // Set the right direction of the last knot
-            if let Some(dir) = pre_dir {
-                if let Some(last) = knots.last_mut() {
-                    last.right = dir;
-                }
-            }
-
             // Parse the join operator
             let join_type = if self.cur.command == Command::PathJoin {
                 let modifier = self.cur.modifier;
@@ -61,8 +54,23 @@ impl Interpreter {
                 self.get_x_next();
                 u16::MAX // special value for &
             } else {
+                // A trailing `{dir}` at the end of an open path applies to the
+                // incoming (left) side of the last knot, not its outgoing side.
+                if let Some(dir) = pre_dir {
+                    if let Some(last) = knots.last_mut() {
+                        last.left = dir;
+                    }
+                }
                 break;
             };
+
+            // Direction before a join applies to the outgoing (right) side of
+            // the current knot.
+            if let Some(dir) = pre_dir {
+                if let Some(last) = knots.last_mut() {
+                    last.right = dir;
+                }
+            }
 
             // Parse tension/controls — returns pending left-side for next knot
             let pending = if join_type == u16::MAX {
@@ -159,6 +167,16 @@ impl Interpreter {
                 if let Some(last) = knots.last_mut() {
                     last.right_tension = t1;
                 }
+
+                // Path syntax requires a second `..` after tension options.
+                if self.cur.command != Command::PathJoin {
+                    return Err(InterpreterError::new(
+                        ErrorKind::UnexpectedToken,
+                        "Expected `..` after tension specification",
+                    ));
+                }
+                self.get_x_next();
+
                 Ok(Some(PendingJoin::Tension(t2)))
             }
             Command::Controls => {
@@ -179,6 +197,16 @@ impl Interpreter {
                 if let Some(last) = knots.last_mut() {
                     last.right = KnotDirection::Explicit(Point::new(x1, y1));
                 }
+
+                // Path syntax requires a second `..` after control options.
+                if self.cur.command != Command::PathJoin {
+                    return Err(InterpreterError::new(
+                        ErrorKind::UnexpectedToken,
+                        "Expected `..` after controls specification",
+                    ));
+                }
+                self.get_x_next();
+
                 Ok(Some(PendingJoin::Control(Point::new(x2, y2))))
             }
             _ => Ok(None), // No special join options
@@ -219,7 +247,8 @@ impl Interpreter {
             }
             Ok(KnotDirection::Curl(curl_val))
         } else {
-            // {<expression>} — direction as pair or angle
+            // {<expression>} — direction as pair, or numeric angle in degrees
+            // (converted to internal radians).
             self.scan_expression()?;
             let dir = self.take_cur_exp();
             if self.cur.command == Command::RightBrace {
@@ -230,6 +259,9 @@ impl Interpreter {
     }
 
     /// Convert a value to a direction for path construction.
+    ///
+    /// Internal direction angles are stored in radians.
+    /// Numeric inputs are interpreted as degrees per `MetaPost` syntax.
     fn value_to_direction(&self, val: &Value) -> InterpResult<KnotDirection> {
         match val {
             Value::Pair(x, y) => Ok(KnotDirection::Given(math::angle(*x, *y).to_radians())),
@@ -245,6 +277,7 @@ impl Interpreter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::variables::VarValue;
 
     #[test]
     fn direction_numeric_is_degrees_in_input() {
@@ -274,5 +307,73 @@ mod tests {
             }
             _ => panic!("expected given direction"),
         }
+    }
+
+    #[test]
+    fn endpoint_direction_applies_to_left_side() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("path p; p := (0,0){(0,1)} .. (2,0){(1,0)};")
+            .expect("path construction should parse");
+
+        let pid = interp
+            .variables
+            .lookup_existing("p")
+            .expect("path variable p should exist");
+        let path = match interp.variables.get(pid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+
+        let p0 = path.knots[0].point;
+        let p1 = path.knots[1].point;
+        let r0 = match path.knots[0].right {
+            KnotDirection::Explicit(cp) => cp,
+            ref other => panic!("knot 0 right is not explicit: {other:?}"),
+        };
+        let l1 = match path.knots[1].left {
+            KnotDirection::Explicit(cp) => cp,
+            ref other => panic!("knot 1 left is not explicit: {other:?}"),
+        };
+
+        // Start direction is up: outgoing tangent at p0 should be vertical.
+        let t0 = r0 - p0;
+        assert!(t0.y > 0.0, "expected upward start tangent, got {t0:?}");
+        assert!(
+            t0.x.abs() < 1e-9,
+            "expected vertical start tangent, got {t0:?}"
+        );
+
+        // End direction is right: incoming tangent at p1 should be horizontal.
+        let t1 = p1 - l1;
+        assert!(t1.x > 0.0, "expected rightward end tangent, got {t1:?}");
+        assert!(
+            t1.y.abs() < 1e-9,
+            "expected horizontal end tangent, got {t1:?}"
+        );
+    }
+
+    #[test]
+    fn tension_option_consumes_trailing_join() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("path p; p := (0,0) .. tension 2 .. (1,1) .. (2,0);")
+            .expect("tension path should parse");
+
+        let pid = interp
+            .variables
+            .lookup_existing("p")
+            .expect("path variable p should exist");
+        let path = match interp.variables.get(pid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+        assert_eq!(path.knots.len(), 3, "expected three knots");
+
+        // Path choices should have been resolved to explicit controls.
+        assert!(matches!(path.knots[0].right, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
+        assert!(matches!(path.knots[2].left, KnotDirection::Explicit(_)));
     }
 }

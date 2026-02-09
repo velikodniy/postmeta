@@ -16,9 +16,9 @@
 //! The algorithm:
 //! 1. Decompose the path into independent segments at "breakpoints"
 //!    (knots with fully specified directions on both sides).
-//! 2. For each segment, compute turning angles between consecutive chords.
+//! 2. For each segment, compute turning angles (radians) between consecutive chords.
 //! 3. Set up and solve a tridiagonal linear system for the unknown
-//!    direction angles `theta_k` at each knot.
+//!    direction angles `theta_k` (radians) at each knot.
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
@@ -102,6 +102,10 @@ const fn is_breakpoint_dir(dir: &KnotDirection) -> bool {
 fn solve_cyclic_with_breakpoints(path: &mut Path, first_bp: usize) {
     let n = path.knots.len();
 
+    // Mirror one-sided direction constraints at breakpoints so segment
+    // decomposition can use consistent endpoint boundary conditions.
+    mirror_one_sided_direction_constraints(path);
+
     // Collect all breakpoints starting from `first_bp`, walking around the cycle.
     let mut breaks = vec![first_bp];
     for offset in 1..n {
@@ -166,13 +170,17 @@ fn solve_cyclic_segment(
         return;
     }
 
+    // mp.web removes `open` at breakpoints by inferring missing boundary
+    // constraints from the opposite side when possible.
+    infer_open_boundary_constraints(path, indices[0], indices[seg_len - 1]);
+
     // For two knots, use the two-knot special case.
     if seg_len == 2 {
         solve_two_knots_range(path, indices[0], indices[1], delta, dist);
         return;
     }
 
-    // For longer segments, compute local turning angles and solve
+    // For longer segments, compute local turning angles (radians) and solve
     // the tridiagonal system.  We work with local indexing (0..seg_len)
     // but map back to global indices for knot/delta/dist access.
 
@@ -326,6 +334,10 @@ fn solve_choices_open(path: &mut Path) {
         return;
     }
 
+    // Mirror one-sided interior direction constraints at breakpoints so
+    // segment decomposition can use consistent endpoint boundary conditions.
+    mirror_one_sided_direction_constraints(path);
+
     // Find breakpoint indices: interior knots where left OR right is constrained.
     // A breakpoint splits the path into independent sub-segments.
     // The first and last knots are always segment boundaries.
@@ -355,6 +367,85 @@ fn solve_choices_open(path: &mut Path) {
     }
 }
 
+fn mirror_one_sided_direction_constraints(path: &mut Path) {
+    for knot in &mut path.knots {
+        if matches!(knot.left, KnotDirection::Open) {
+            match knot.right {
+                KnotDirection::Given(angle) => knot.left = KnotDirection::Given(angle),
+                KnotDirection::Curl(curl) => knot.left = KnotDirection::Curl(curl),
+                _ => {}
+            }
+        }
+
+        if matches!(knot.right, KnotDirection::Open) {
+            match knot.left {
+                KnotDirection::Given(angle) => knot.right = KnotDirection::Given(angle),
+                KnotDirection::Curl(curl) => knot.right = KnotDirection::Curl(curl),
+                _ => {}
+            }
+        }
+    }
+}
+
+/// Infer missing `open` boundary constraints at segment endpoints from the
+/// opposite side when possible, mirroring mp.web breakpoint handling.
+fn infer_open_boundary_constraints(path: &mut Path, start: usize, end: usize) {
+    infer_right_from_left(path, start);
+    infer_left_from_right(path, end);
+}
+
+fn infer_right_from_left(path: &mut Path, idx: usize) {
+    if !matches!(path.knots[idx].right, KnotDirection::Open) {
+        return;
+    }
+
+    let point = path.knots[idx].point;
+    let left = path.knots[idx].left;
+    let inferred = match left {
+        KnotDirection::Given(angle) => Some(KnotDirection::Given(angle)),
+        KnotDirection::Curl(curl) => Some(KnotDirection::Curl(curl)),
+        KnotDirection::Explicit(cp) => {
+            let d = point - cp;
+            if d.length() < EPSILON {
+                Some(KnotDirection::Curl(1.0))
+            } else {
+                Some(KnotDirection::Given(angle_of(d)))
+            }
+        }
+        KnotDirection::Open => None,
+    };
+
+    if let Some(dir) = inferred {
+        path.knots[idx].right = dir;
+    }
+}
+
+fn infer_left_from_right(path: &mut Path, idx: usize) {
+    if !matches!(path.knots[idx].left, KnotDirection::Open) {
+        return;
+    }
+
+    let point = path.knots[idx].point;
+    let right = path.knots[idx].right;
+    let inferred = match right {
+        KnotDirection::Given(angle) => Some(KnotDirection::Given(angle)),
+        KnotDirection::Curl(curl) => Some(KnotDirection::Curl(curl)),
+        KnotDirection::Explicit(cp) => {
+            let d = cp - point;
+            if d.length() < EPSILON {
+                Some(KnotDirection::Curl(1.0))
+            } else {
+                Some(KnotDirection::Given(angle_of(d)))
+            }
+        }
+        KnotDirection::Open => None,
+    };
+
+    if let Some(dir) = inferred {
+        path.knots[idx].left = dir;
+    }
+}
+
 /// Solve a single open sub-segment from knot `start` to knot `end` (inclusive).
 ///
 /// This applies Hobby's algorithm with the boundary conditions from the
@@ -372,14 +463,18 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         return;
     }
 
+    // mp.web removes `open` at breakpoints by inferring missing boundary
+    // constraints from the opposite side when possible.
+    infer_open_boundary_constraints(path, start, end);
+
     // For two knots, use the special-case solver
     if seg_len == 2 {
         solve_two_knots_range(path, start, end, delta, dist);
         return;
     }
 
-    // Compute turning angles for this sub-segment.
-    // psi[i] corresponds to the turning angle at local index i.
+    // Compute turning angles (radians) for this sub-segment.
+    // psi[i] corresponds to the turning angle (radians) at local index i.
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for (i, psi_i) in psi.iter_mut().enumerate().take(seg_len - 1).skip(1) {
         let k = start + i;
@@ -560,9 +655,9 @@ fn solve_two_knots_range(
 
     match (&path.knots[i].right, &path.knots[j].left) {
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
-            // mp.web: theta = given_right - chord_angle
+            // mp.web: theta = given_right - chord_angle (radians)
             //         phi computed via sin/cos: sf = -sin(given_left - chord_angle)
-            // i.e., phi = -(given_left - chord_angle)
+            // i.e., phi = -(given_left - chord_angle) (radians)
             let theta = reduce_angle(*a1 - chord_angle);
             let phi = reduce_angle(-(*a2 - chord_angle));
             set_controls_given_given(path, i, j, full_delta, full_dist, theta, phi);
@@ -570,7 +665,7 @@ fn solve_two_knots_range(
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
             // Given start, curl end: theta from given, phi from general solver.
-            // mp.web: theta[0] = given - chord_angle, uu[0] = 0.
+            // mp.web: theta[0] = given - chord_angle (radians), uu[0] = 0.
             // Right curl boundary: ff = curl_ratio(gamma, lt_j, rt_i),
             //   theta[1] = -ff * theta[0]. phi = -theta[1] = ff * theta.
             let theta = reduce_angle(*a1 - chord_angle);
@@ -583,7 +678,7 @@ fn solve_two_knots_range(
         }
         (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
             // Curl start, given end: phi from given, theta from general solver.
-            // mp.web: theta[n] = given - chord_angle.
+            // mp.web: theta[n] = given - chord_angle (radians).
             // Left curl boundary: ff = curl_ratio(gamma, rt_i, lt_j),
             //   theta[0] = -ff * theta[n]. phi = -(given - chord) = -theta_n.
             let phi = reduce_angle(-(*a2 - chord_angle));
@@ -858,7 +953,8 @@ fn solve_choices_cyclic(path: &mut Path) {
 // ---------------------------------------------------------------------------
 
 /// Set cubic Bezier control points for the segment from knot `i` to knot `j`,
-/// given the solved angles theta (outgoing at i) and phi (incoming at j).
+/// given the solved angles theta/phi in radians
+/// (theta outgoing at i, phi incoming at j).
 fn set_controls_for_segment(
     path: &mut Path,
     i: usize,
@@ -1070,8 +1166,14 @@ fn turning_angle(a: Vec2, b: Vec2) -> Scalar {
     let ang_a = angle_of(a);
     let ang_b = angle_of(b);
     let diff = ang_b - ang_a;
-    // Normalize to [-π, π] using atan2 for robustness
-    diff.sin().atan2(diff.cos())
+    // Normalize using atan2 for robustness. Canonicalize -π to +π to match
+    // MetaPost's angle convention for 180-degree turns.
+    let t = diff.sin().atan2(diff.cos());
+    if (t + std::f64::consts::PI).abs() < 1e-12 {
+        std::f64::consts::PI
+    } else {
+        t
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1973,5 +2075,86 @@ mod tests {
         // Segment 1→2: controls (138.09456,47.50314) and (167.19278,18.9412)
         assert_cp("s1 rcp", right_cp(&path, 1), 138.09456, 47.50314);
         assert_cp("s1 lcp", left_cp(&path, 2), 167.19278, 18.9412);
+    }
+
+    /// Regression: tlhiv example 38 (`--` then `..`) must match MetaPost.
+    ///
+    /// MetaPost reference:
+    /// (0,0)..controls (0,9.44882) and (0,18.89763)..(0,28.34645)
+    ///      ..controls (-12.591,9.73645) and (9.73645,-12.591)..(28.34645,0)
+    ///      ..controls (38.37733,6.78662) and (38.37733,21.55983)..(28.34645,28.34645)
+    #[test]
+    fn test_mpost_example_38_breakpoint_curl() {
+        let cm = 28.34645;
+
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Curl(1.0);
+
+        let mut k1 = Knot::new(Point::new(0.0, cm));
+        k1.left = KnotDirection::Curl(1.0);
+
+        let k2 = Knot::new(Point::new(cm, 0.0));
+        let k3 = Knot::new(Point::new(cm, cm));
+
+        let mut path = Path::from_knots(vec![k0, k1, k2, k3], false);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        assert_cp("s0 rcp", right_cp(&path, 0), 0.0, 9.44882);
+        assert_cp("s0 lcp", left_cp(&path, 1), 0.0, 18.89763);
+        assert_cp("s1 rcp", right_cp(&path, 1), -12.591, 9.73645);
+        assert_cp("s1 lcp", left_cp(&path, 2), 9.73645, -12.591);
+        assert_cp("s2 rcp", right_cp(&path, 2), 38.37733, 6.78662);
+        assert_cp("s2 lcp", left_cp(&path, 3), 38.37733, 21.55983);
+    }
+
+    /// Regression: two-knot open cycle must use consistent 180-degree turn sign.
+    ///
+    /// MetaPost reference for `(0,0)..(1cm,1cm)..cycle`:
+    /// (0,0)..controls (18.89763,-18.89763) and (47.24408,9.44882)
+    ///  ..(28.34645,28.34645)..controls (9.44882,47.24408) and (-18.89763,18.89763)
+    ///  ..cycle
+    #[test]
+    fn test_mpost_example_42_two_knot_cycle() {
+        let cm = 28.34645;
+        let mut path = Path::from_knots(
+            vec![
+                Knot::new(Point::new(0.0, 0.0)),
+                Knot::new(Point::new(cm, cm)),
+            ],
+            true,
+        );
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        assert_cp("s0 rcp", right_cp(&path, 0), 18.89763, -18.89763);
+        assert_cp("s0 lcp", left_cp(&path, 1), 47.24408, 9.44882);
+        assert_cp("s1 rcp", right_cp(&path, 1), 9.44882, 47.24408);
+        assert_cp("s1 lcp", left_cp(&path, 0), -18.89763, 18.89763);
+    }
+
+    /// Regression: cyclic two-knot path with right-side directions on both knots.
+    ///
+    /// MetaPost reference for `(0,0){up}..(2cm,0){up}..cycle`:
+    /// (0,0)..controls (0,37.79527) and (56.6929,-37.79527)
+    ///  ..(56.6929,0)..controls (56.6929,37.79527) and (0,-37.79527)..cycle
+    #[test]
+    fn test_mpost_example_47_two_knot_cyclic_right_directions() {
+        let cm = 28.34645;
+
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        k0.right = KnotDirection::Given(90.0_f64.to_radians());
+
+        let mut k1 = Knot::new(Point::new(2.0 * cm, 0.0));
+        k1.right = KnotDirection::Given(90.0_f64.to_radians());
+
+        let mut path = Path::from_knots(vec![k0, k1], true);
+        make_choices(&mut path);
+        assert_all_explicit(&path);
+
+        assert_cp("s0 rcp", right_cp(&path, 0), 0.0, 37.79527);
+        assert_cp("s0 lcp", left_cp(&path, 1), 56.6929, -37.79527);
+        assert_cp("s1 rcp", right_cp(&path, 1), 56.6929, 37.79527);
+        assert_cp("s1 lcp", left_cp(&path, 0), 0.0, -37.79527);
     }
 }

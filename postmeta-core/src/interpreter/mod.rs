@@ -1695,6 +1695,52 @@ mod tests {
         assert!(!interp.pictures.is_empty(), "expected shipped pictures");
     }
 
+    #[test]
+    fn plain_path_examples_39_and_56() {
+        use crate::filesystem::FileSystem;
+        struct TestFs;
+        impl FileSystem for TestFs {
+            fn read_file(&self, name: &str) -> Option<String> {
+                if name == "plain" || name == "plain.mp" {
+                    Some(
+                        std::fs::read_to_string(
+                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                .parent()
+                                .unwrap()
+                                .join("lib/plain.mp"),
+                        )
+                        .ok()?,
+                    )
+                } else {
+                    None
+                }
+            }
+        }
+
+        let mut interp = Interpreter::new();
+        interp.set_filesystem(Box::new(TestFs));
+        interp
+            .run(
+                "input plain;
+                 beginfig(39);
+                   draw (0,0) --- (0,1cm) .. (1cm,0) .. (1cm,1cm);
+                 endfig;
+                 beginfig(56);
+                   draw (0,0) .. tension 2 .. (1cm,1cm) .. (2cm,0);
+                 endfig;
+                 end;",
+            )
+            .unwrap();
+
+        let errors = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .count();
+        assert!(errors == 0, "expected 0 errors, got {errors}");
+        assert!(interp.pictures.len() >= 2, "expected shipped pictures");
+    }
+
     // -----------------------------------------------------------------------
     // Type tests (numeric, pen, etc. as unary operators)
     // -----------------------------------------------------------------------
