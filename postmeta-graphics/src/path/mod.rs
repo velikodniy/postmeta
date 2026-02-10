@@ -109,6 +109,10 @@ pub fn postcontrol_of(path: &Path, t: Scalar) -> Point {
 }
 
 /// Extract a subpath from time `t1` to time `t2`.
+///
+/// For cyclic paths, the subpath wraps around naturally: `subpath(3.5, 1.5)`
+/// on a 4-segment cycle yields the path going 3.5 → 0/4 → 1.5 (the long
+/// way around). This matches `MetaPost`'s `chop_path` semantics.
 #[must_use]
 pub fn subpath(path: &Path, t1: Scalar, t2: Scalar) -> Path {
     if path.knots.is_empty() {
@@ -120,64 +124,111 @@ pub fn subpath(path: &Path, t1: Scalar, t2: Scalar) -> Path {
         return Path::from_knots(vec![path.knots[0].clone()], false);
     }
 
-    // Handle reversed direction
-    if t1 > t2 {
-        let result = subpath(path, t2, t1);
-        return reverse(&result);
+    // Handle reversed direction: swap, compute, reverse result.
+    let (a, b, reversed) = if t1 <= t2 {
+        (t1, t2, false)
+    } else {
+        (t2, t1, true)
+    };
+
+    let n_f = index_to_scalar(n);
+
+    // Normalize following MetaPost's chop_path:
+    // - Cyclic: shift both a,b so that a is in [0, n).
+    //   b can exceed n (wrapping around the cycle).
+    // - Open: clamp both to [0, n].
+    let (a, b) = if path.is_cyclic {
+        // Shift both so a is in [0, n). b may exceed n (wrap-around).
+        let shift = a.div_euclid(n_f) * n_f;
+        (a - shift, b - shift)
+    } else {
+        (a.clamp(0.0, n_f), b.clamp(0.0, n_f))
+    };
+
+    let result = subpath_normalized(path, a, b, n);
+    if reversed {
+        reverse(&result)
+    } else {
+        result
+    }
+}
+
+/// Core subpath extraction with `0 <= a` and `a <= b`.
+///
+/// For cyclic paths `b` may exceed `n` (indicating wrap-around).
+/// Segment indices are taken modulo `n`.
+fn subpath_normalized(path: &Path, start: Scalar, end: Scalar, num_segs: usize) -> Path {
+    let (seg1, frac1) = time_to_seg_frac(start, num_segs);
+    // For end we decompose manually since it can exceed num_segs for cyclic paths.
+    let seg2_raw = scalar_to_index(end).min(if path.is_cyclic {
+        usize::MAX
+    } else {
+        num_segs - 1
+    });
+    let frac2 = end - index_to_scalar(seg2_raw);
+
+    if seg1 == seg2_raw && frac2 > frac1 {
+        // Both endpoints in the same segment
+        return subpath_single_segment(path, seg1, frac1, frac2);
     }
 
     let mut knots = Vec::new();
+    let num_knots = path.knots.len();
 
-    let (seg1, frac1) = time_to_seg_frac(t1, n);
-    let (seg2, frac2) = time_to_seg_frac(t2, n);
+    // Start knot from splitting first segment
+    let seg1_wrapped = seg1 % num_segs;
+    let cubic_first = CubicSegment::from_path(path, seg1_wrapped);
+    let (_, right_part) = cubic_first.split(frac1);
+    let start_pt = cubic_first.eval(frac1);
+    knots.push(Knot::with_controls(start_pt, start_pt, right_part.p1));
 
-    if seg1 == seg2 && frac2 > frac1 {
-        // Both endpoints in the same segment
-        let cubic = CubicSegment::from_path(path, seg1);
-        let (_, right) = cubic.split(frac1);
-        let t_inner = if (1.0 - frac1).abs() < EPSILON {
-            0.0
-        } else {
-            (frac2 - frac1) / (1.0 - frac1)
-        };
-        let (sub, _) = right.split(t_inner);
-        let p0 = cubic.eval(frac1);
-        let p1 = cubic.eval(frac2);
-        knots.push(Knot::with_controls(p0, p0, sub.p1));
-        knots.push(Knot::with_controls(p1, sub.p2, p1));
-    } else {
-        // Start knot from splitting first segment
-        let cubic1 = CubicSegment::from_path(path, seg1);
-        let (_, right_part) = cubic1.split(frac1);
-        let start_pt = cubic1.eval(frac1);
-        knots.push(Knot::with_controls(start_pt, start_pt, right_part.p1));
+    // End of first partial segment
+    let next_idx = (seg1 + 1) % num_knots;
+    let mut next_knot = path.knots[next_idx].clone();
+    next_knot.left = KnotDirection::Explicit(right_part.p2);
+    knots.push(next_knot);
 
-        // End of first partial segment
-        let j1 = (seg1 + 1) % path.knots.len();
-        let mut k = path.knots[j1].clone();
-        k.left = KnotDirection::Explicit(right_part.p2);
-        knots.push(k);
+    // Full intermediate segments (wrapping via modulo for cyclic paths)
+    for seg in (seg1 + 1)..seg2_raw {
+        let idx = (seg + 1) % num_knots;
+        knots.push(path.knots[idx].clone());
+    }
 
-        // Full intermediate segments
-        for seg in (seg1 + 1)..seg2 {
-            let j = (seg + 1) % path.knots.len();
-            knots.push(path.knots[j].clone());
+    // Split last segment
+    if frac2.abs() > EPSILON {
+        let seg2_wrapped = seg2_raw % num_segs;
+        let cubic_last = CubicSegment::from_path(path, seg2_wrapped);
+        let (left_part, _) = cubic_last.split(frac2);
+        let end_pt = cubic_last.eval(frac2);
+
+        if let Some(last) = knots.last_mut() {
+            last.right = KnotDirection::Explicit(left_part.p1);
         }
-
-        // Split last segment
-        if frac2.abs() > EPSILON {
-            let cubic_last = CubicSegment::from_path(path, seg2);
-            let (left_part, _) = cubic_last.split(frac2);
-            let end_pt = cubic_last.eval(frac2);
-
-            if let Some(last) = knots.last_mut() {
-                last.right = KnotDirection::Explicit(left_part.p1);
-            }
-            knots.push(Knot::with_controls(end_pt, left_part.p2, end_pt));
-        }
+        knots.push(Knot::with_controls(end_pt, left_part.p2, end_pt));
     }
 
     Path::from_knots(knots, false)
+}
+
+/// Extract a subpath where both endpoints lie in the same segment.
+fn subpath_single_segment(path: &Path, seg: usize, frac1: Scalar, frac2: Scalar) -> Path {
+    let cubic = CubicSegment::from_path(path, seg);
+    let (_, right) = cubic.split(frac1);
+    let t_inner = if (1.0 - frac1).abs() < EPSILON {
+        0.0
+    } else {
+        (frac2 - frac1) / (1.0 - frac1)
+    };
+    let (sub, _) = right.split(t_inner);
+    let p0 = cubic.eval(frac1);
+    let p1 = cubic.eval(frac2);
+    Path::from_knots(
+        vec![
+            Knot::with_controls(p0, p0, sub.p1),
+            Knot::with_controls(p1, sub.p2, p1),
+        ],
+        false,
+    )
 }
 
 /// Reverse a path.
@@ -313,6 +364,65 @@ mod tests {
         let sub = subpath(&path, 0.0, 0.5);
         let end = point_of(&sub, index_to_scalar(sub.num_segments()));
         assert!((end.x - 5.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_subpath_cyclic_wrap() {
+        // Triangle: 3 segments, knots at (0,0), (10,0), (5,10)
+        let tri = make_triangle_path();
+        assert_eq!(tri.num_segments(), 3);
+
+        // subpath(2.5, 0.5) should go the LONG way: 2.5 → 3/0 → 0.5
+        // After swap: a=0.5, b=2.5, reversed=true → subpath(0.5,2.5) reversed
+        // That gives the SHORT path 0.5→2.5 reversed.
+        // But MetaPost convention: t1>t2 on a cycle means reverse the short path.
+        // The result should have endpoints near the midpoints of segments 2 and 0.
+        let sub = subpath(&tri, 2.5, 0.5);
+        assert!(!sub.knots.is_empty());
+        let p_start = point_of(&sub, 0.0);
+        let p_end = point_of(&sub, index_to_scalar(sub.num_segments()));
+
+        // Start should be at time 2.5 on the triangle (midpoint of seg 2: (5,10)→(0,0))
+        let expected_start = point_of(&tri, 2.5);
+        assert!(
+            (p_start.x - expected_start.x).abs() < 0.1
+                && (p_start.y - expected_start.y).abs() < 0.1,
+            "start: {p_start:?}, expected: {expected_start:?}"
+        );
+
+        // End should be at time 0.5 on the triangle (midpoint of seg 0: (0,0)→(10,0))
+        let expected_end = point_of(&tri, 0.5);
+        assert!(
+            (p_end.x - expected_end.x).abs() < 0.1 && (p_end.y - expected_end.y).abs() < 0.1,
+            "end: {p_end:?}, expected: {expected_end:?}"
+        );
+    }
+
+    #[test]
+    fn test_subpath_cyclic_forward_wrap() {
+        // Triangle: 3 segments. subpath(2.5, 4.5) should wrap forward:
+        // 2.5 → 3/0 → 1.5 (4.5 mod 3 = 1.5).
+        // After normalization: a=2.5, b=4.5 (b > n=3, but for cyclic that's ok).
+        let tri = make_triangle_path();
+        let sub = subpath(&tri, 2.5, 4.5);
+        assert!(sub.knots.len() >= 3, "should span multiple segments");
+
+        let p_start = point_of(&sub, 0.0);
+        let p_end = point_of(&sub, index_to_scalar(sub.num_segments()));
+
+        let expected_start = point_of(&tri, 2.5);
+        assert!(
+            (p_start.x - expected_start.x).abs() < 0.1
+                && (p_start.y - expected_start.y).abs() < 0.1,
+            "start: {p_start:?}, expected: {expected_start:?}"
+        );
+
+        // End should be at time 1.5 on the triangle
+        let expected_end = point_of(&tri, 1.5);
+        assert!(
+            (p_end.x - expected_end.x).abs() < 0.1 && (p_end.y - expected_end.y).abs() < 0.1,
+            "end: {p_end:?}, expected: {expected_end:?}"
+        );
     }
 
     #[test]
