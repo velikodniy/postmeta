@@ -358,9 +358,8 @@ fn solve_choices_open(path: &mut Path) {
 
     // Solve each sub-segment independently
     for w in breaks.windows(2) {
-        let start = w[0];
-        let end = w[1];
-        solve_open_segment(path, start, end, &delta, &dist);
+        let indices: Vec<usize> = (w[0]..=w[1]).collect();
+        solve_segment(path, &indices, &delta, &dist);
     }
 }
 
@@ -443,17 +442,6 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
     }
 }
 
-/// Solve a single open sub-segment from knot `start` to knot `end` (inclusive).
-///
-/// This applies Hobby's algorithm with the boundary conditions from the
-/// endpoint knots' `right` (at `start`) and `left` (at `end`) directions.
-///
-/// Delegates to `solve_segment` with a contiguous index range.
-fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2], dist: &[Scalar]) {
-    let indices: Vec<usize> = (start..=end).collect();
-    solve_segment(path, &indices, delta, dist);
-}
-
 /// Two-knot special case for a sub-segment range.
 ///
 /// Handles the four combinations of boundary conditions at a two-knot segment.
@@ -479,7 +467,7 @@ fn solve_two_knots_range(
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
             let theta = reduce_angle(*a1 - chord_angle);
             let phi = reduce_angle(-(*a2 - chord_angle));
-            set_controls_given_given(path, i, j, full_delta, full_dist, theta, phi);
+            set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
@@ -511,66 +499,6 @@ fn solve_two_knots_range(
     }
 
     set_controls_for_segment(path, i, j, full_delta, full_dist, 0.0, 0.0);
-}
-
-/// Set controls for the two-knot given+given case.
-///
-/// Computes sin/cos of theta and phi directly and passes them to the
-/// velocity function, avoiding the tridiagonal solver entirely.
-fn set_controls_given_given(
-    path: &mut Path,
-    i: usize,
-    j: usize,
-    delta: &[Vec2],
-    dist: &[Scalar],
-    theta: Scalar,
-    phi: Scalar,
-) {
-    let seg = i.min(delta.len() - 1);
-    let d = delta[seg];
-    let dd = dist[seg];
-
-    if dd < EPSILON {
-        let p = path.knots[i].point;
-        path.knots[i].right = KnotDirection::Explicit(p);
-        path.knots[j].left = KnotDirection::Explicit(p);
-        return;
-    }
-
-    let alpha = tension_val(path.knots[i].right_tension);
-    let beta = tension_val(path.knots[j].left_tension);
-
-    let st = theta.sin();
-    let ct = theta.cos();
-    let sf = phi.sin();
-    let cf = phi.cos();
-
-    let rr = velocity(st, ct, sf, cf, alpha);
-    let ss = velocity(sf, cf, st, ct, beta);
-
-    // Apply at_least clamping
-    let (rr, ss) = clamp_at_least(
-        rr,
-        ss,
-        st,
-        ct,
-        sf,
-        cf,
-        path.knots[i].right_tension,
-        path.knots[j].left_tension,
-    );
-
-    let right_cp = Point::new(
-        rr.mul_add(d.x.mul_add(ct, -(d.y * st)), path.knots[i].point.x),
-        rr.mul_add(d.y.mul_add(ct, d.x * st), path.knots[i].point.y),
-    );
-    let left_cp = Point::new(
-        ss.mul_add(-d.x.mul_add(cf, d.y * sf), path.knots[j].point.x),
-        ss.mul_add(-d.y.mul_add(cf, -(d.x * sf)), path.knots[j].point.y),
-    );
-
-    path.knots[i].right = KnotDirection::Explicit(right_cp);
-    path.knots[j].left = KnotDirection::Explicit(left_cp);
 }
 
 // ---------------------------------------------------------------------------

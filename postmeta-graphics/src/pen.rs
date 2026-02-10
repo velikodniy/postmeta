@@ -15,22 +15,6 @@ use crate::types::{
 };
 
 // ---------------------------------------------------------------------------
-// pencircle / nullpen
-// ---------------------------------------------------------------------------
-
-/// Create a circular pen of the given diameter.
-#[must_use]
-pub const fn pencircle(diameter: Scalar) -> Pen {
-    Pen::circle(diameter)
-}
-
-/// The null pen: a single point at the origin.
-#[must_use]
-pub const fn nullpen() -> Pen {
-    Pen::Elliptical(Transform::ZERO)
-}
-
-// ---------------------------------------------------------------------------
 // makepen — path to pen
 // ---------------------------------------------------------------------------
 
@@ -246,8 +230,8 @@ mod tests {
     use crate::types::EPSILON;
 
     #[test]
-    fn test_pencircle_default() {
-        let pen = pencircle(1.0);
+    fn test_pencircle() {
+        let pen = Pen::circle(1.0);
         match pen {
             Pen::Elliptical(t) => {
                 assert!((t.txx - 0.5).abs() < EPSILON);
@@ -259,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_nullpen() {
-        let pen = nullpen();
+        let pen = Pen::null();
         match pen {
             Pen::Elliptical(t) => {
                 assert!(t.txx.abs() < EPSILON);
@@ -271,7 +255,7 @@ mod tests {
 
     #[test]
     fn test_makepath_elliptical_has_8_knots() {
-        let pen = pencircle(2.0);
+        let pen = Pen::circle(2.0);
         let path = makepath(&pen);
         assert!(path.is_cyclic);
         assert_eq!(path.knots.len(), 8);
@@ -279,7 +263,7 @@ mod tests {
 
     #[test]
     fn test_makepath_elliptical_points_on_circle() {
-        let pen = pencircle(2.0); // radius = 1.0
+        let pen = Pen::circle(2.0); // radius = 1.0
         let path = makepath(&pen);
         for knot in &path.knots {
             let r = knot.point.to_vec2().length();
@@ -322,7 +306,7 @@ mod tests {
 
     #[test]
     fn test_penoffset_circle_right() {
-        let pen = pencircle(2.0); // radius 1
+        let pen = Pen::circle(2.0); // radius 1
         let offset = penoffset(&pen, Vec2::new(1.0, 0.0));
         assert!((offset.x - 1.0).abs() < 0.01, "offset.x = {}", offset.x);
         assert!(offset.y.abs() < 0.01, "offset.y = {}", offset.y);
@@ -330,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_penoffset_circle_up() {
-        let pen = pencircle(2.0); // radius 1
+        let pen = Pen::circle(2.0); // radius 1
         let offset = penoffset(&pen, Vec2::new(0.0, 1.0));
         assert!(offset.x.abs() < 0.01, "offset.x = {}", offset.x);
         assert!((offset.y - 1.0).abs() < 0.01, "offset.y = {}", offset.y);

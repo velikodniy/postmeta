@@ -114,14 +114,6 @@ impl Vec2 {
 /// Errors returned by graphics operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GraphicsError {
-    /// A path has unresolved knot directions (not yet processed by Hobby's
-    /// algorithm).
-    UnresolvedPath {
-        /// Index of the knot with the unresolved direction.
-        knot: usize,
-        /// Which side of the knot is unresolved (`"left"` or `"right"`).
-        side: &'static str,
-    },
     /// `makepen` was called with an invalid path.
     InvalidPen(&'static str),
 }
@@ -129,12 +121,6 @@ pub enum GraphicsError {
 impl fmt::Display for GraphicsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnresolvedPath { knot, side } => {
-                write!(
-                    f,
-                    "path not fully resolved: knot {knot} {side} direction is not Explicit"
-                )
-            }
             Self::InvalidPen(msg) => write!(f, "invalid pen: {msg}"),
         }
     }
@@ -462,7 +448,17 @@ impl Pen {
     #[must_use]
     pub const fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
-        Self::Elliptical(Transform::scale(r))
+        Self::Elliptical(Transform {
+            txx: r,
+            tyy: r,
+            ..Transform::IDENTITY
+        })
+    }
+
+    /// The null pen: a single point at the origin.
+    #[must_use]
+    pub const fn null() -> Self {
+        Self::Elliptical(Transform::ZERO)
     }
 
     /// The default pen: a circle of diameter 0.5bp.
@@ -509,17 +505,6 @@ impl Transform {
         tyx: 0.0,
         tyy: 0.0,
     };
-
-    /// A uniform scale transform.
-    #[inline]
-    #[must_use]
-    pub const fn scale(s: Scalar) -> Self {
-        Self {
-            txx: s,
-            tyy: s,
-            ..Self::IDENTITY
-        }
-    }
 
     /// Compose two transforms: `self` applied first, then `other`.
     ///

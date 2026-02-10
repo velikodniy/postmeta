@@ -11,7 +11,7 @@ use postmeta_graphics::picture;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, GraphicsObject, Picture, Point, TextObject, Transform, Vec2,
+    Color, GraphicsObject, Pen, Picture, Point, TextObject, Transform, Vec2,
 };
 
 use crate::command::{
@@ -44,11 +44,11 @@ impl Interpreter {
                 self.cur_type = Type::Picture;
             }
             x if x == NullaryOp::NullPen as u16 => {
-                self.cur_exp = Value::Pen(pen::nullpen());
+                self.cur_exp = Value::Pen(Pen::null());
                 self.cur_type = Type::Pen;
             }
             x if x == NullaryOp::PenCircle as u16 => {
-                self.cur_exp = Value::Pen(pen::pencircle(1.0));
+                self.cur_exp = Value::Pen(Pen::circle(1.0));
                 self.cur_type = Type::Pen;
             }
             x if x == NullaryOp::NormalDeviate as u16 => {
