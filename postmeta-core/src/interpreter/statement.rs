@@ -11,7 +11,8 @@ use postmeta_graphics::picture;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, DashPattern, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture, Transform,
+    Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture,
+    StrokeObject, Transform,
 };
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
@@ -392,11 +393,13 @@ impl Interpreter {
                 let target = self.get_target_picture(&pic_name);
                 picture::addto_contour(
                     target,
-                    path,
-                    ds.color,
-                    if pen_specified { Some(ds.pen) } else { None },
-                    ds.line_join,
-                    ds.miter_limit,
+                    FillObject {
+                        path,
+                        color: ds.color,
+                        pen: if pen_specified { Some(ds.pen) } else { None },
+                        line_join: ds.line_join,
+                        miter_limit: ds.miter_limit,
+                    },
                 );
             }
             x if x == ThingToAddOp::DoublePath as u16 => {
@@ -414,24 +417,28 @@ impl Interpreter {
                         let shifted = dot.transformed(&transform::shifted(x, y));
                         picture::addto_contour(
                             target,
-                            shifted,
-                            ds.color,
-                            None,
-                            ds.line_join,
-                            ds.miter_limit,
+                            FillObject {
+                                path: shifted,
+                                color: ds.color,
+                                pen: None,
+                                line_join: ds.line_join,
+                                miter_limit: ds.miter_limit,
+                            },
                         );
                     }
                     other => {
                         let path = value_to_path_owned(other)?;
                         picture::addto_doublepath(
                             target,
-                            path,
-                            ds.pen,
-                            ds.color,
-                            ds.dash,
-                            ds.line_cap,
-                            ds.line_join,
-                            ds.miter_limit,
+                            StrokeObject {
+                                path,
+                                pen: ds.pen,
+                                color: ds.color,
+                                dash: ds.dash,
+                                line_cap: ds.line_cap,
+                                line_join: ds.line_join,
+                                miter_limit: ds.miter_limit,
+                            },
                         );
                     }
                 }
