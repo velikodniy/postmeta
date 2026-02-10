@@ -149,16 +149,15 @@ pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
             // For an elliptical pen: find the point on the transformed circle
             // that has the outward normal in direction `dir`.
             //
-            // If T maps the unit circle to the pen, then the offset in direction
-            // d is T * normalize(T^{-T} * d).
-            //
-            // Transform coefficients: txx, txy, tyx, tyy (2x2 part)
-            // Affine convention: x' = txx*x + txy*y, y' = tyx*x + tyy*y
+            // If T maps the unit circle to the pen, the offset in direction d
+            // is T_linear * normalize(T_linear^{-T} * d).  Only the 2x2 linear
+            // part matters — translation represents the pen's origin, not its
+            // shape.
             let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
             if det.abs() < NEAR_ZERO {
                 return Point::ZERO;
             }
-            // Inverse transpose: columns of (T^{-1})^T = rows of T^{-1}
+            // Inverse transpose of the 2x2 part
             let inv_t_x = t.tyy.mul_add(dir.x, -(t.tyx * dir.y)) / det;
             let inv_t_y = (-t.txy).mul_add(dir.x, t.txx * dir.y) / det;
             let len = inv_t_x.hypot(inv_t_y);
@@ -167,7 +166,11 @@ pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
             }
             let unit_x = inv_t_x / len;
             let unit_y = inv_t_y / len;
-            t.apply_to_point(Point::new(unit_x, unit_y))
+            // Apply only the linear part (no translation)
+            Point::new(
+                t.txx.mul_add(unit_x, t.txy * unit_y),
+                t.tyx.mul_add(unit_x, t.tyy * unit_y),
+            )
         }
         Pen::Polygonal(vertices) => {
             // Find the vertex with the maximum dot product with dir
