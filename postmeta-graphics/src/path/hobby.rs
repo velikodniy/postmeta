@@ -649,6 +649,12 @@ fn solve_two_knots_range(
     full_delta: &[Vec2],
     full_dist: &[Scalar],
 ) {
+    if matches!(path.knots[i].right, KnotDirection::Explicit(_))
+        && matches!(path.knots[j].left, KnotDirection::Explicit(_))
+    {
+        return;
+    }
+
     let seg = i.min(full_delta.len() - 1);
     let d = full_delta[seg];
     let chord_angle = angle_of(d);
@@ -964,6 +970,12 @@ fn set_controls_for_segment(
     theta: Scalar,
     phi: Scalar,
 ) {
+    if matches!(path.knots[i].right, KnotDirection::Explicit(_))
+        && matches!(path.knots[j].left, KnotDirection::Explicit(_))
+    {
+        return;
+    }
+
     let seg = i.min(delta.len() - 1);
     let d = delta[seg];
     let dd = dist[seg];
@@ -1240,6 +1252,34 @@ mod tests {
         if let KnotDirection::Explicit(cp) = path.knots[1].left {
             assert!(cp.x > 0.0 && cp.x < 10.0);
             assert!(cp.y.abs() < 0.5);
+        }
+    }
+
+    #[test]
+    fn test_two_knot_explicit_controls_are_preserved() {
+        let mut k0 = Knot::new(Point::new(0.0, 0.0));
+        let mut k1 = Knot::new(Point::new(2.0, 0.0));
+
+        let cp1 = Point::new(-1.0, 2.0);
+        let cp2 = Point::new(3.0, 3.0);
+        k0.right = KnotDirection::Explicit(cp1);
+        k1.left = KnotDirection::Explicit(cp2);
+
+        let mut path = Path::from_knots(vec![k0, k1], false);
+        make_choices(&mut path);
+
+        match path.knots[0].right {
+            KnotDirection::Explicit(p) => {
+                assert!((p.x - cp1.x).abs() < EPSILON && (p.y - cp1.y).abs() < EPSILON);
+            }
+            _ => panic!("expected explicit right control on first knot"),
+        }
+
+        match path.knots[1].left {
+            KnotDirection::Explicit(p) => {
+                assert!((p.x - cp2.x).abs() < EPSILON && (p.y - cp2.y).abs() < EPSILON);
+            }
+            _ => panic!("expected explicit left control on second knot"),
         }
     }
 

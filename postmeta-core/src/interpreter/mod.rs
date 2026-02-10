@@ -2365,4 +2365,45 @@ mod tests {
         assert!((ox - 1.5).abs() < 0.01, "ox={ox}");
         assert!((oy - 0.5).abs() < 0.01, "oy={oy}");
     }
+
+    #[test]
+    fn save_localizes_suffix_bindings_in_recursive_vardef() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "vardef test(expr n) = \
+                   save a; numeric a[]; \
+                   a[1] := n; \
+                   if n>0: \
+                     test(n-1); \
+                   else: \
+                   fi; \
+                   show a[1]; \
+                 enddef; \
+                 test(3);",
+            )
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+
+        assert_eq!(infos.len(), 4, "expected 4 recursive samples, got: {infos:?}");
+        for i in 0..4 {
+            assert!(
+                infos.iter().any(|m| m.contains(&format!(">> {i}"))),
+                "missing sample {i} in {infos:?}"
+            );
+        }
+    }
 }

@@ -432,6 +432,45 @@ mod tests {
     }
 
     #[test]
+    fn controls_option_preserves_explicit_controls() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "pair A,B,C,D; path p; \
+                 A:=(0,0); B:=(-1,2); C:=(3,3); D:=(2,0); \
+                 p := A .. controls B and C .. D;",
+            )
+            .expect("controls path should parse");
+
+        let pid = interp
+            .variables
+            .lookup_existing("p")
+            .expect("path variable p should exist");
+        let path = match interp.variables.get(pid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+
+        assert_eq!(path.knots.len(), 2, "expected two knots");
+
+        match path.knots[0].right {
+            KnotDirection::Explicit(cp) => {
+                assert!((cp.x + 1.0).abs() < 1e-9, "cp.x={}", cp.x);
+                assert!((cp.y - 2.0).abs() < 1e-9, "cp.y={}", cp.y);
+            }
+            ref other => panic!("knot 0 right is not explicit: {other:?}"),
+        }
+
+        match path.knots[1].left {
+            KnotDirection::Explicit(cp) => {
+                assert!((cp.x - 3.0).abs() < 1e-9, "cp.x={}", cp.x);
+                assert!((cp.y - 3.0).abs() < 1e-9, "cp.y={}", cp.y);
+            }
+            ref other => panic!("knot 1 left is not explicit: {other:?}"),
+        }
+    }
+
+    #[test]
     fn ampersand_concatenates_paths() {
         let mut interp = Interpreter::new();
         interp

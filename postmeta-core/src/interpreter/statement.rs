@@ -588,9 +588,9 @@ impl Interpreter {
             if let Some(id) = self.cur.sym {
                 let entry = self.symbols.get(id);
                 self.save_stack.save_symbol(id, entry);
-                let name = self.symbols.name(id).to_owned();
-                let prev = self.variables.unbind_name(&name);
-                self.save_stack.save_name_binding(name, prev);
+                let root = self.symbols.name(id).to_owned();
+                let prev = self.variables.take_name_bindings_for_root(&root);
+                self.save_stack.save_name_bindings(root, prev);
                 self.symbols.clear(id);
             }
             self.get_x_next();
@@ -792,8 +792,11 @@ impl Interpreter {
                 SaveEntry::Symbol { id, entry } => {
                     self.symbols.set(id, entry);
                 }
-                SaveEntry::NameBinding { name, prev } => {
-                    self.variables.restore_name_binding(&name, prev);
+                SaveEntry::NameBindings { root, prev } => {
+                    self.variables.clear_name_bindings_for_root(&root);
+                    for (name, id) in prev {
+                        self.variables.register_name(&name, id);
+                    }
                 }
                 SaveEntry::Boundary => {} // shouldn't happen
             }

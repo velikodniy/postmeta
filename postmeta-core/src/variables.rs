@@ -142,6 +142,50 @@ impl Variables {
         self.name_to_id.remove(name)
     }
 
+    fn matches_root_or_suffix(name: &str, root: &str) -> bool {
+        if name == root {
+            return true;
+        }
+
+        name.strip_prefix(root)
+            .is_some_and(|tail| tail.starts_with('.') || tail.starts_with('['))
+    }
+
+    /// Remove all bindings for a root name and its suffix/subscript descendants.
+    ///
+    /// Examples for root `a`: `a`, `a.x`, `a[1]`, `a[1].x`.
+    pub fn take_name_bindings_for_root(&mut self, root: &str) -> Vec<(String, VarId)> {
+        let names: Vec<String> = self
+            .name_to_id
+            .keys()
+            .filter(|name| Self::matches_root_or_suffix(name, root))
+            .cloned()
+            .collect();
+
+        let mut taken = Vec::with_capacity(names.len());
+        for name in names {
+            if let Some(id) = self.name_to_id.remove(&name) {
+                taken.push((name, id));
+            }
+        }
+
+        taken
+    }
+
+    /// Clear current bindings for a root name and all its descendants.
+    pub fn clear_name_bindings_for_root(&mut self, root: &str) {
+        let names: Vec<String> = self
+            .name_to_id
+            .keys()
+            .filter(|name| Self::matches_root_or_suffix(name, root))
+            .cloned()
+            .collect();
+
+        for name in names {
+            self.name_to_id.remove(&name);
+        }
+    }
+
     /// Restore a name binding to a previous state.
     pub fn restore_name_binding(&mut self, name: &str, prev: Option<VarId>) {
         if let Some(id) = prev {
@@ -531,8 +575,11 @@ pub enum SaveEntry {
         id: crate::symbols::SymbolId,
         entry: crate::symbols::SymbolEntry,
     },
-    /// Saved variable name binding for `save` scoping.
-    NameBinding { name: String, prev: Option<VarId> },
+    /// Saved bindings for a root name and its descendants (`a`, `a[1]`, `a.x`, ...).
+    NameBindings {
+        root: String,
+        prev: Vec<(String, VarId)>,
+    },
 }
 
 /// The save stack for scoping.
@@ -574,9 +621,9 @@ impl SaveStack {
         self.entries.push(SaveEntry::Symbol { id, entry });
     }
 
-    /// Save a variable name binding.
-    pub fn save_name_binding(&mut self, name: String, prev: Option<VarId>) {
-        self.entries.push(SaveEntry::NameBinding { name, prev });
+    /// Save bindings for a root name and its descendants.
+    pub fn save_name_bindings(&mut self, root: String, prev: Vec<(String, VarId)>) {
+        self.entries.push(SaveEntry::NameBindings { root, prev });
     }
 
     /// Restore all entries back to the last boundary.
