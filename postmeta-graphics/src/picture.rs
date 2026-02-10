@@ -184,7 +184,7 @@ impl BoundingBox {
     }
 
     /// Expand to include a point.
-    pub fn include_point(&mut self, p: Point) {
+    pub const fn include_point(&mut self, p: Point) {
         self.min_x = self.min_x.min(p.x);
         self.min_y = self.min_y.min(p.y);
         self.max_x = self.max_x.max(p.x);

@@ -154,7 +154,7 @@ fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
 
 /// Solve one segment of a path given an explicit list of knot indices.
 ///
-/// The `indices` slice maps local positions (0..seg_len) to global knot
+/// The `indices` slice maps local positions (0..`seg_len`) to global knot
 /// indices in the path. This handles both contiguous ranges (open paths)
 /// and wrap-around ranges (cyclic path segments).
 ///
