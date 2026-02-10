@@ -208,7 +208,7 @@ fn solve_cyclic_segment(
         KnotDirection::Curl(gamma) => {
             let cr = curl_ratio(gamma, rt0, lt1);
             uu[0] = cr;
-            vv[0] = -cr * psi[1]; // C2 fix
+            vv[0] = -cr * psi[1];
         }
         _ => {
             uu[0] = 0.0;
@@ -291,8 +291,7 @@ fn solve_cyclic_segment(
         }
         KnotDirection::Curl(gamma) => {
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            // mp.web line 6742-6743:
-            //   theta[n] := -(ff * vv[n-1]) / (1 - ff * uu[n-1])
+            // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
             let denom = ff.mul_add(-uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
@@ -451,11 +450,11 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
 /// This applies Hobby's algorithm with the boundary conditions from the
 /// endpoint knots' `right` (at `start`) and `left` (at `end`) directions.
 ///
-/// Follows mp.web's `make_choices` structure: ratio-based tridiagonal
-/// coefficients (aa=A/B, bb=D/C) with correct tension sourcing.
+/// Uses ratio-based tridiagonal coefficients (aa=A/B, bb=D/C) with
+/// correct tension sourcing.
 #[expect(
     clippy::too_many_lines,
-    reason = "tridiagonal solver with boundary conditions mirrors mp.web structure"
+    reason = "tridiagonal solver with boundary conditions is a single logical unit"
 )]
 fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2], dist: &[Scalar]) {
     let seg_len = end - start + 1; // number of knots in this segment
@@ -486,7 +485,6 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
     let mut vv = vec![0.0; seg_len];
 
     // Left boundary condition (knot at `start`)
-    // mp.web: rt = right_tension(start), lt = left_tension(start+1)
     let rt0 = path.knots[start].right_tension;
     let lt1 = path.knots[start + 1].left_tension;
 
@@ -498,10 +496,9 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
             vv[0] = th;
         }
         KnotDirection::Curl(gamma) => {
-            // mp.web: uu[0] = curl_ratio(cc, rt, lt); vv[0] = -psi[1]*uu[0]
             let cr = curl_ratio(gamma, rt0, lt1);
             uu[0] = cr;
-            vv[0] = -cr * psi[1]; // C2 fix: was 0.0
+            vv[0] = -cr * psi[1];
         }
         _ => {
             uu[0] = 0.0;
@@ -509,20 +506,8 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
     }
 
-    // Forward sweep for interior knots (k = 1..seg_len-2)
-    //
-    // Following mp.web's ratio-based approach:
-    //   aa = A_k/B_k = alpha_{k-1} / (3 - alpha_{k-1})
-    //     where alpha_{k-1} = 1/|right_tension(prev_knot)|
-    //   bb = D_k/C_k = beta_{k+1} / (3 - beta_{k+1})
-    //     where beta_{k+1} = 1/|left_tension(next_knot)|
-    //   dd = (3 - alpha_{k-1}) * dist[k]    (forward chord length)
-    //   ee = (3 - beta_{k+1}) * dist[k-1]   (backward chord length)
-    //   cc = 1 - uu[k-1] * aa
-    //   Adjust dd,ee by (lt/rt)^2 or (rt/lt)^2 for asymmetric tensions at k.
-    //   ff = ee / (ee + cc*dd_adj)
-    //   uu[k] = ff * bb
-    //   vv[k] = -psi[k+1]*uu[k] - (1-ff)*psi[k] - ff*aa*vv[k-1]  (for non-curl previous)
+    // Forward sweep for interior knots (k = 1..seg_len-2).
+    // Ratio-based tridiagonal coefficients: aa = alpha/(3-alpha), bb = beta/(3-beta).
     for i in 1..(seg_len - 1) {
         let k = start + i;
 
@@ -538,7 +523,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         let lt_k = tension_val(path.knots[k].left_tension);
         let rt_k = tension_val(path.knots[k].right_tension);
 
-        // aa = alpha_{k-1} / (3 - alpha_{k-1}); mp.web: 1/(3*rt_prev - 1)
+        // aa = alpha_{k-1} / (3 - alpha_{k-1})
         let aa = if (rt_prev - 1.0).abs() < EPSILON {
             0.5
         } else {
@@ -546,7 +531,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         };
         let dd = (3.0 - alpha_prev) * dist[k]; // forward chord scaled
 
-        // bb = beta_{k+1} / (3 - beta_{k+1}); mp.web: 1/(3*lt_next - 1)
+        // bb = beta_{k+1} / (3 - beta_{k+1})
         let bb = if (lt_next - 1.0).abs() < EPSILON {
             0.5
         } else {
@@ -557,7 +542,6 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         let cc = uu[i - 1].mul_add(-aa, 1.0);
 
         // Scale dd or ee for asymmetric tensions at the current knot.
-        // mp.web: if lt_k != rt_k, multiply dd by (lt_k/rt_k)^2 or ee by (rt_k/lt_k)^2.
         let (dd_adj, ee_adj) = if (lt_k - rt_k).abs() < EPSILON {
             (cc * dd, ee)
         } else if lt_k < rt_k {
@@ -605,8 +589,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
         KnotDirection::Curl(gamma) => {
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            // mp.web line 6742-6743:
-            //   theta[n] := -(ff * vv[n-1]) / (1 - ff * uu[n-1])
+            // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
             let denom = ff.mul_add(-uu[last - 1], 1.0);
             if denom.abs() < 1e-30 {
                 theta[last] = 0.0;
@@ -619,7 +602,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
         }
     }
 
-    // Back-substitution: theta[k] = vv[k] - uu[k]*theta[k+1]
+    // Back-substitution
     for i in (0..last).rev() {
         theta[i] = uu[i].mul_add(-theta[i + 1], vv[i]);
     }
@@ -661,19 +644,13 @@ fn solve_two_knots_range(
 
     match (&path.knots[i].right, &path.knots[j].left) {
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
-            // mp.web: theta = given_right - chord_angle (radians)
-            //         phi computed via sin/cos: sf = -sin(given_left - chord_angle)
-            // i.e., phi = -(given_left - chord_angle) (radians)
             let theta = reduce_angle(*a1 - chord_angle);
             let phi = reduce_angle(-(*a2 - chord_angle));
             set_controls_given_given(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
-            // Given start, curl end: theta from given, phi from general solver.
-            // mp.web: theta[0] = given - chord_angle (radians), uu[0] = 0.
-            // Right curl boundary: ff = curl_ratio(gamma, lt_j, rt_i),
-            //   theta[1] = -ff * theta[0]. phi = -theta[1] = ff * theta.
+            // Given start, curl end: theta from direction, phi via curl ratio.
             let theta = reduce_angle(*a1 - chord_angle);
             let lt_j = path.knots[j].left_tension.abs();
             let rt_i = path.knots[i].right_tension.abs();
@@ -683,10 +660,7 @@ fn solve_two_knots_range(
             return;
         }
         (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
-            // Curl start, given end: phi from given, theta from general solver.
-            // mp.web: theta[n] = given - chord_angle (radians).
-            // Left curl boundary: ff = curl_ratio(gamma, rt_i, lt_j),
-            //   theta[0] = -ff * theta[n]. phi = -(given - chord) = -theta_n.
+            // Curl start, given end: phi from direction, theta via curl ratio.
             let phi = reduce_angle(-(*a2 - chord_angle));
             let rt_i = path.knots[i].right_tension.abs();
             let lt_j = path.knots[j].left_tension.abs();
@@ -696,10 +670,7 @@ fn solve_two_knots_range(
             return;
         }
         (KnotDirection::Curl(_), KnotDirection::Curl(_)) => {
-            // Both curls: straight line.
-            // mp.web directly sets controls at 1/3 and 2/3 of the chord,
-            // adjusted by tension. Our velocity function handles this correctly
-            // with theta=phi=0.
+            // Both curls: straight line (theta=phi=0).
             set_controls_for_segment(path, i, j, full_delta, full_dist, 0.0, 0.0);
             return;
         }
@@ -711,10 +682,8 @@ fn solve_two_knots_range(
 
 /// Set controls for the two-knot given+given case.
 ///
-/// mp.web computes sin/cos directly: `sf = -sin(phi_raw)`, `cf = cos(phi_raw)`,
-/// so the effective phi angle passed to the velocity function is negated relative
-/// to the raw direction difference. This is handled by passing (st,ct,sf,cf) to
-/// `velocity` and `set_controls` directly.
+/// Computes sin/cos of theta and phi directly and passes them to the
+/// velocity function, avoiding the tridiagonal solver entirely.
 fn set_controls_given_given(
     path: &mut Path,
     i: usize,
@@ -777,7 +746,7 @@ fn set_controls_given_given(
 
 /// Solve a purely cyclic path (all Open directions, no breakpoints).
 ///
-/// Follows mp.web's cyclic tridiagonal solver (lines 6590-6712, 6778-6788):
+/// Uses the cyclic tridiagonal solver from mp.web:
 /// - Forward sweep with uu[k], vv[k], ww[k] (ww tracks theta[0] coefficient)
 /// - Backward iteration closure to solve for theta[0] = theta[n]
 /// - Standard back-substitution
@@ -814,11 +783,8 @@ fn solve_choices_cyclic(path: &mut Path) {
     }
 
     // Forward sweep: compute uu[k], vv[k], ww[k] for k=1..n.
-    //
-    // mp.web processes k=1..n (1-based), where k=n is the end_cycle knot (same as
-    // knot 0). The recurrence is: theta[k-1] + uu[k-1]*theta[k] = vv[k-1] + ww[k-1]*theta[0]
-    //
-    // We use arrays of size n+1 (indices 0..n), where index n corresponds to knot 0.
+    // Recurrence: theta[k-1] + uu[k-1]*theta[k] = vv[k-1] + ww[k-1]*theta[0]
+    // Arrays have size n+1 (indices 0..n), where index n corresponds to knot 0.
     let mut uu = vec![0.0_f64; n + 1];
     let mut vv = vec![0.0_f64; n + 1];
     let mut ww = vec![0.0_f64; n + 1];
@@ -889,7 +855,7 @@ fn solve_choices_cyclic(path: &mut Path) {
         let ff = ee / denom;
         uu[k] = ff * bb;
 
-        // Compute vv[k] and ww[k] (mp.web lines 6674-6687)
+        // Compute vv[k] and ww[k]
         let psi_next = psi[knot_next];
         let acc = -psi_next * uu[k];
 
@@ -909,10 +875,7 @@ fn solve_choices_cyclic(path: &mut Path) {
     }
 
     // Cyclic closure: solve for theta[0] = theta[n].
-    // mp.web lines 6701-6712: backward iteration starting at k=n, then
-    // decr(k) before each step, wrapping k=0→k=n. This processes
-    // indices {n-1, n-2, ..., 1, n} in that order (n iterations).
-    // The order matters because this is a sequential recurrence.
+    // Backward iteration processes indices {n-1, n-2, ..., 1, n} in that order.
     let mut aa_val = 0.0_f64;
     let mut bb_val = 1.0_f64;
     // Process k = n-1, n-2, ..., 1
@@ -920,7 +883,7 @@ fn solve_choices_cyclic(path: &mut Path) {
         aa_val = aa_val.mul_add(-uu[k], vv[k]);
         bb_val = bb_val.mul_add(-uu[k], ww[k]);
     }
-    // Final step: process k = n (mp.web: k=0 wraps to k=n)
+    // Final step: process k = n (wraps to knot 0)
     aa_val = aa_val.mul_add(-uu[n], vv[n]);
     bb_val = bb_val.mul_add(-uu[n], ww[n]);
 
@@ -932,21 +895,19 @@ fn solve_choices_cyclic(path: &mut Path) {
     };
 
     // Adjust vv to eliminate ww dependency: vv[k] += theta0 * ww[k]
-    // mp.web: theta[n] = aa; vv[0] = aa; for k:=1 to n-1 do vv[k] += aa*ww[k];
     vv[0] = theta0;
     for k in 1..n {
         vv[k] += theta0 * ww[k];
     }
 
-    // Back-substitution: theta[k] = vv[k] - uu[k]*theta[k+1]
-    // mp.web line 6781: for k:=n-1 downto 0 do theta[k]:=vv[k]-take_fraction(theta[k+1],uu[k])
+    // Back-substitution
     let mut theta = vec![0.0_f64; n + 1];
     theta[n] = theta0;
     for k in (0..n).rev() {
         theta[k] = uu[k].mul_add(-theta[k + 1], vv[k]);
     }
 
-    // Set control points for all segments (mp.web lines 6782-6788)
+    // Set control points for all segments
     for k in 0..n {
         let next = (k + 1) % n;
         let phi_next = -(psi[next] + theta[next]);
@@ -996,11 +957,10 @@ fn set_controls_for_segment(
     let sf = phi.sin();
     let cf = phi.cos();
 
-    // The velocity function from mp.web / Hobby's paper
     let rr = velocity(st, ct, sf, cf, alpha);
     let ss = velocity(sf, cf, st, ct, beta);
 
-    // Apply at_least clamping (mp.web lines 6806-6807, 6825-6837)
+    // Apply "at least" tension clamping (bounding triangle constraint)
     let (rr, ss) = clamp_at_least(
         rr,
         ss,
@@ -1012,7 +972,6 @@ fn set_controls_for_segment(
         path.knots[j].left_tension,
     );
 
-    // Compute control points (mp.web lines 6808-6815)
     // right_cp = knot[i] + rr * (delta rotated by theta)
     // left_cp  = knot[j] - ss * (delta rotated by -phi)
     let right_cp = Point::new(
@@ -1031,9 +990,9 @@ fn set_controls_for_segment(
 
 /// Clamp velocities for "at least" tension (bounding triangle constraint).
 ///
-/// From mp.web lines 6819-6837: When `sin(theta)` and `sin(phi)` have the
-/// same sign, the bounding triangle condition limits velocities so that the
-/// curve stays inside the triangle formed by the tangent lines.
+/// When `sin(theta)` and `sin(phi)` have the same sign, the bounding
+/// triangle condition limits velocities so that the curve stays inside the
+/// triangle formed by the tangent lines.
 ///
 /// Arguments:
 /// - `rr`, `ss`: computed velocities
@@ -1066,8 +1025,7 @@ fn clamp_at_least(
         return (rr, ss);
     }
 
-    // Safety factor: multiply by (1 + epsilon). mp.web uses (fraction_one + unity),
-    // which in fixed-point is (1 + 1/65536). We use a small factor.
+    // Safety factor: multiply by (1 + 1/65536) to avoid boundary case.
     let sine = sine * (1.0 + 1.0 / 65536.0);
 
     let mut rr = rr;
@@ -1115,8 +1073,7 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
         return 0.0;
     }
 
-    // mp.web line 2656-2659: divide num by tension FIRST, then cap at 4.
-    // velocity = min(num / (tension * denom), 4)
+    // Divide by tension first, then cap at 4.
     let result = num / (denom * tension);
     result.min(4.0)
 }
@@ -1312,6 +1269,7 @@ mod tests {
 
         // The curve should pass through all knots
         for i in 0..4 {
+            #[expect(clippy::cast_precision_loss, reason = "test index fits in f64")]
             let p = crate::path::point_of(&path, i as Scalar);
             assert!(
                 (p.x - path.knots[i].point.x).abs() < EPSILON
@@ -1853,7 +1811,7 @@ mod tests {
         let r = 10.0;
         let points: Vec<Point> = (0..3)
             .map(|i| {
-                let angle = 2.0 * std::f64::consts::PI * (i as f64) / 3.0;
+                let angle = 2.0 * std::f64::consts::PI * f64::from(i) / 3.0;
                 Point::new(r * angle.cos(), r * angle.sin())
             })
             .collect();
@@ -1874,13 +1832,11 @@ mod tests {
         }
     }
 
-    /// Regression test for right curl boundary sign bug (C8 fix).
-    ///
-    /// mp.web line 6742-6743 uses `(1 - ff*uu)` in the denominator, not
+    /// Regression: curl boundary denominator must use `(1 - ff*uu)`, not
     /// `(1 + ff*uu)`. The sign error produced asymmetric curves when both
     /// endpoints had curl boundaries.
     ///
-    /// MetaPost reference output verified with `mpost` version 2.11:
+    /// `MetaPost` reference output verified with `mpost` version 2.11:
     ///   (0,0)..controls (-19.4835,-0.59496) and (-19.4835,28.9414)
     ///    ..(0,28.34645)..controls (15.4556,27.87448) and (12.89085,0.47195)
     ///    ..(28.34645,0)..controls (47.82996,-0.59496) and (47.82996,28.9414)
@@ -1926,7 +1882,7 @@ mod tests {
         );
     }
 
-    /// Helper to assert a control point matches MetaPost reference (tolerance 0.01).
+    /// Helper to assert a control point matches `MetaPost` reference (tolerance 0.01).
     fn assert_cp(label: &str, actual: Point, ex: f64, ey: f64) {
         let tol = 0.01;
         assert!(
@@ -2117,9 +2073,9 @@ mod tests {
         assert_cp("s1 lcp", left_cp(&path, 2), 167.19278, 18.9412);
     }
 
-    /// Regression: tlhiv example 38 (`--` then `..`) must match MetaPost.
+    /// Regression: tlhiv example 38 (`--` then `..`) must match `MetaPost`.
     ///
-    /// MetaPost reference:
+    /// `MetaPost` reference:
     /// (0,0)..controls (0,9.44882) and (0,18.89763)..(0,28.34645)
     ///      ..controls (-12.591,9.73645) and (9.73645,-12.591)..(28.34645,0)
     ///      ..controls (38.37733,6.78662) and (38.37733,21.55983)..(28.34645,28.34645)
@@ -2150,7 +2106,7 @@ mod tests {
 
     /// Regression: two-knot open cycle must use consistent 180-degree turn sign.
     ///
-    /// MetaPost reference for `(0,0)..(1cm,1cm)..cycle`:
+    /// `MetaPost` reference for `(0,0)..(1cm,1cm)..cycle`:
     /// (0,0)..controls (18.89763,-18.89763) and (47.24408,9.44882)
     ///  ..(28.34645,28.34645)..controls (9.44882,47.24408) and (-18.89763,18.89763)
     ///  ..cycle
@@ -2175,7 +2131,7 @@ mod tests {
 
     /// Regression: cyclic two-knot path with right-side directions on both knots.
     ///
-    /// MetaPost reference for `(0,0){up}..(2cm,0){up}..cycle`:
+    /// `MetaPost` reference for `(0,0){up}..(2cm,0){up}..cycle`:
     /// (0,0)..controls (0,37.79527) and (56.6929,-37.79527)
     ///  ..(56.6929,0)..controls (56.6929,37.79527) and (0,-37.79527)..cycle
     #[test]
