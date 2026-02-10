@@ -32,12 +32,15 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
     }
 
     // Try all pairs of segments
+    let mut work = 0_u32;
     for i in 0..n1 {
         for j in 0..n2 {
             let seg1 = CubicSegment::from_path(path1, i);
             let seg2 = CubicSegment::from_path(path2, j);
 
-            if let Some((t1, t2)) = intersect_cubics(&seg1, &seg2, 0.0, 1.0, 0.0, 1.0, 0) {
+            if let Some((t1, t2)) =
+                intersect_cubics(&seg1, &seg2, Interval::UNIT, Interval::UNIT, 0, &mut work)
+            {
                 return Some(Intersection {
                     t1: index_to_scalar(i) + t1,
                     t2: index_to_scalar(j) + t2,
@@ -54,33 +57,30 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
 pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
     let n1 = path1.num_segments();
     let n2 = path2.num_segments();
-    let mut results = Vec::new();
+    let results = Vec::new();
 
     if n1 == 0 || n2 == 0 {
         return results;
     }
 
+    let mut ctx = FindAllContext {
+        seg1_offset: 0.0,
+        seg2_offset: 0.0,
+        results,
+        work: 0,
+    };
+
     for i in 0..n1 {
         for j in 0..n2 {
             let seg1 = CubicSegment::from_path(path1, i);
             let seg2 = CubicSegment::from_path(path2, j);
-
-            find_intersections_recursive(
-                &seg1,
-                &seg2,
-                0.0,
-                1.0,
-                0.0,
-                1.0,
-                0,
-                index_to_scalar(i),
-                index_to_scalar(j),
-                &mut results,
-            );
+            ctx.seg1_offset = index_to_scalar(i);
+            ctx.seg2_offset = index_to_scalar(j);
+            ctx.recurse(&seg1, &seg2, Interval::UNIT, Interval::UNIT, 0);
         }
     }
 
-    results
+    ctx.results
 }
 
 // ---------------------------------------------------------------------------
@@ -97,21 +97,62 @@ fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Maximum recursion depth for bisection.
-const MAX_DEPTH: u32 = 40;
+///
+/// `MetaPost`'s `mp.web` uses ~17 levels. We use 20 for margin with `f64` precision.
+const MAX_DEPTH: u32 = 20;
+
+/// Maximum number of bbox overlap tests before giving up.
+///
+/// `MetaPost` uses `max_patience = 5000` backtracks. We count all overlap
+/// tests as work units with a comparable budget.
+const MAX_WORK: u32 = 5000;
 
 /// Tolerance for convergence.
 const INTERSECT_TOL: Scalar = 1e-6;
+
+/// A time parameter interval `[lo, hi]` within a single cubic segment.
+#[derive(Clone, Copy)]
+struct Interval {
+    lo: Scalar,
+    hi: Scalar,
+}
+
+impl Interval {
+    const UNIT: Self = Self { lo: 0.0, hi: 1.0 };
+
+    const fn mid(self) -> Scalar {
+        f64::midpoint(self.lo, self.hi)
+    }
+
+    const fn left(self) -> Self {
+        Self {
+            lo: self.lo,
+            hi: self.mid(),
+        }
+    }
+
+    const fn right(self) -> Self {
+        Self {
+            lo: self.mid(),
+            hi: self.hi,
+        }
+    }
+}
 
 /// Find one intersection between two cubic segments via bisection.
 fn intersect_cubics(
     seg1: &CubicSegment,
     seg2: &CubicSegment,
-    t1_lo: Scalar,
-    t1_hi: Scalar,
-    t2_lo: Scalar,
-    t2_hi: Scalar,
+    iv1: Interval,
+    iv2: Interval,
     depth: u32,
+    work: &mut u32,
 ) -> Option<(Scalar, Scalar)> {
+    *work += 1;
+    if *work > MAX_WORK {
+        return Some((iv1.mid(), iv2.mid()));
+    }
+
     let bb1 = seg1.bbox();
     let bb2 = seg2.bbox();
 
@@ -121,130 +162,78 @@ fn intersect_cubics(
 
     // Check convergence
     if seg1.extent() < INTERSECT_TOL && seg2.extent() < INTERSECT_TOL {
-        return Some((f64::midpoint(t1_lo, t1_hi), f64::midpoint(t2_lo, t2_hi)));
+        return Some((iv1.mid(), iv2.mid()));
     }
 
     if depth >= MAX_DEPTH {
-        return Some((f64::midpoint(t1_lo, t1_hi), f64::midpoint(t2_lo, t2_hi)));
+        return Some((iv1.mid(), iv2.mid()));
     }
 
     // Bisect both curves
-    let t1_mid = f64::midpoint(t1_lo, t1_hi);
-    let t2_mid = f64::midpoint(t2_lo, t2_hi);
-
     let (s1_left, s1_right) = seg1.split(0.5);
     let (s2_left, s2_right) = seg2.split(0.5);
+    let d = depth + 1;
 
-    // Try all 4 combinations, return the first hit
-    intersect_cubics(&s1_left, &s2_left, t1_lo, t1_mid, t2_lo, t2_mid, depth + 1)
-        .or_else(|| intersect_cubics(&s1_left, &s2_right, t1_lo, t1_mid, t2_mid, t2_hi, depth + 1))
-        .or_else(|| intersect_cubics(&s1_right, &s2_left, t1_mid, t1_hi, t2_lo, t2_mid, depth + 1))
-        .or_else(|| {
-            intersect_cubics(
-                &s1_right,
-                &s2_right,
-                t1_mid,
-                t1_hi,
-                t2_mid,
-                t2_hi,
-                depth + 1,
-            )
-        })
+    // Try all 4 combinations (LL, LR, RL, RR), return the first hit
+    intersect_cubics(&s1_left, &s2_left, iv1.left(), iv2.left(), d, work)
+        .or_else(|| intersect_cubics(&s1_left, &s2_right, iv1.left(), iv2.right(), d, work))
+        .or_else(|| intersect_cubics(&s1_right, &s2_left, iv1.right(), iv2.left(), d, work))
+        .or_else(|| intersect_cubics(&s1_right, &s2_right, iv1.right(), iv2.right(), d, work))
 }
 
-/// Find all intersections (appends to results).
-#[expect(
-    clippy::too_many_arguments,
-    reason = "recursive bisection requires passing interval bounds for both curves"
-)]
-fn find_intersections_recursive(
-    seg1: &CubicSegment,
-    seg2: &CubicSegment,
-    t1_lo: Scalar,
-    t1_hi: Scalar,
-    t2_lo: Scalar,
-    t2_hi: Scalar,
-    depth: u32,
+/// Accumulator for `find_all` recursive intersection search.
+struct FindAllContext {
     seg1_offset: Scalar,
     seg2_offset: Scalar,
-    results: &mut Vec<Intersection>,
-) {
-    let bb1 = seg1.bbox();
-    let bb2 = seg2.bbox();
+    results: Vec<Intersection>,
+    work: u32,
+}
 
-    if !bbox_overlap(&bb1, &bb2) {
-        return;
-    }
-
-    if (seg1.extent() < INTERSECT_TOL && seg2.extent() < INTERSECT_TOL) || depth >= MAX_DEPTH {
-        let t1 = seg1_offset + f64::midpoint(t1_lo, t1_hi);
-        let t2 = seg2_offset + f64::midpoint(t2_lo, t2_hi);
-
-        // Avoid duplicate results
-        let dominated = results.iter().any(|r| {
-            (r.t1 - t1).abs() < INTERSECT_TOL * 10.0 && (r.t2 - t2).abs() < INTERSECT_TOL * 10.0
-        });
-        if !dominated {
-            results.push(Intersection { t1, t2 });
+impl FindAllContext {
+    fn recurse(
+        &mut self,
+        seg1: &CubicSegment,
+        seg2: &CubicSegment,
+        iv1: Interval,
+        iv2: Interval,
+        depth: u32,
+    ) {
+        self.work += 1;
+        if self.work > MAX_WORK {
+            return;
         }
-        return;
+
+        let bb1 = seg1.bbox();
+        let bb2 = seg2.bbox();
+
+        if !bbox_overlap(&bb1, &bb2) {
+            return;
+        }
+
+        if (seg1.extent() < INTERSECT_TOL && seg2.extent() < INTERSECT_TOL) || depth >= MAX_DEPTH {
+            let t1 = self.seg1_offset + iv1.mid();
+            let t2 = self.seg2_offset + iv2.mid();
+
+            // Avoid duplicate results
+            let dominated = self.results.iter().any(|r| {
+                (r.t1 - t1).abs() < INTERSECT_TOL * 10.0 && (r.t2 - t2).abs() < INTERSECT_TOL * 10.0
+            });
+            if !dominated {
+                self.results.push(Intersection { t1, t2 });
+            }
+            return;
+        }
+
+        let (s1_left, s1_right) = seg1.split(0.5);
+        let (s2_left, s2_right) = seg2.split(0.5);
+
+        let d = depth + 1;
+        for (s1, i1) in [(&s1_left, iv1.left()), (&s1_right, iv1.right())] {
+            for (s2, i2) in [(&s2_left, iv2.left()), (&s2_right, iv2.right())] {
+                self.recurse(s1, s2, i1, i2, d);
+            }
+        }
     }
-
-    let t1_mid = f64::midpoint(t1_lo, t1_hi);
-    let t2_mid = f64::midpoint(t2_lo, t2_hi);
-
-    let (s1_left, s1_right) = seg1.split(0.5);
-    let (s2_left, s2_right) = seg2.split(0.5);
-
-    let d = depth + 1;
-    find_intersections_recursive(
-        &s1_left,
-        &s2_left,
-        t1_lo,
-        t1_mid,
-        t2_lo,
-        t2_mid,
-        d,
-        seg1_offset,
-        seg2_offset,
-        results,
-    );
-    find_intersections_recursive(
-        &s1_left,
-        &s2_right,
-        t1_lo,
-        t1_mid,
-        t2_mid,
-        t2_hi,
-        d,
-        seg1_offset,
-        seg2_offset,
-        results,
-    );
-    find_intersections_recursive(
-        &s1_right,
-        &s2_left,
-        t1_mid,
-        t1_hi,
-        t2_lo,
-        t2_mid,
-        d,
-        seg1_offset,
-        seg2_offset,
-        results,
-    );
-    find_intersections_recursive(
-        &s1_right,
-        &s2_right,
-        t1_mid,
-        t1_hi,
-        t2_mid,
-        t2_hi,
-        d,
-        seg1_offset,
-        seg2_offset,
-        results,
-    );
 }
 
 // ---------------------------------------------------------------------------
