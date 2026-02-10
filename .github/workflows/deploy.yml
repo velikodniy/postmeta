@@ -26,6 +26,7 @@ jobs:
         run: deno task build
 
       - name: Deploy to Deno Deploy
+        working-directory: web/dist
         env:
           DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-        run: deno deploy --org vlcdn --app postmeta --prod --no-wait web/dist
+        run: deno deploy --org vlcdn --app postmeta --prod --no-wait .
