@@ -125,36 +125,21 @@ fn solve_cyclic_with_breakpoints(path: &mut Path, first_bp: usize) {
         dist.push(d.length());
     }
 
-    // Solve each pair of consecutive breakpoints as an open segment.
+    // Solve each pair of consecutive breakpoints as a segment.
     // The last segment wraps from the final breakpoint back to the first.
     for w in breaks.windows(2) {
-        solve_cyclic_segment(path, w[0], w[1], &delta, &dist, n);
+        let indices = cyclic_index_range(w[0], w[1], n);
+        solve_segment(path, &indices, &delta, &dist);
     }
     // Closing segment: last breakpoint → first breakpoint (wrapping around).
-    // With k breakpoints we have k segments; windows(2) gives k−1.
     let last_bp = breaks[breaks.len() - 1];
-    solve_cyclic_segment(path, last_bp, breaks[0], &delta, &dist, n);
+    let indices = cyclic_index_range(last_bp, breaks[0], n);
+    solve_segment(path, &indices, &delta, &dist);
 }
 
-/// Solve one segment of a cyclic path between two breakpoint knot indices.
-///
-/// Unlike `solve_open_segment` which works with contiguous index ranges,
-/// this handles the wrap-around case where `start > end` by collecting
-/// intermediate knots going around the cycle, then solving a virtual
-/// open sub-path.
-#[expect(
-    clippy::too_many_lines,
-    reason = "tridiagonal solver for cyclic path segments mirrors the open-path solver"
-)]
-fn solve_cyclic_segment(
-    path: &mut Path,
-    start: usize,
-    end: usize,
-    delta: &[Vec2],
-    dist: &[Scalar],
-    n: usize,
-) {
-    // Collect the knot indices in this segment (start → end going forward).
+/// Build the sequence of knot indices from `start` to `end` going forward
+/// around a cycle of length `n`.
+fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
     let mut indices = vec![start];
     let mut k = start;
     loop {
@@ -164,14 +149,28 @@ fn solve_cyclic_segment(
             break;
         }
     }
+    indices
+}
 
+/// Solve one segment of a path given an explicit list of knot indices.
+///
+/// The `indices` slice maps local positions (0..seg_len) to global knot
+/// indices in the path. This handles both contiguous ranges (open paths)
+/// and wrap-around ranges (cyclic path segments).
+///
+/// Applies Hobby's tridiagonal solver with boundary conditions from the
+/// endpoint knots' `right` (at first index) and `left` (at last index).
+#[expect(
+    clippy::too_many_lines,
+    reason = "tridiagonal solver with boundary conditions is a single logical unit"
+)]
+fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Scalar]) {
     let seg_len = indices.len();
     if seg_len < 2 {
         return;
     }
 
-    // mp.web removes `open` at breakpoints by inferring missing boundary
-    // constraints from the opposite side when possible.
+    // Infer missing boundary constraints from the opposite side.
     infer_open_boundary_constraints(path, indices[0], indices[seg_len - 1]);
 
     // For two knots, use the two-knot special case.
@@ -180,9 +179,8 @@ fn solve_cyclic_segment(
         return;
     }
 
-    // For longer segments, compute local turning angles (radians) and solve
-    // the tridiagonal system.  We work with local indexing (0..seg_len)
-    // but map back to global indices for knot/delta/dist access.
+    // Compute local turning angles and solve the tridiagonal system.
+    // Local indexing (0..seg_len) maps to global indices via `indices`.
 
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for li in 1..(seg_len - 1) {
@@ -193,7 +191,7 @@ fn solve_cyclic_segment(
     let mut uu = vec![0.0; seg_len];
     let mut vv = vec![0.0; seg_len];
 
-    // Left boundary (knot at `start`)
+    // Left boundary (first knot)
     let gi = indices[0];
     let rt0 = path.knots[gi].right_tension;
     let lt1 = path.knots[indices[1]].left_tension;
@@ -450,175 +448,10 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
 /// This applies Hobby's algorithm with the boundary conditions from the
 /// endpoint knots' `right` (at `start`) and `left` (at `end`) directions.
 ///
-/// Uses ratio-based tridiagonal coefficients (aa=A/B, bb=D/C) with
-/// correct tension sourcing.
-#[expect(
-    clippy::too_many_lines,
-    reason = "tridiagonal solver with boundary conditions is a single logical unit"
-)]
+/// Delegates to `solve_segment` with a contiguous index range.
 fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2], dist: &[Scalar]) {
-    let seg_len = end - start + 1; // number of knots in this segment
-    if seg_len < 2 {
-        return;
-    }
-
-    // mp.web removes `open` at breakpoints by inferring missing boundary
-    // constraints from the opposite side when possible.
-    infer_open_boundary_constraints(path, start, end);
-
-    // For two knots, use the special-case solver
-    if seg_len == 2 {
-        solve_two_knots_range(path, start, end, delta, dist);
-        return;
-    }
-
-    // Compute turning angles (radians) for this sub-segment.
-    // psi[i] corresponds to the turning angle (radians) at local index i.
-    let mut psi = vec![0.0; seg_len]; // psi[0] unused
-    for (i, psi_i) in psi.iter_mut().enumerate().take(seg_len - 1).skip(1) {
-        let k = start + i;
-        *psi_i = turning_angle(delta[k - 1], delta[k]);
-    }
-
-    let mut theta = vec![0.0; seg_len];
-    let mut uu = vec![0.0; seg_len];
-    let mut vv = vec![0.0; seg_len];
-
-    // Left boundary condition (knot at `start`)
-    let rt0 = path.knots[start].right_tension;
-    let lt1 = path.knots[start + 1].left_tension;
-
-    match path.knots[start].right {
-        KnotDirection::Given(angle) => {
-            let th = reduce_angle(angle - angle_of(delta[start]));
-            theta[0] = th;
-            uu[0] = 0.0;
-            vv[0] = th;
-        }
-        KnotDirection::Curl(gamma) => {
-            let cr = curl_ratio(gamma, rt0, lt1);
-            uu[0] = cr;
-            vv[0] = -cr * psi[1];
-        }
-        _ => {
-            uu[0] = 0.0;
-            vv[0] = 0.0;
-        }
-    }
-
-    // Forward sweep for interior knots (k = 1..seg_len-2).
-    // Ratio-based tridiagonal coefficients: aa = alpha/(3-alpha), bb = beta/(3-beta).
-    for i in 1..(seg_len - 1) {
-        let k = start + i;
-
-        // Tensions for the A/B ratio (uses previous knot's right tension)
-        let rt_prev = tension_val(path.knots[k - 1].right_tension);
-        let alpha_prev = 1.0 / rt_prev;
-
-        // Tensions for the D/C ratio (uses next knot's left tension)
-        let lt_next = tension_val(path.knots[k + 1].left_tension);
-        let beta_next = 1.0 / lt_next;
-
-        // Tensions at the current knot (for scaling between the two sides)
-        let lt_k = tension_val(path.knots[k].left_tension);
-        let rt_k = tension_val(path.knots[k].right_tension);
-
-        // aa = alpha_{k-1} / (3 - alpha_{k-1})
-        let aa = if (rt_prev - 1.0).abs() < EPSILON {
-            0.5
-        } else {
-            alpha_prev / (3.0 - alpha_prev)
-        };
-        let dd = (3.0 - alpha_prev) * dist[k]; // forward chord scaled
-
-        // bb = beta_{k+1} / (3 - beta_{k+1})
-        let bb = if (lt_next - 1.0).abs() < EPSILON {
-            0.5
-        } else {
-            beta_next / (3.0 - beta_next)
-        };
-        let ee = (3.0 - beta_next) * dist[k - 1]; // backward chord scaled
-
-        let cc = uu[i - 1].mul_add(-aa, 1.0);
-
-        // Scale dd or ee for asymmetric tensions at the current knot.
-        let (dd_adj, ee_adj) = if (lt_k - rt_k).abs() < EPSILON {
-            (cc * dd, ee)
-        } else if lt_k < rt_k {
-            let ratio = lt_k / rt_k;
-            (cc * dd * ratio * ratio, ee)
-        } else {
-            let ratio = rt_k / lt_k;
-            (cc * dd, ee * ratio * ratio)
-        };
-
-        // ff = C_k / (C_k + B_k - u_{k-1}*A_k)
-        let denom_ff = ee_adj + dd_adj;
-        if denom_ff.abs() < NEAR_ZERO {
-            uu[i] = 0.0;
-            vv[i] = 0.0;
-        } else {
-            let ff = ee_adj / denom_ff;
-            uu[i] = ff * bb;
-
-            // Compute vv[i]: the particular solution.
-            let acc = if i + 1 < seg_len - 1 {
-                -psi[i + 1] * uu[i]
-            } else {
-                0.0
-            };
-            let bk_frac = if cc.abs() < NEAR_ZERO {
-                0.0
-            } else {
-                (1.0 - ff) / cc
-            };
-            vv[i] = (vv[i - 1] * bk_frac).mul_add(-aa, psi[i].mul_add(-bk_frac, acc));
-        }
-    }
-
-    // Right boundary condition (knot at `end`)
-    let last = seg_len - 1;
-    let lt_end = path.knots[end].left_tension;
-    let rt_prev_end = path.knots[end - 1].right_tension;
-
-    match path.knots[end].left {
-        KnotDirection::Given(angle) => {
-            theta[last] = reduce_angle(
-                angle - angle_of(delta[end - 1]) - psi.get(last).copied().unwrap_or(0.0),
-            );
-        }
-        KnotDirection::Curl(gamma) => {
-            let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
-            let denom = ff.mul_add(-uu[last - 1], 1.0);
-            if denom.abs() < NEAR_ZERO {
-                theta[last] = 0.0;
-            } else {
-                theta[last] = -(ff * vv[last - 1]) / denom;
-            }
-        }
-        _ => {
-            theta[last] = vv[last - 1];
-        }
-    }
-
-    // Back-substitution
-    for i in (0..last).rev() {
-        theta[i] = uu[i].mul_add(-theta[i + 1], vv[i]);
-    }
-
-    // Compute phi values and set control points
-    let mut phi = vec![0.0; seg_len];
-    for i in 1..(seg_len - 1) {
-        phi[i] = -(psi[i] + theta[i]);
-    }
-    phi[last] = -theta[last];
-
-    for i in 0..(seg_len - 1) {
-        let ki = start + i;
-        let kj = start + i + 1;
-        set_controls_for_segment(path, ki, kj, delta, dist, theta[i], phi[i + 1]);
-    }
+    let indices: Vec<usize> = (start..=end).collect();
+    solve_segment(path, &indices, delta, dist);
 }
 
 /// Two-knot special case for a sub-segment range.
