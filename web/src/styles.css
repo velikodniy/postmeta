@@ -10,7 +10,7 @@
   --error: #b43f33;
   --success: #2f7d58;
   --shadow: 0 16px 36px rgba(36, 44, 35, 0.08);
-  --serif: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", serif;
+  --serif: "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
   --sans: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
   --mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
 }
