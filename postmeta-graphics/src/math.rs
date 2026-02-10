@@ -92,6 +92,10 @@ pub fn floor(x: Scalar) -> Scalar {
     reason = "precision loss is acceptable for a pseudo-random number generator"
 )]
 pub fn uniform_deviate(x: Scalar, seed: &mut u64) -> Scalar {
+    // Ensure seed is never zero (xorshift has a fixed point at 0).
+    if *seed == 0 {
+        *seed = 1;
+    }
     *seed ^= *seed << 13;
     *seed ^= *seed >> 7;
     *seed ^= *seed << 17;

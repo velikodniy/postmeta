@@ -729,9 +729,14 @@ impl Picture {
         self.objects.push(obj);
     }
 
-    /// Append all objects from another picture.
+    /// Append all objects from another picture (cloning).
     pub fn merge(&mut self, other: &Self) {
         self.objects.extend(other.objects.iter().cloned());
+    }
+
+    /// Append all objects from another picture (consuming).
+    pub fn merge_from(&mut self, other: Self) {
+        self.objects.extend(other.objects);
     }
 }
 

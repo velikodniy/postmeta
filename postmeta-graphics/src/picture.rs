@@ -255,8 +255,11 @@ pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
             GraphicsObject::Text(text) => {
                 // Estimate text bounding box from font size and character count.
                 let char_width = TEXT_CHAR_WIDTH_RATIO * text.font_size;
-                #[allow(clippy::cast_precision_loss)] // text length fits in f64
-                let width = char_width * text.text.len() as Scalar;
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "text character count fits in f64"
+                )]
+                let width = char_width * text.text.chars().count() as Scalar;
                 let ascender = TEXT_ASCENDER_RATIO * text.font_size;
                 let descender = TEXT_DESCENDER_RATIO * text.font_size;
                 // Text rectangle corners in local coordinates (origin at

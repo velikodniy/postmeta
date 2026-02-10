@@ -27,7 +27,9 @@ fn normalize_time(path: &Path, t: Scalar) -> Option<Scalar> {
     }
     Some(if path.is_cyclic {
         let n_f = index_to_scalar(n);
-        ((t % n_f) + n_f) % n_f
+        let wrapped = ((t % n_f) + n_f) % n_f;
+        // Normalize -0.0 to 0.0
+        wrapped + 0.0
     } else {
         t.clamp(0.0, index_to_scalar(n))
     })

@@ -441,7 +441,7 @@ impl Interpreter {
                 let pic_val = self.take_cur_exp();
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
-                    target.merge(&p);
+                    target.merge_from(p);
                 }
             }
             _ => {
