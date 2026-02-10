@@ -4,8 +4,8 @@
 //!
 //! Key design points:
 //! - `MetaPost` coordinates have Y pointing **up**; SVG has Y pointing **down**.
-//!   We apply a global `transform="scale(1,-1)"` on the root `<g>` and
-//!   adjust the `viewBox` accordingly.
+//!   All Y coordinates are negated at render time so that no global transform
+//!   or `viewBox` trick is needed. Text renders right-side up naturally.
 //! - Path data is built as raw `d` strings to preserve `f64` precision
 //!   (the `svg` crate's `Data` builder uses `f32`).
 //! - Clip regions produce `<defs><clipPath>...</clipPath></defs>` plus
@@ -220,11 +220,18 @@ fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::elem
 }
 
 /// Render a text label to an SVG `<text>` element.
+///
+/// Y coordinates are negated to convert from `MetaPost` (Y-up) to SVG
+/// (Y-down). The transform matrix is adjusted accordingly.
 fn render_text(text: &TextObject, opts: &RenderOptions) -> SvgText {
     let t = &text.transform;
-    // SVG matrix(a,b,c,d,e,f) corresponds to our (txx,tyx,txy,tyy,tx,ty).
-    // We also flip Y (the global group has scale(1,-1)) so we need to
-    // counter-flip text so it reads right-side up.
+    // MetaPost transform: (x,y) → (txx·x + txy·y + tx, tyx·x + tyy·y + ty)
+    // SVG matrix(a,b,c,d,e,f): (x,y) → (a·x + c·y + e, b·x + d·y + f)
+    //
+    // To convert a MetaPost rotation/scale to SVG (Y-flipped) coordinates,
+    // conjugate the 2×2 part by the Y-flip matrix S = diag(1,-1):
+    //   M_svg = S · M_mp · S = [txx, -txy; -tyx, tyy]
+    // Translation: (tx, -ty).
     let matrix = format!(
         "matrix({},{},{},{},{},{})",
         fmt_scalar(t.txx, opts.precision),
@@ -249,7 +256,8 @@ fn render_text(text: &TextObject, opts: &RenderOptions) -> SvgText {
 /// Convert a resolved [`Path`] to an SVG path data string.
 ///
 /// Uses cubic Bezier commands (M, C, Z). All coordinates are f64 with
-/// the specified precision.
+/// the specified precision. Y coordinates are negated to convert from
+/// `MetaPost` (Y-up) to SVG (Y-down).
 fn path_to_d(path: &Path, precision: usize) -> String {
     if path.knots.is_empty() {
         return String::new();
@@ -258,7 +266,7 @@ fn path_to_d(path: &Path, precision: usize) -> String {
     let mut d = String::with_capacity(path.knots.len() * 40);
     let p0 = path.knots[0].point;
     d.push('M');
-    write_point(&mut d, p0.x, p0.y, precision);
+    write_point(&mut d, p0.x, -p0.y, precision);
 
     let n = path.num_segments();
     for i in 0..n {
@@ -276,11 +284,11 @@ fn path_to_d(path: &Path, precision: usize) -> String {
         };
 
         d.push('C');
-        write_point(&mut d, cp1.x, cp1.y, precision);
+        write_point(&mut d, cp1.x, -cp1.y, precision);
         d.push(' ');
-        write_point(&mut d, cp2.x, cp2.y, precision);
+        write_point(&mut d, cp2.x, -cp2.y, precision);
         d.push(' ');
-        write_point(&mut d, k1.point.x, k1.point.y, precision);
+        write_point(&mut d, k1.point.x, -k1.point.y, precision);
     }
 
     if path.is_cyclic {
@@ -291,8 +299,12 @@ fn path_to_d(path: &Path, precision: usize) -> String {
 }
 
 /// Write "x,y" to the string with the given precision.
+///
+/// Normalizes negative zero to positive zero for cleaner output.
 fn write_point(d: &mut String, x: Scalar, y: Scalar, precision: usize) {
     use std::fmt::Write;
+    let x = if x == 0.0 { 0.0 } else { x };
+    let y = if y == 0.0 { 0.0 } else { y };
     let _ = write!(d, "{x:.precision$},{y:.precision$}");
 }
 
@@ -418,6 +430,9 @@ fn find_matching_end(objects: &[GraphicsObject], start: usize, is_clip: bool) ->
 // ---------------------------------------------------------------------------
 
 /// Build the final SVG [`Document`] from rendered content and defs.
+///
+/// The `viewBox` is computed by negating the Y range from the `MetaPost`
+/// bounding box: SVG `min_y = -bb.max_y`, SVG `max_y = -bb.min_y`.
 fn build_document(
     bb: &BoundingBox,
     opts: &RenderOptions,
@@ -429,16 +444,13 @@ fn build_document(
     let (vb_x, vb_y, vb_w, vb_h) = if bb.is_valid() {
         (
             bb.min_x - m,
-            -(bb.max_y + m), // flip Y
+            -bb.max_y - m, // MetaPost max_y → SVG min_y (negated)
             2.0f64.mul_add(m, bb.max_x - bb.min_x),
             2.0f64.mul_add(m, bb.max_y - bb.min_y),
         )
     } else {
         (0.0, 0.0, 100.0, 100.0)
     };
-
-    // Root group with Y-flip: scale(1, -1)
-    let root = Group::new().set("transform", "scale(1,-1)").add(content);
 
     let mut doc = Document::new()
         .set("xmlns", "http://www.w3.org/2000/svg")
@@ -463,7 +475,7 @@ fn build_document(
         doc = doc.add(defs);
     }
 
-    doc.add(root)
+    doc.add(content)
 }
 
 // ---------------------------------------------------------------------------
@@ -528,6 +540,19 @@ mod tests {
         assert!(d.starts_with('M'));
         assert!(d.contains('C'));
         assert!(!d.contains('Z')); // open path
+                                   // Line is at y=0 in MetaPost → y=0 in SVG (negating 0 is still 0)
+        assert!(d.starts_with("M0.00,0.00"), "unexpected start: {d}");
+    }
+
+    #[test]
+    fn test_path_to_d_y_negation() {
+        // A point at (5, 10) in MetaPost should become (5, -10) in SVG
+        let mut k0 = Knot::new(Point::new(5.0, 10.0));
+        k0.right = KnotDirection::Explicit(Point::new(5.0, 10.0));
+        k0.left = KnotDirection::Explicit(Point::new(5.0, 10.0));
+        let path = Path::from_knots(vec![k0], false);
+        let d = path_to_d(&path, 1);
+        assert!(d.contains("5.0,-10.0"), "Y should be negated: {d}");
     }
 
     #[test]
@@ -682,7 +707,11 @@ mod tests {
         );
         let svg = render_to_string(&pic);
         assert!(svg.contains("fill=\"#0000ff\""), "missing blue fill: {svg}");
-        assert!(svg.contains("scale(1,-1)"), "missing Y flip: {svg}");
+        // No global scale(1,-1) — Y flip is per-coordinate
+        assert!(
+            !svg.contains("scale(1,-1)"),
+            "should not have global Y flip: {svg}"
+        );
     }
 
     #[test]
@@ -745,6 +774,8 @@ mod tests {
         let svg = render_to_string(&pic);
         assert!(svg.contains("Hello"), "missing text content: {svg}");
         assert!(svg.contains("font-family=\"CMR10\""), "missing font: {svg}");
+        // Text at ty=25 → SVG ty=-25
+        assert!(svg.contains("-25"), "Y should be negated in text: {svg}");
     }
 
     #[test]
