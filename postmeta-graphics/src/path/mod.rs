@@ -7,9 +7,38 @@
 
 pub mod hobby;
 
+use crate::bezier::CubicSegment;
 use crate::types::{
     index_to_scalar, scalar_to_index, Knot, KnotDirection, Path, Point, Scalar, Vec2, EPSILON,
 };
+
+// ---------------------------------------------------------------------------
+// Path time normalization
+// ---------------------------------------------------------------------------
+
+/// Normalize a time parameter for a path with `n` segments.
+///
+/// Cyclic paths wrap around; open paths clamp to `[0, n]`.
+/// Returns `None` if the path has no segments.
+fn normalize_time(path: &Path, t: Scalar) -> Option<Scalar> {
+    let n = path.num_segments();
+    if n == 0 {
+        return None;
+    }
+    Some(if path.is_cyclic {
+        let n_f = index_to_scalar(n);
+        ((t % n_f) + n_f) % n_f
+    } else {
+        t.clamp(0.0, index_to_scalar(n))
+    })
+}
+
+/// Decompose a normalized time into `(segment_index, fraction)`.
+fn time_to_seg_frac(t: Scalar, n: usize) -> (usize, Scalar) {
+    let seg = scalar_to_index(t).min(n - 1);
+    let frac = t - index_to_scalar(seg);
+    (seg, frac)
+}
 
 // ---------------------------------------------------------------------------
 // Path query operations
@@ -24,47 +53,24 @@ pub fn point_of(path: &Path, t: Scalar) -> Point {
     if path.knots.is_empty() {
         return Point::ZERO;
     }
-
-    let n = path.num_segments();
-    if n == 0 {
+    let Some(t) = normalize_time(path, t) else {
         return path.knots[0].point;
-    }
-
-    // Clamp for open paths; wrap for cyclic
-    let t = if path.is_cyclic {
-        let n_f = index_to_scalar(n);
-        ((t % n_f) + n_f) % n_f
-    } else {
-        t.clamp(0.0, index_to_scalar(n))
     };
-
-    let seg = scalar_to_index(t).min(n - 1);
-    let frac = t - index_to_scalar(seg);
-
-    let cubic = get_segment(path, seg);
-    eval_cubic(&cubic, frac)
+    let (seg, frac) = time_to_seg_frac(t, path.num_segments());
+    CubicSegment::from_path(path, seg).eval(frac)
 }
 
 /// Get the direction (tangent vector) at time `t` on the path.
 #[must_use]
 pub fn direction_of(path: &Path, t: Scalar) -> Vec2 {
-    if path.knots.is_empty() || path.num_segments() == 0 {
+    if path.knots.is_empty() {
         return Vec2::ZERO;
     }
-
-    let n = path.num_segments();
-    let t = if path.is_cyclic {
-        let n_f = index_to_scalar(n);
-        ((t % n_f) + n_f) % n_f
-    } else {
-        t.clamp(0.0, index_to_scalar(n))
+    let Some(t) = normalize_time(path, t) else {
+        return Vec2::ZERO;
     };
-
-    let seg = scalar_to_index(t).min(n - 1);
-    let frac = t - index_to_scalar(seg);
-
-    let cubic = get_segment(path, seg);
-    eval_cubic_deriv(&cubic, frac)
+    let (seg, frac) = time_to_seg_frac(t, path.num_segments());
+    CubicSegment::from_path(path, seg).eval_deriv(frac)
 }
 
 /// Get the precontrol point at time `t`.
@@ -73,19 +79,10 @@ pub fn precontrol_of(path: &Path, t: Scalar) -> Point {
     if path.knots.is_empty() {
         return Point::ZERO;
     }
-    let n = path.num_segments();
-    if n == 0 {
+    let Some(t) = normalize_time(path, t) else {
         return path.knots[0].point;
-    }
-
-    let t = if path.is_cyclic {
-        let n_f = index_to_scalar(n);
-        ((t % n_f) + n_f) % n_f
-    } else {
-        t.clamp(0.0, index_to_scalar(n))
     };
-
-    let seg = scalar_to_index(t).min(n - 1);
+    let (seg, _) = time_to_seg_frac(t, path.num_segments());
     let j = (seg + 1) % path.knots.len();
     match path.knots[j].left {
         KnotDirection::Explicit(p) => p,
@@ -99,19 +96,10 @@ pub fn postcontrol_of(path: &Path, t: Scalar) -> Point {
     if path.knots.is_empty() {
         return Point::ZERO;
     }
-    let n = path.num_segments();
-    if n == 0 {
+    let Some(t) = normalize_time(path, t) else {
         return path.knots[0].point;
-    }
-
-    let t = if path.is_cyclic {
-        let n_f = index_to_scalar(n);
-        ((t % n_f) + n_f) % n_f
-    } else {
-        t.clamp(0.0, index_to_scalar(n))
     };
-
-    let seg = scalar_to_index(t).min(n - 1);
+    let (seg, _) = time_to_seg_frac(t, path.num_segments());
     match path.knots[seg].right {
         KnotDirection::Explicit(p) => p,
         _ => path.knots[seg].point,
@@ -138,32 +126,28 @@ pub fn subpath(path: &Path, t1: Scalar, t2: Scalar) -> Path {
 
     let mut knots = Vec::new();
 
-    // Split the first segment at t1
-    let seg1 = scalar_to_index(t1).min(n - 1);
-    let frac1 = t1 - index_to_scalar(seg1);
-
-    let seg2 = scalar_to_index(t2).min(n - 1);
-    let frac2 = t2 - index_to_scalar(seg2);
+    let (seg1, frac1) = time_to_seg_frac(t1, n);
+    let (seg2, frac2) = time_to_seg_frac(t2, n);
 
     if seg1 == seg2 && frac2 > frac1 {
         // Both endpoints in the same segment
-        let cubic = get_segment(path, seg1);
-        let (_, right) = split_cubic(&cubic, frac1);
+        let cubic = CubicSegment::from_path(path, seg1);
+        let (_, right) = cubic.split(frac1);
         let t_inner = if (1.0 - frac1).abs() < EPSILON {
             0.0
         } else {
             (frac2 - frac1) / (1.0 - frac1)
         };
-        let (sub, _) = split_cubic(&right, t_inner);
-        let p0 = eval_cubic(&cubic, frac1);
-        let p1 = eval_cubic(&cubic, frac2);
+        let (sub, _) = right.split(t_inner);
+        let p0 = cubic.eval(frac1);
+        let p1 = cubic.eval(frac2);
         knots.push(Knot::with_controls(p0, p0, sub.p1));
         knots.push(Knot::with_controls(p1, sub.p2, p1));
     } else {
         // Start knot from splitting first segment
-        let cubic1 = get_segment(path, seg1);
-        let (_, right_part) = split_cubic(&cubic1, frac1);
-        let start_pt = eval_cubic(&cubic1, frac1);
+        let cubic1 = CubicSegment::from_path(path, seg1);
+        let (_, right_part) = cubic1.split(frac1);
+        let start_pt = cubic1.eval(frac1);
         knots.push(Knot::with_controls(start_pt, start_pt, right_part.p1));
 
         // End of first partial segment
@@ -180,9 +164,9 @@ pub fn subpath(path: &Path, t1: Scalar, t2: Scalar) -> Path {
 
         // Split last segment
         if frac2.abs() > EPSILON {
-            let cubic_last = get_segment(path, seg2);
-            let (left_part, _) = split_cubic(&cubic_last, frac2);
-            let end_pt = eval_cubic(&cubic_last, frac2);
+            let cubic_last = CubicSegment::from_path(path, seg2);
+            let (left_part, _) = cubic_last.split(frac2);
+            let end_pt = cubic_last.eval(frac2);
 
             if let Some(last) = knots.last_mut() {
                 last.right = KnotDirection::Explicit(left_part.p1);
@@ -218,104 +202,6 @@ pub fn reverse(path: &Path) -> Path {
 }
 
 // ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-/// Representation of a cubic Bezier segment by 4 control points.
-struct Cubic {
-    p0: Point,
-    p1: Point,
-    p2: Point,
-    p3: Point,
-}
-
-/// Extract segment `i` as a Cubic.
-fn get_segment(path: &Path, i: usize) -> Cubic {
-    let j = (i + 1) % path.knots.len();
-    let k0 = &path.knots[i];
-    let k1 = &path.knots[j];
-
-    let p1 = match k0.right {
-        KnotDirection::Explicit(p) => p,
-        _ => k0.point,
-    };
-    let p2 = match k1.left {
-        KnotDirection::Explicit(p) => p,
-        _ => k1.point,
-    };
-
-    Cubic {
-        p0: k0.point,
-        p1,
-        p2,
-        p3: k1.point,
-    }
-}
-
-/// Evaluate a cubic at parameter `t` in [0, 1].
-#[expect(
-    clippy::many_single_char_names,
-    reason = "standard Bezier math variable names (a, b, c, d)"
-)]
-fn eval_cubic(c: &Cubic, t: Scalar) -> Point {
-    let s = 1.0 - t;
-    let a = s * s * s;
-    let b = 3.0 * s * s * t;
-    let cc = 3.0 * s * t * t;
-    let d = t * t * t;
-    Point::new(
-        d.mul_add(c.p3.x, a * c.p0.x + b * c.p1.x + cc * c.p2.x),
-        d.mul_add(c.p3.y, a * c.p0.y + b * c.p1.y + cc * c.p2.y),
-    )
-}
-
-/// Evaluate the derivative of a cubic at parameter `t` in [0, 1].
-#[expect(
-    clippy::many_single_char_names,
-    reason = "standard Bezier math variable names (a, b, c, d)"
-)]
-fn eval_cubic_deriv(c: &Cubic, t: Scalar) -> Vec2 {
-    let s = 1.0 - t;
-    let a = 3.0 * s * s;
-    let b = 6.0 * s * t;
-    let cc = 3.0 * t * t;
-    Vec2::new(
-        a * (c.p1.x - c.p0.x) + b * (c.p2.x - c.p1.x) + cc * (c.p3.x - c.p2.x),
-        a * (c.p1.y - c.p0.y) + b * (c.p2.y - c.p1.y) + cc * (c.p3.y - c.p2.y),
-    )
-}
-
-/// Split a cubic at parameter `t` using de Casteljau's algorithm.
-/// Returns (`left_half`, `right_half`).
-fn split_cubic(c: &Cubic, t: Scalar) -> (Cubic, Cubic) {
-    let ab = lerp_pt(c.p0, c.p1, t);
-    let bc = lerp_pt(c.p1, c.p2, t);
-    let cd = lerp_pt(c.p2, c.p3, t);
-    let abc = lerp_pt(ab, bc, t);
-    let bcd = lerp_pt(bc, cd, t);
-    let abcd = lerp_pt(abc, bcd, t);
-
-    (
-        Cubic {
-            p0: c.p0,
-            p1: ab,
-            p2: abc,
-            p3: abcd,
-        },
-        Cubic {
-            p0: abcd,
-            p1: bcd,
-            p2: cd,
-            p3: c.p3,
-        },
-    )
-}
-
-fn lerp_pt(a: Point, b: Point, t: Scalar) -> Point {
-    Point::new(t.mul_add(b.x - a.x, a.x), t.mul_add(b.y - a.y, a.y))
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -344,8 +230,8 @@ mod tests {
             .map(|i| {
                 let j = (i + 1) % 3;
                 let prev = (i + 2) % 3;
-                let right_cp = lerp_pt(pts[i], pts[j], 1.0 / 3.0);
-                let left_cp = lerp_pt(pts[prev], pts[i], 2.0 / 3.0);
+                let right_cp = pts[i].lerp(pts[j], 1.0 / 3.0);
+                let left_cp = pts[prev].lerp(pts[i], 2.0 / 3.0);
                 Knot::with_controls(pts[i], left_cp, right_cp)
             })
             .collect();

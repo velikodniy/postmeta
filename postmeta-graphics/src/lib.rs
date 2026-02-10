@@ -1,5 +1,6 @@
 pub mod types;
 
+pub mod bezier;
 pub mod intersection;
 pub mod math;
 pub mod path;

@@ -6,7 +6,8 @@
 //! The algorithm recursively bisects both curves and checks bounding-box
 //! overlap, stopping when the sub-curves are small enough.
 
-use crate::types::{index_to_scalar, KnotDirection, Path, Point, Scalar};
+use crate::bezier::CubicSegment;
+use crate::types::{index_to_scalar, Path, Point, Scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -33,8 +34,8 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
     // Try all pairs of segments
     for i in 0..n1 {
         for j in 0..n2 {
-            let seg1 = get_segment_points(path1, i);
-            let seg2 = get_segment_points(path2, j);
+            let seg1 = CubicSegment::from_path(path1, i);
+            let seg2 = CubicSegment::from_path(path2, j);
 
             if let Some((t1, t2)) = intersect_cubics(&seg1, &seg2, 0.0, 1.0, 0.0, 1.0, 0) {
                 return Some(Intersection {
@@ -61,8 +62,8 @@ pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
 
     for i in 0..n1 {
         for j in 0..n2 {
-            let seg1 = get_segment_points(path1, i);
-            let seg2 = get_segment_points(path2, j);
+            let seg1 = CubicSegment::from_path(path1, i);
+            let seg2 = CubicSegment::from_path(path2, j);
 
             find_intersections_recursive(
                 &seg1,
@@ -83,63 +84,8 @@ pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
 }
 
 // ---------------------------------------------------------------------------
-// Cubic segment representation
+// Bounding box overlap
 // ---------------------------------------------------------------------------
-
-/// Four control points of a cubic Bezier segment.
-#[derive(Debug, Clone, Copy)]
-struct CubicSeg {
-    p0: Point,
-    p1: Point,
-    p2: Point,
-    p3: Point,
-}
-
-impl CubicSeg {
-    /// Axis-aligned bounding box: (min, max).
-    const fn bbox(&self) -> (Point, Point) {
-        let min_x = self.p0.x.min(self.p1.x).min(self.p2.x).min(self.p3.x);
-        let min_y = self.p0.y.min(self.p1.y).min(self.p2.y).min(self.p3.y);
-        let max_x = self.p0.x.max(self.p1.x).max(self.p2.x).max(self.p3.x);
-        let max_y = self.p0.y.max(self.p1.y).max(self.p2.y).max(self.p3.y);
-        (Point::new(min_x, min_y), Point::new(max_x, max_y))
-    }
-
-    /// Split at parameter t using de Casteljau.
-    fn split(&self, t: Scalar) -> (Self, Self) {
-        let ab = lerp(self.p0, self.p1, t);
-        let bc = lerp(self.p1, self.p2, t);
-        let cd = lerp(self.p2, self.p3, t);
-        let abc = lerp(ab, bc, t);
-        let bcd = lerp(bc, cd, t);
-        let abcd = lerp(abc, bcd, t);
-
-        (
-            Self {
-                p0: self.p0,
-                p1: ab,
-                p2: abc,
-                p3: abcd,
-            },
-            Self {
-                p0: abcd,
-                p1: bcd,
-                p2: cd,
-                p3: self.p3,
-            },
-        )
-    }
-
-    /// Maximum extent (diagonal of bounding box).
-    fn extent(&self) -> Scalar {
-        let (min, max) = self.bbox();
-        (max.x - min.x).hypot(max.y - min.y)
-    }
-}
-
-fn lerp(a: Point, b: Point, t: Scalar) -> Point {
-    Point::new(t.mul_add(b.x - a.x, a.x), t.mul_add(b.y - a.y, a.y))
-}
 
 /// Check if two bounding boxes overlap.
 fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
@@ -158,8 +104,8 @@ const INTERSECT_TOL: Scalar = 1e-6;
 
 /// Find one intersection between two cubic segments via bisection.
 fn intersect_cubics(
-    seg1: &CubicSeg,
-    seg2: &CubicSeg,
+    seg1: &CubicSegment,
+    seg2: &CubicSegment,
     t1_lo: Scalar,
     t1_hi: Scalar,
     t2_lo: Scalar,
@@ -182,7 +128,7 @@ fn intersect_cubics(
         return Some((f64::midpoint(t1_lo, t1_hi), f64::midpoint(t2_lo, t2_hi)));
     }
 
-    // Bisect the larger curve
+    // Bisect both curves
     let t1_mid = f64::midpoint(t1_lo, t1_hi);
     let t2_mid = f64::midpoint(t2_lo, t2_hi);
 
@@ -212,8 +158,8 @@ fn intersect_cubics(
     reason = "recursive bisection requires passing interval bounds for both curves"
 )]
 fn find_intersections_recursive(
-    seg1: &CubicSeg,
-    seg2: &CubicSeg,
+    seg1: &CubicSegment,
+    seg2: &CubicSegment,
     t1_lo: Scalar,
     t1_hi: Scalar,
     t2_lo: Scalar,
@@ -302,45 +248,14 @@ fn find_intersections_recursive(
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Extract segment `i` as a `CubicSeg` from a resolved path.
-fn get_segment_points(path: &Path, i: usize) -> CubicSeg {
-    let j = (i + 1) % path.knots.len();
-    let k0 = &path.knots[i];
-    let k1 = &path.knots[j];
-
-    let p1 = match k0.right {
-        KnotDirection::Explicit(p) => p,
-        _ => k0.point,
-    };
-    let p2 = match k1.left {
-        KnotDirection::Explicit(p) => p,
-        _ => k1.point,
-    };
-
-    CubicSeg {
-        p0: k0.point,
-        p1,
-        p2,
-        p3: k1.point,
-    }
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    reason = "exact float comparisons are intentional in tests"
-)]
 mod tests {
     use super::*;
     use crate::path::hobby::make_choices;
-    use crate::types::Knot;
+    use crate::types::{Knot, KnotDirection};
 
     /// Make a horizontal line from (x0, y) to (x1, y) as a resolved path.
     fn hline(x0: Scalar, x1: Scalar, y: Scalar) -> Path {
