@@ -61,6 +61,32 @@ impl fmt::Debug for Point {
     }
 }
 
+/// `Point + Vec2 = Point` (translate a point by a displacement).
+impl ops::Add<Vec2> for Point {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: Vec2) -> Self {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+/// `Point - Vec2 = Point` (translate a point by the negated displacement).
+impl ops::Sub<Vec2> for Point {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: Vec2) -> Self {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
 /// `Point - Point = Vec2` (displacement between two points).
 impl ops::Sub for Point {
     type Output = Vec2;
@@ -104,6 +130,71 @@ impl Vec2 {
     #[must_use]
     pub fn length(self) -> f64 {
         self.x.hypot(self.y)
+    }
+}
+
+/// `Vec2 + Vec2`.
+impl ops::Add for Vec2 {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: Self) -> Self {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+/// `Vec2 - Vec2`.
+impl ops::Sub for Vec2 {
+    type Output = Self;
+
+    #[inline]
+    fn sub(self, rhs: Self) -> Self {
+        Self {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
+    }
+}
+
+/// `-Vec2` (negate).
+impl ops::Neg for Vec2 {
+    type Output = Self;
+
+    #[inline]
+    fn neg(self) -> Self {
+        Self {
+            x: -self.x,
+            y: -self.y,
+        }
+    }
+}
+
+/// `Vec2 * Scalar` (scale).
+impl ops::Mul<Scalar> for Vec2 {
+    type Output = Self;
+
+    #[inline]
+    fn mul(self, rhs: Scalar) -> Self {
+        Self {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
+/// `Scalar * Vec2` (scale).
+impl ops::Mul<Vec2> for Scalar {
+    type Output = Vec2;
+
+    #[inline]
+    fn mul(self, rhs: Vec2) -> Vec2 {
+        Vec2 {
+            x: self * rhs.x,
+            y: self * rhs.y,
+        }
     }
 }
 

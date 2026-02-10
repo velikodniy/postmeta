@@ -89,31 +89,21 @@ fn make_ellipse_path(t: &Transform) -> Path {
     // kappa = (4/3) * tan(π/16) ≈ 0.26520784
     const KAPPA: Scalar = 0.265_207_840_674;
 
-    let n = 8;
-    let mut knots = Vec::with_capacity(n);
+    let knots = (0..8)
+        .map(|i| {
+            let angle = index_to_scalar(i) * std::f64::consts::FRAC_PI_4;
+            let (sin_a, cos_a) = angle.sin_cos();
 
-    for i in 0..n {
-        let angle = index_to_scalar(i) * std::f64::consts::FRAC_PI_4;
-        let cos_a = angle.cos();
-        let sin_a = angle.sin();
+            let p = Point::new(cos_a, sin_a);
+            let tangent = Vec2::new(-sin_a, cos_a);
 
-        // Point on unit circle
-        let p = Point::new(cos_a, sin_a);
-        // Tangent direction (perpendicular to radius)
-        let tangent = Vec2::new(-sin_a, cos_a);
+            let on_curve = t.apply_to_point(p);
+            let right_cp = t.apply_to_point(p + tangent * KAPPA);
+            let left_cp = t.apply_to_point(p - tangent * KAPPA);
 
-        let on_curve = t.apply_to_point(p);
-        let right_cp = t.apply_to_point(Point::new(
-            KAPPA.mul_add(tangent.x, p.x),
-            KAPPA.mul_add(tangent.y, p.y),
-        ));
-        let left_cp = t.apply_to_point(Point::new(
-            KAPPA.mul_add(-tangent.x, p.x),
-            KAPPA.mul_add(-tangent.y, p.y),
-        ));
-
-        knots.push(Knot::with_controls(on_curve, left_cp, right_cp));
-    }
+            Knot::with_controls(on_curve, left_cp, right_cp)
+        })
+        .collect();
 
     Path::from_knots(knots, true)
 }
@@ -164,7 +154,7 @@ pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
                 .max_by(|a, b| {
                     let da = dir.x.mul_add(a.x, dir.y * a.y);
                     let db = dir.x.mul_add(b.x, dir.y * b.y);
-                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                    da.total_cmp(&db)
                 })
                 .unwrap_or(Point::ZERO)
         }
@@ -185,11 +175,7 @@ pub fn convex_hull(points: &[Point]) -> Vec<Point> {
 
     // Andrew's monotone chain algorithm
     let mut sorted: Vec<Point> = points.to_vec();
-    sorted.sort_by(|a, b| {
-        a.x.partial_cmp(&b.x)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then(a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
 
     let mut hull: Vec<Point> = Vec::with_capacity(2 * sorted.len());
 
@@ -217,7 +203,9 @@ pub fn convex_hull(points: &[Point]) -> Vec<Point> {
 
 /// 2D cross product of vectors OA and OB.
 fn cross(o: Point, a: Point, b: Point) -> Scalar {
-    (a.x - o.x).mul_add(b.y - o.y, -((a.y - o.y) * (b.x - o.x)))
+    let oa = a - o;
+    let ob = b - o;
+    oa.x.mul_add(ob.y, -(oa.y * ob.x))
 }
 
 // ---------------------------------------------------------------------------

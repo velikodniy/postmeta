@@ -149,7 +149,7 @@ impl CubicSegment {
     #[must_use]
     pub fn extent(&self) -> Scalar {
         let (min, max) = self.bbox();
-        (max.x - min.x).hypot(max.y - min.y)
+        (max - min).length()
     }
 }
 
