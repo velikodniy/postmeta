@@ -360,6 +360,34 @@ impl Knot {
             right_tension: 1.0,
         }
     }
+
+    /// Set the left (incoming) direction constraint.
+    #[must_use]
+    pub const fn with_left(mut self, dir: KnotDirection) -> Self {
+        self.left = dir;
+        self
+    }
+
+    /// Set the right (outgoing) direction constraint.
+    #[must_use]
+    pub const fn with_right(mut self, dir: KnotDirection) -> Self {
+        self.right = dir;
+        self
+    }
+
+    /// Set the left (incoming) tension.
+    #[must_use]
+    pub const fn with_left_tension(mut self, t: Scalar) -> Self {
+        self.left_tension = t;
+        self
+    }
+
+    /// Set the right (outgoing) tension.
+    #[must_use]
+    pub const fn with_right_tension(mut self, t: Scalar) -> Self {
+        self.right_tension = t;
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------
