@@ -83,13 +83,6 @@ pub fn addto_doublepath(
     }));
 }
 
-/// Merge another picture into this one.
-///
-/// Corresponds to `addto <pic> also <other>`.
-pub fn addto_also(pic: &mut Picture, other: &Picture) {
-    pic.merge(other);
-}
-
 // ---------------------------------------------------------------------------
 // clip and setbounds
 // ---------------------------------------------------------------------------
@@ -390,14 +383,14 @@ mod tests {
     }
 
     #[test]
-    fn test_addto_also() {
+    fn test_merge() {
         let mut pic1 = Picture::new();
         pic1.push(GraphicsObject::ClipEnd);
 
         let mut pic2 = Picture::new();
         pic2.push(GraphicsObject::SetBoundsEnd);
 
-        addto_also(&mut pic1, &pic2);
+        pic1.merge(&pic2);
         assert_eq!(pic1.objects.len(), 2);
     }
 

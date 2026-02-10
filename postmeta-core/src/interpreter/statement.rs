@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use postmeta_graphics::picture;
 use postmeta_graphics::transform;
+use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, DashPattern, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture, Transform,
 };
@@ -220,7 +221,9 @@ impl Interpreter {
                     x if x == TypeNameOp::Path as u16 => {
                         VarValue::Known(Value::Path(Path::default()))
                     }
-                    x if x == TypeNameOp::Pen as u16 => VarValue::Known(Value::Pen(Pen::default())),
+                    x if x == TypeNameOp::Pen as u16 => {
+                        VarValue::Known(Value::Pen(Pen::circle(0.0)))
+                    }
                     x if x == TypeNameOp::Picture as u16 => {
                         VarValue::Known(Value::Picture(Picture::default()))
                     }
@@ -408,7 +411,7 @@ impl Interpreter {
                         // Emulate this via the pen outline path shifted to the
                         // pair position, then filled.
                         let dot = postmeta_graphics::pen::makepath(&ds.pen);
-                        let shifted = transform::transform_path(&transform::shifted(x, y), &dot);
+                        let shifted = dot.transformed(&transform::shifted(x, y));
                         picture::addto_contour(
                             target,
                             shifted,
@@ -438,7 +441,7 @@ impl Interpreter {
                 let pic_val = self.take_cur_exp();
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
-                    picture::addto_also(target, &p);
+                    target.merge(&p);
                 }
             }
             _ => {
