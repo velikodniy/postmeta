@@ -6,7 +6,6 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -35,3 +34,4 @@ jobs:
           project: postmeta
           entrypoint: jsr:@std/http/file-server
           root: web/dist
+          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
