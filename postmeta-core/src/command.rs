@@ -365,6 +365,7 @@ pub enum SecondaryBinaryOp {
     ZScaled = 100,
     Transformed = 101,
     DotProd = 102,
+    Infont = 112,
 }
 
 /// Operation codes for [`Command::TertiaryBinary`].
@@ -599,6 +600,16 @@ pub const PRIMITIVES: &[Primitive] = &[
     Primitive {
         name: "expandafter",
         command: Command::ExpandAfter,
+        modifier: 0,
+    },
+    Primitive {
+        name: "btex",
+        command: Command::StartTex,
+        modifier: 0,
+    },
+    Primitive {
+        name: "etex",
+        command: Command::EtexMarker,
         modifier: 0,
     },
     // -- Statement-level commands --
@@ -1199,6 +1210,11 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "dotprod",
         command: Command::SecondaryBinary,
         modifier: SecondaryBinaryOp::DotProd as u16,
+    },
+    Primitive {
+        name: "infont",
+        command: Command::SecondaryBinary,
+        modifier: SecondaryBinaryOp::Infont as u16,
     },
     Primitive {
         name: "and",

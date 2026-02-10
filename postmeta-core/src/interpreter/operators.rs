@@ -7,8 +7,11 @@ use std::sync::Arc;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::pen;
+use postmeta_graphics::picture;
 use postmeta_graphics::transform;
-use postmeta_graphics::types::{Color, Picture, Point, Transform, Vec2};
+use postmeta_graphics::types::{
+    Color, GraphicsObject, Picture, Point, TextObject, Transform, Vec2,
+};
 
 use crate::command::{
     ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
@@ -207,6 +210,55 @@ impl Interpreter {
                 self.cur_exp = Value::Boolean(is_cyclic);
                 self.cur_type = Type::Boolean;
             }
+            x if x == UnaryOp::LLCorner as u16
+                || x == UnaryOp::LRCorner as u16
+                || x == UnaryOp::ULCorner as u16
+                || x == UnaryOp::URCorner as u16 =>
+            {
+                let bb = match &self.cur_exp {
+                    Value::Picture(pic) => picture::picture_bbox(pic, false),
+                    Value::Path(p) => picture::path_bbox(p),
+                    Value::Pen(p) => {
+                        let mut bb = postmeta_graphics::picture::BoundingBox::EMPTY;
+                        match p {
+                            postmeta_graphics::types::Pen::Elliptical(t) => {
+                                // Include the four cardinal pen offsets
+                                for pt in [
+                                    t.apply_to_point(Point::new(1.0, 0.0)),
+                                    t.apply_to_point(Point::new(-1.0, 0.0)),
+                                    t.apply_to_point(Point::new(0.0, 1.0)),
+                                    t.apply_to_point(Point::new(0.0, -1.0)),
+                                ] {
+                                    bb.include_point(pt);
+                                }
+                            }
+                            postmeta_graphics::types::Pen::Polygonal(verts) => {
+                                for v in verts {
+                                    bb.include_point(*v);
+                                }
+                            }
+                        }
+                        bb
+                    }
+                    _ => {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            format!(
+                                "corner operators require a picture or path, got {}",
+                                self.cur_exp.ty()
+                            ),
+                        ));
+                    }
+                };
+                let (px, py) = match x {
+                    _ if x == UnaryOp::LLCorner as u16 => (bb.min_x, bb.min_y),
+                    _ if x == UnaryOp::LRCorner as u16 => (bb.max_x, bb.min_y),
+                    _ if x == UnaryOp::ULCorner as u16 => (bb.min_x, bb.max_y),
+                    _ => (bb.max_x, bb.max_y), // URCorner
+                };
+                self.cur_exp = Value::Pair(px, py);
+                self.cur_type = Type::PairType;
+            }
             _ => {
                 // Unimplemented unary — leave cur_exp unchanged
             }
@@ -332,6 +384,24 @@ impl Interpreter {
                 let (bx, by) = value_to_pair(&right)?;
                 self.cur_exp = Value::Numeric(ax.mul_add(bx, ay * by));
                 self.cur_type = Type::Known;
+            }
+            x if x == SecondaryBinaryOp::Infont as u16 => {
+                let text = value_to_string(left)?;
+                let font_name = value_to_string(&right)?;
+                // Default font size — MetaPost uses 10pt for design size.
+                // `plain.mp` applies `scaled defaultscale` after infont.
+                let font_size = 10.0;
+                let text_obj = TextObject {
+                    text: Arc::from(text.as_ref()),
+                    font_name: Arc::from(font_name.as_ref()),
+                    font_size,
+                    color: Color::BLACK,
+                    transform: Transform::IDENTITY,
+                };
+                let mut pic = Picture::new();
+                pic.objects.push(GraphicsObject::Text(text_obj));
+                self.cur_exp = Value::Picture(pic);
+                self.cur_type = Type::Picture;
             }
             _ => {
                 self.report_error(

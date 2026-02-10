@@ -244,9 +244,27 @@ pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
                 bb.union(&pbb);
             }
             GraphicsObject::Text(text) => {
-                // Approximate: include the transform origin
-                let origin = text.transform.apply_to_point(Point::ZERO);
-                bb.include_point(origin);
+                // Estimate text bounding box from font size and character count.
+                // Approximate character width: 0.5 × font_size (reasonable for
+                // most proportional fonts). Height: font_size. Baseline offset
+                // (descender): ~0.2 × font_size below origin.
+                let char_width = 0.5 * text.font_size;
+                #[allow(clippy::cast_precision_loss)] // text length fits in f64
+                let width = char_width * text.text.len() as Scalar;
+                let ascender = 0.8 * text.font_size;
+                let descender = 0.2 * text.font_size;
+                // Text rectangle corners in local coordinates (origin at
+                // left baseline).
+                let corners = [
+                    Point::new(0.0, -descender),
+                    Point::new(width, -descender),
+                    Point::new(width, ascender),
+                    Point::new(0.0, ascender),
+                ];
+                for corner in &corners {
+                    let pt = text.transform.apply_to_point(*corner);
+                    bb.include_point(pt);
+                }
             }
             GraphicsObject::SetBoundsStart(path) if !true_corners => {
                 bounds_stack.push(bb);
@@ -471,5 +489,31 @@ mod tests {
         bb1.union(&bb2);
         assert!((bb1.min_x).abs() < EPSILON);
         assert!((bb1.max_x - 10.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn text_bbox_estimates_dimensions() {
+        use crate::types::{TextObject, Transform};
+        use std::sync::Arc;
+
+        let text = TextObject {
+            text: Arc::from("Hello"),
+            font_name: Arc::from("cmr10"),
+            font_size: 10.0,
+            color: Color::BLACK,
+            transform: Transform::IDENTITY,
+        };
+        let mut pic = Picture::new();
+        pic.objects.push(GraphicsObject::Text(text));
+        let bb = picture_bbox(&pic, false);
+
+        // Width: 5 chars × 0.5 × 10 = 25
+        assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
+        // Height: ascender = 0.8 × 10 = 8
+        assert!((bb.max_y - 8.0).abs() < EPSILON, "max_y: {}", bb.max_y);
+        // Descender: -0.2 × 10 = -2
+        assert!((bb.min_y + 2.0).abs() < EPSILON, "min_y: {}", bb.min_y);
+        // Left edge at 0
+        assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
     }
 }

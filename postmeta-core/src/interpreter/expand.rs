@@ -79,6 +79,11 @@ pub(super) struct MacroInfo {
     pub(super) body: TokenList,
     /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
     pub(super) is_vardef: bool,
+    /// Whether this vardef has an `@#` suffix parameter.
+    /// When true, the LAST entry in `params` is `UndelimitedSuffix` and
+    /// corresponds to the `@#` suffix that appears between the macro name
+    /// and the argument list.
+    pub(super) has_at_suffix: bool,
 }
 
 impl Interpreter {
@@ -96,6 +101,7 @@ impl Interpreter {
                 Command::DefinedMacro => self.expand_defined_macro(),
                 Command::Input => self.expand_input(),
                 Command::ScanTokens => self.expand_scantokens(),
+                Command::StartTex => self.expand_start_tex(),
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -628,6 +634,7 @@ impl Interpreter {
             params: param_types,
             body,
             is_vardef,
+            has_at_suffix,
         };
         self.macros.insert(macro_sym, info);
 
@@ -713,6 +720,7 @@ impl Interpreter {
             params: vec![ParamType::Expr, ParamType::Expr],
             body,
             is_vardef: false,
+            has_at_suffix: false,
         };
         self.macros.insert(op_sym, info);
 
@@ -1064,9 +1072,28 @@ impl Interpreter {
 
         if !macro_info.params.is_empty() {
             self.get_x_next(); // advance past the macro name, expanding conditionals/etc.
+
+            // For vardefs with `@#`, the suffix tokens sit between the macro
+            // name and the argument list `(`.  Collect them now, before the
+            // regular param loop, and insert the arg at the `@#` position
+            // (the last param) afterwards.
+            let at_suffix_arg = if macro_info.has_at_suffix {
+                Some(self.scan_suffix_arg())
+            } else {
+                None
+            };
+
             let mut in_delimiters = false;
 
-            for (i, param_type) in macro_info.params.iter().enumerate() {
+            // Number of regular params (excluding the trailing @# if present).
+            let regular_param_count = if macro_info.has_at_suffix {
+                macro_info.params.len() - 1
+            } else {
+                macro_info.params.len()
+            };
+
+            for i in 0..regular_param_count {
+                let param_type = &macro_info.params[i];
                 match param_type {
                     // --- Delimited parameters (inside parentheses) ---
                     ParamType::Expr | ParamType::Suffix | ParamType::Text => {
@@ -1103,7 +1130,7 @@ impl Interpreter {
                             .copied()
                             .is_some_and(ParamType::is_undelimited);
                         if self.cur.command == Command::RightDelimiter
-                            && (next_is_undelimited || i + 1 >= macro_info.params.len())
+                            && (next_is_undelimited || i + 1 >= regular_param_count)
                         {
                             // Only advance past `)` if there are more params to
                             // scan.  When this is the LAST parameter, leave
@@ -1154,18 +1181,26 @@ impl Interpreter {
                     }
                 }
             }
+
+            // Append the pre-collected @# suffix arg at the end (its param
+            // index in the body matches the last position).
+            if let Some(suffix_arg) = at_suffix_arg {
+                args.push(suffix_arg);
+            }
         }
 
-        // When the last parameter is undelimited, `self.cur` holds the first
-        // token AFTER the arguments (mp.web §389).  We must preserve it by
-        // pushing it as a one-token input level BEFORE the body expansion, so
-        // the body sits on top and is read first, then the trailing token,
-        // then the rest of the original source.
-        let last_param_undelimited = macro_info
-            .params
-            .last()
-            .copied()
-            .is_some_and(ParamType::is_undelimited);
+        // When the last *regular* parameter is undelimited, `self.cur` holds
+        // the first token AFTER the arguments (mp.web §389).  We must
+        // preserve it by pushing it as a one-token input level BEFORE the
+        // body expansion.  For `@#` vardefs the trailing `UndelimitedSuffix`
+        // was already collected before the regular params, so check the last
+        // regular param instead.
+        let last_regular_param = if macro_info.has_at_suffix {
+            macro_info.params.iter().rev().nth(1).copied()
+        } else {
+            macro_info.params.last().copied()
+        };
+        let last_param_undelimited = last_regular_param.is_some_and(ParamType::is_undelimited);
         if last_param_undelimited {
             let mut trailing = TokenList::new();
             self.store_current_token(&mut trailing);
@@ -1226,6 +1261,48 @@ impl Interpreter {
             }
         }
 
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle `btex ... etex`.
+    ///
+    /// Collects the raw text between `btex` and `etex` (without macro
+    /// expansion) and produces a string value. In the original `MetaPost` this
+    /// would be shipped to TeX for typesetting; `PostMeta` treats it as plain
+    /// text. The `thelabel` macro in `plain.mp` will then apply `infont` to
+    /// convert it into a picture.
+    fn expand_start_tex(&mut self) {
+        let mut parts: Vec<String> = Vec::new();
+
+        // Read raw tokens (no expansion) until EtexMarker or end of input.
+        loop {
+            self.get_next();
+            match self.cur.command {
+                Command::EtexMarker | Command::Stop => break,
+                _ => {
+                    // Reconstruct text from token content.
+                    match &self.cur.token.kind {
+                        crate::token::TokenKind::Symbolic(s) => parts.push(s.clone()),
+                        crate::token::TokenKind::Numeric(v) => parts.push(v.to_string()),
+                        crate::token::TokenKind::StringLit(s) => {
+                            parts.push(format!("\"{s}\""));
+                        }
+                        crate::token::TokenKind::Eof => break,
+                    }
+                }
+            }
+        }
+
+        let text: std::sync::Arc<str> = parts.join(" ").into();
+
+        // Push a string capsule — `thelabel` will call `s infont defaultfont`
+        // to convert to a picture.
+        self.cur_exp = Value::String(text);
+        self.cur_type = crate::types::Type::String;
+        self.back_expr();
+
+        // Advance past the capsule and continue expansion.
         self.get_next();
         self.expand_current();
     }

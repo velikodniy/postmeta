@@ -2406,4 +2406,108 @@ mod tests {
             );
         }
     }
+
+    // -----------------------------------------------------------------------
+    // btex/etex and infont
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn btex_etex_produces_string() {
+        // btex Hello World etex should produce a string "Hello World"
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"string s; s = btex Hello World etex; show s;"#)
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(
+            msg.contains("Hello World"),
+            "expected 'Hello World' in: {msg}"
+        );
+    }
+
+    #[test]
+    fn infont_produces_picture() {
+        // "abc" infont "cmr10" should produce a picture
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"picture p; p = "abc" infont "cmr10"; show p;"#)
+            .unwrap();
+        // The show output should indicate a picture value
+        let msg = &interp.errors[0].message;
+        // A picture show typically shows the type or contents
+        assert!(
+            !msg.contains("error"),
+            "infont should not produce an error: {msg}"
+        );
+    }
+
+    #[test]
+    fn infont_text_has_bbox() {
+        // Corner operators on an infont picture should give non-zero bbox
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"picture p; p = "Hello" infont "cmr10"; show lrcorner p;"#)
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        // lrcorner should have positive x and negative y (descender)
+        assert!(msg.contains(','), "expected a pair in: {msg}");
+    }
+
+    #[test]
+    fn corner_operators_on_picture() {
+        // Test all four corners on a simple filled picture
+        let mut interp = Interpreter::new();
+        interp
+            .run("picture p; p = \"test\" infont \"cmr10\"; show llcorner p; show urcorner p;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 2, "expected 2 corner values, got: {infos:?}");
+    }
+
+    #[test]
+    fn corner_operators_on_path() {
+        // Corner operators should work on paths too
+        let mut interp = Interpreter::new();
+        interp
+            .run("path p; p = (0,0)..(10,20)..(30,5); show llcorner p; show urcorner p;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 2, "expected 2 corner values, got: {infos:?}");
+    }
+
+    #[test]
+    fn vardef_at_suffix_with_params() {
+        // vardef foo@#(expr s) should bind @# to the suffix and s to the arg
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"vardef foo@#(expr s) = show str @#; show s enddef; foo.bar("hello");"#)
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
+        assert!(
+            infos[0].contains("bar"),
+            "expected @# = bar, got: {}",
+            infos[0]
+        );
+        assert!(
+            infos[1].contains("hello"),
+            "expected s = hello, got: {}",
+            infos[1]
+        );
+    }
 }
