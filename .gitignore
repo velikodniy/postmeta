@@ -1,7 +1,6 @@
-/target
-**/*.rs.bk
-Cargo.lock
+# OS generated files
+.DS_Store
 
-# Visual test outputs (generated, not committed)
-visual-tests/*.svg
-visual-tests/*.png
+# Rust
+/target
+Cargo.lock
