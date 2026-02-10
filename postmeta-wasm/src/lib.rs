@@ -6,8 +6,6 @@ use postmeta_svg::{render_with_options, RenderOptions};
 use wasm_bindgen::prelude::*;
 
 const PLAIN_MP: &str = include_str!("../../lib/plain.mp");
-const PRELUDE: &str = "input plain;\n";
-const EPILOGUE: &str = "\nend;\n";
 
 struct EmbeddedFileSystem;
 
@@ -55,12 +53,7 @@ fn compile_program(source: &str) -> CompileOutput {
     let mut interpreter = Interpreter::new();
     interpreter.set_filesystem(Box::new(EmbeddedFileSystem));
 
-    let mut program = String::with_capacity(PRELUDE.len() + source.len() + EPILOGUE.len());
-    program.push_str(PRELUDE);
-    program.push_str(source);
-    program.push_str(EPILOGUE);
-
-    let run_failure = interpreter.run(&program).err();
+    let run_failure = interpreter.run(source).err();
     let diagnostics = collect_diagnostics(&interpreter.errors, run_failure.as_ref());
     let has_error = has_errors(&interpreter.errors) || run_failure.is_some();
     let svg = render_svg_preview(&interpreter);
@@ -138,7 +131,7 @@ mod tests {
     #[test]
     fn compiles_plain_macros_and_returns_svg() {
         let output = compile_program(
-            "beginfig(1); draw fullcircle scaled 36; fill fullcircle scaled 8 shifted (18,0); endfig;",
+            "input plain; beginfig(1); draw fullcircle scaled 36; fill fullcircle scaled 8 shifted (18,0); endfig; end;",
         );
 
         assert!(
@@ -152,7 +145,7 @@ mod tests {
 
     #[test]
     fn reports_errors_for_invalid_source() {
-        let output = compile_program("beginfig(1); draw (0,0)..; endfig;");
+        let output = compile_program("input plain; beginfig(1); draw (0,0)..; endfig; end;");
 
         assert!(output.has_error, "expected compile error");
         assert!(!output.diagnostics.is_empty(), "expected diagnostics");
