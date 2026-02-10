@@ -1,0 +1,4 @@
+/target
+
+# Override root .gitignore — this standalone crate should pin its deps
+!Cargo.lock

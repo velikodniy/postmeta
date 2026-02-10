@@ -1,0 +1,24 @@
+[package]
+name = "postmeta-wasm"
+description = "WASM adapter for PostMeta"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+postmeta-core = { path = "../postmeta-core" }
+postmeta-svg = { path = "../postmeta-svg" }
+wasm-bindgen = "0.2"
+
+[profile.release]
+opt-level = "z"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
+[workspace]
+members = []

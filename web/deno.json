@@ -1,0 +1,37 @@
+{
+  "nodeModulesDir": "auto",
+  "tasks": {
+    "wasm": "deno run -A scripts/build_wasm.ts",
+    "build": "deno run -A scripts/build.ts",
+    "dev": "deno run -A scripts/dev.ts",
+    "preview": "deno run -A jsr:@std/http/file-server dist --port 4173"
+  },
+  "imports": {
+    "@std/fs": "jsr:@std/fs@^1.0.20",
+    "@std/path": "jsr:@std/path@^1.1.2",
+    "esbuild": "npm:esbuild@0.25.11",
+    "react": "npm:react@^19.1.1",
+    "react/jsx-runtime": "npm:react@^19.1.1/jsx-runtime",
+    "react/jsx-dev-runtime": "npm:react@^19.1.1/jsx-dev-runtime",
+    "react-dom/client": "npm:react-dom@^19.1.1/client",
+    "@uiw/react-codemirror": "npm:@uiw/react-codemirror@^4.25.2",
+    "@codemirror/language": "npm:@codemirror/language@^6.11.1",
+    "@codemirror/state": "npm:@codemirror/state@^6.5.2",
+    "@codemirror/view": "npm:@codemirror/view@^6.37.3",
+    "@lezer/highlight": "npm:@lezer/highlight@^1.2.1"
+  },
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "types": [
+      "npm:@types/react@^19.1.10",
+      "npm:@types/react-dom@^19.1.7"
+    ],
+    "lib": [
+      "dom",
+      "esnext",
+      "deno.ns"
+    ]
+  }
+}
