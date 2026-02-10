@@ -4,6 +4,7 @@
 
 use std::sync::Arc;
 
+use postmeta_graphics::bbox;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::pen;
@@ -219,10 +220,10 @@ impl Interpreter {
                 || x == UnaryOp::URCorner as u16 =>
             {
                 let bb = match &self.cur_exp {
-                    Value::Picture(pic) => picture::picture_bbox(pic, false),
-                    Value::Path(p) => picture::path_bbox(p),
+                    Value::Picture(pic) => bbox::picture_bbox(pic, false),
+                    Value::Path(p) => bbox::path_bbox(p),
                     Value::Pen(p) => {
-                        let mut bb = postmeta_graphics::picture::BoundingBox::EMPTY;
+                        let mut bb = bbox::BoundingBox::EMPTY;
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
                                 // Include the four cardinal pen offsets

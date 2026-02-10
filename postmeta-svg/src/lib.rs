@@ -16,7 +16,7 @@
 use svg::node::element::{ClipPath, Definitions, Group, Text as SvgText};
 use svg::Document;
 
-use postmeta_graphics::picture::{picture_bbox, BoundingBox};
+use postmeta_graphics::bbox::{picture_bbox, BoundingBox};
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, KnotDirection, LineCap, LineJoin, Path, Pen,
     Picture, Scalar, StrokeObject, TextObject,
@@ -486,7 +486,7 @@ fn build_document(
 mod tests {
     use super::*;
     use postmeta_graphics::picture::{addto_contour, addto_doublepath};
-    use postmeta_graphics::types::{Knot, KnotDirection, Point, Transform};
+    use postmeta_graphics::types::{Knot, KnotDirection, Point, StrokeObject, Transform};
 
     /// Make a resolved line from (0,0) to (10,0).
     fn make_line() -> Path {
@@ -699,11 +699,13 @@ mod tests {
         let mut pic = Picture::new();
         addto_contour(
             &mut pic,
-            make_square(),
-            Color::new(0.0, 0.0, 1.0),
-            None,
-            LineJoin::Round,
-            10.0,
+            FillObject {
+                path: make_square(),
+                color: Color::new(0.0, 0.0, 1.0),
+                pen: None,
+                line_join: LineJoin::Round,
+                miter_limit: 10.0,
+            },
         );
         let svg = render_to_string(&pic);
         assert!(svg.contains("fill=\"#0000ff\""), "missing blue fill: {svg}");
@@ -719,13 +721,15 @@ mod tests {
         let mut pic = Picture::new();
         addto_doublepath(
             &mut pic,
-            make_line(),
-            Pen::circle(1.0),
-            Color::BLACK,
-            None,
-            LineCap::Round,
-            LineJoin::Round,
-            10.0,
+            StrokeObject {
+                path: make_line(),
+                pen: Pen::circle(1.0),
+                color: Color::BLACK,
+                dash: None,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+                miter_limit: 10.0,
+            },
         );
         let svg = render_to_string(&pic);
         assert!(svg.contains("stroke=\"black\""), "missing stroke: {svg}");
@@ -795,11 +799,13 @@ mod tests {
         let mut pic = Picture::new();
         addto_contour(
             &mut pic,
-            make_square(),
-            Color::BLACK,
-            None,
-            LineJoin::Round,
-            10.0,
+            FillObject {
+                path: make_square(),
+                color: Color::BLACK,
+                pen: None,
+                line_join: LineJoin::Round,
+                miter_limit: 10.0,
+            },
         );
         let svg = render_to_string(&pic);
         // The viewBox should span roughly the square's bounds with margin
