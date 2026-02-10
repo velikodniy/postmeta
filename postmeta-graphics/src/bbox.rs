@@ -128,8 +128,7 @@ impl Default for BoundingBox {
 /// points, not the tight bound. This matches `MetaPost`'s behavior.
 #[must_use]
 pub fn path_bbox(path: &Path) -> BoundingBox {
-    let mut bb = BoundingBox::EMPTY;
-    for knot in &path.knots {
+    path.knots.iter().fold(BoundingBox::EMPTY, |mut bb, knot| {
         bb.include_point(knot.point);
         if let KnotDirection::Explicit(cp) = knot.left {
             bb.include_point(cp);
@@ -137,8 +136,8 @@ pub fn path_bbox(path: &Path) -> BoundingBox {
         if let KnotDirection::Explicit(cp) = knot.right {
             bb.include_point(cp);
         }
-    }
-    bb
+        bb
+    })
 }
 
 /// Rough estimate of the maximum pen extent (half-width).

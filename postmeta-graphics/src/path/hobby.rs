@@ -348,13 +348,12 @@ fn solve_choices_open(path: &mut Path) {
     breaks.dedup();
 
     // Precompute delta and dist for all segments
-    let mut delta: Vec<Vec2> = Vec::with_capacity(n);
-    let mut dist: Vec<Scalar> = Vec::with_capacity(n);
-    for i in 0..(n - 1) {
-        let d = path.knots[i + 1].point - path.knots[i].point;
-        delta.push(d);
-        dist.push(d.length());
-    }
+    let (delta, dist): (Vec<Vec2>, Vec<Scalar>) = (0..(n - 1))
+        .map(|i| {
+            let d = path.knots[i + 1].point - path.knots[i].point;
+            (d, d.length())
+        })
+        .unzip();
 
     // Solve each sub-segment independently
     for w in breaks.windows(2) {
@@ -526,22 +525,19 @@ fn solve_choices_cyclic(path: &mut Path) {
     }
 
     // Compute delta vectors and distances for all n cyclic segments
-    let mut delta: Vec<Vec2> = Vec::with_capacity(n);
-    let mut dist: Vec<Scalar> = Vec::with_capacity(n);
-    let mut psi: Vec<Scalar> = Vec::with_capacity(n);
+    // Chord vectors and distances for all n cyclic segments.
+    let (delta, dist): (Vec<Vec2>, Vec<Scalar>) = (0..n)
+        .map(|i| {
+            let d = path.knots[(i + 1) % n].point - path.knots[i].point;
+            (d, d.length())
+        })
+        .unzip();
 
-    for i in 0..n {
-        let j = (i + 1) % n;
-        let d = path.knots[j].point - path.knots[i].point;
-        delta.push(d);
-        dist.push(d.length());
-    }
-
-    // Turning angles: psi[k] = turning angle at knot k (between chords k-1 and k)
-    for k in 0..n {
-        let prev = if k == 0 { n - 1 } else { k - 1 };
-        psi.push(turning_angle(delta[prev], delta[k]));
-    }
+    // Turning angles: psi[k] = angle between chord k-1 and chord k.
+    // For cyclic paths, psi[0] uses delta[n-1] and delta[0].
+    let psi: Vec<Scalar> = (0..n)
+        .map(|k| turning_angle(delta[(k + n - 1) % n], delta[k]))
+        .collect();
 
     // Forward sweep: compute uu[k], vv[k], ww[k] for k=1..n.
     // Recurrence: theta[k-1] + uu[k-1]*theta[k] = vv[k-1] + ww[k-1]*theta[0]
