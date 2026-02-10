@@ -5,14 +5,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,9 +26,6 @@ jobs:
         run: deno task build
 
       - name: Deploy to Deno Deploy
-        uses: denoland/deployctl@v1
-        with:
-          project: postmeta
-          entrypoint: jsr:@std/http/file-server
-          root: web/dist
-          token: ${{ secrets.DENO_DEPLOY_TOKEN }}
+        env:
+          DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
+        run: deno deploy --org vlcdn --app postmeta --prod --no-wait web/dist
