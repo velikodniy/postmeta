@@ -9,6 +9,7 @@ use postmeta_graphics::path;
 use postmeta_graphics::pen;
 use postmeta_graphics::picture;
 use postmeta_graphics::transform;
+use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, GraphicsObject, Picture, Point, TextObject, Transform, Vec2,
 };
@@ -119,7 +120,9 @@ impl Interpreter {
             x if x == UnaryOp::Length as u16 => {
                 match &self.cur_exp {
                     Value::Path(p) => {
-                        self.cur_exp = Value::Numeric(p.length() as f64);
+                        #[expect(clippy::cast_precision_loss, reason = "segment count fits in f64")]
+                        let n = p.num_segments() as f64;
+                        self.cur_exp = Value::Numeric(n);
                     }
                     Value::String(s) => {
                         self.cur_exp = Value::Numeric(s.len() as f64);
@@ -417,24 +420,24 @@ impl Interpreter {
     fn apply_transform(&mut self, val: &Value, t: &Transform) -> InterpResult<()> {
         match val {
             Value::Pair(x, y) => {
-                let pt = transform::transform_point(t, Point::new(*x, *y));
+                let pt = Point::new(*x, *y).transformed(t);
                 self.cur_exp = Value::Pair(pt.x, pt.y);
                 self.cur_type = Type::PairType;
             }
             Value::Path(p) => {
-                self.cur_exp = Value::Path(transform::transform_path(t, p));
+                self.cur_exp = Value::Path(p.transformed(t));
                 self.cur_type = Type::Path;
             }
             Value::Pen(p) => {
-                self.cur_exp = Value::Pen(transform::transform_pen(t, p));
+                self.cur_exp = Value::Pen(p.transformed(t));
                 self.cur_type = Type::Pen;
             }
             Value::Picture(p) => {
-                self.cur_exp = Value::Picture(transform::transform_picture(t, p));
+                self.cur_exp = Value::Picture(p.transformed(t));
                 self.cur_type = Type::Picture;
             }
             Value::Transform(existing) => {
-                self.cur_exp = Value::Transform(transform::compose(existing, t));
+                self.cur_exp = Value::Transform(existing.transformed(t));
                 self.cur_type = Type::TransformType;
             }
             _ => {

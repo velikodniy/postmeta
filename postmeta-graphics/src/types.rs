@@ -406,12 +406,6 @@ impl Path {
             self.knots.len() - 1
         }
     }
-
-    /// The "length" of the path in `MetaPost` terms (number of segments).
-    #[must_use]
-    pub fn length(&self) -> usize {
-        self.num_segments()
-    }
 }
 
 impl Default for Path {
