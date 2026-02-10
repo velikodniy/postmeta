@@ -1123,21 +1123,23 @@ impl Interpreter {
                             self.get_x_next();
                         }
                         // Close delimiters if this is the last delimited param
-                        // or the next param is undelimited
-                        let next_is_undelimited = macro_info
-                            .params
-                            .get(i + 1)
-                            .copied()
-                            .is_some_and(ParamType::is_undelimited);
+                        // or the next *regular* param is undelimited.
+                        // Note: the @# suffix (if present) was already collected
+                        // before the regular param loop; do NOT count it here.
+                        let next_regular_is_undelimited = if i + 1 < regular_param_count {
+                            macro_info.params[i + 1].is_undelimited()
+                        } else {
+                            false
+                        };
                         if self.cur.command == Command::RightDelimiter
-                            && (next_is_undelimited || i + 1 >= regular_param_count)
+                            && (next_regular_is_undelimited || i + 1 >= regular_param_count)
                         {
                             // Only advance past `)` if there are more params to
                             // scan.  When this is the LAST parameter, leave
                             // `self.cur` at `)` so the token that follows the
                             // macro call (typically `;`) is not consumed before
                             // the body expansion is pushed.
-                            if next_is_undelimited {
+                            if next_regular_is_undelimited {
                                 self.get_x_next();
                             }
                             in_delimiters = false;
