@@ -24,9 +24,21 @@ impl CubicSegment {
 
     /// Extract segment `i` from a resolved path.
     ///
+    /// For a cyclic path with N knots, valid segment indices are `0..N`.
+    /// For an open path with N knots, valid segment indices are `0..N-1`.
+    ///
     /// Non-explicit knot directions fall back to the on-curve point.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `i >= path.num_segments()` or the path is empty.
     #[must_use]
     pub fn from_path(path: &Path, i: usize) -> Self {
+        debug_assert!(
+            !path.knots.is_empty() && i < path.num_segments(),
+            "segment index {i} out of range for path with {} segments",
+            path.num_segments()
+        );
         let j = (i + 1) % path.knots.len();
         let k0 = &path.knots[i];
         let k1 = &path.knots[j];
