@@ -11,7 +11,9 @@ const MIN_SCALE = 0.5;
 const MAX_SCALE = 5;
 const ZOOM_STEP = 1.12;
 
-const defaultProgram = `beginfig(1);
+const defaultProgram = `input plain;
+
+beginfig(1);
   numeric R, ring, petals;
   R := 150;
   ring := 110;
@@ -53,7 +55,9 @@ const defaultProgram = `beginfig(1);
 
   fill fullcircle scaled 24 withcolor (0.11, 0.15, 0.23);
   fill fullcircle scaled 8 withcolor (0.97, 0.72, 0.19);
-endfig;`;
+endfig;
+
+end;`;
 
 export function App() {
   const [source, setSource] = useState(defaultProgram);
