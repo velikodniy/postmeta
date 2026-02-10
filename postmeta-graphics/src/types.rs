@@ -41,6 +41,18 @@ impl Point {
             y: self.y,
         }
     }
+
+    /// Linearly interpolate between `self` and `other`.
+    ///
+    /// `t = 0` returns `self`, `t = 1` returns `other`.
+    #[inline]
+    #[must_use]
+    pub fn lerp(self, other: Self, t: Scalar) -> Self {
+        Self::new(
+            t.mul_add(other.x - self.x, self.x),
+            t.mul_add(other.y - self.y, self.y),
+        )
+    }
 }
 
 impl fmt::Debug for Point {
@@ -141,6 +153,15 @@ pub type Scalar = f64;
 /// Tolerance for floating-point comparisons.
 pub const EPSILON: Scalar = 1.0 / 65536.0;
 
+/// Near-zero guard for avoiding division by zero or singularity.
+///
+/// Used as a denominator check / vector-length check where we want to
+/// detect degenerate transforms, zero-length vectors, etc.
+pub const NEAR_ZERO: Scalar = 1e-30;
+
+/// Tolerance for floating-point angle comparisons near multiples of pi.
+pub const ANGLE_TOLERANCE: Scalar = 1e-12;
+
 /// Maximum coordinate value (matches `MetaPost`'s `infinity`).
 pub const INFINITY_VAL: Scalar = 4_095.999_98;
 
@@ -171,20 +192,6 @@ pub const fn index_to_scalar(i: usize) -> Scalar {
 )]
 pub fn scalar_to_index(t: Scalar) -> usize {
     t.floor() as usize
-}
-
-/// Convert degrees to radians.
-#[inline]
-#[must_use]
-pub const fn deg_to_rad(deg: Scalar) -> Scalar {
-    deg.to_radians()
-}
-
-/// Convert radians to degrees.
-#[inline]
-#[must_use]
-pub const fn rad_to_deg(rad: Scalar) -> Scalar {
-    rad.to_degrees()
 }
 
 // ---------------------------------------------------------------------------
@@ -440,12 +447,6 @@ impl Pen {
     #[must_use]
     pub const fn default_pen() -> Self {
         Self::circle(0.5)
-    }
-}
-
-impl Default for Pen {
-    fn default() -> Self {
-        Self::circle(0.0)
     }
 }
 
@@ -759,13 +760,5 @@ mod tests {
         p2.push(GraphicsObject::SetBoundsEnd);
         p1.merge(&p2);
         assert_eq!(p1.objects.len(), 2);
-    }
-
-    #[test]
-    fn deg_rad_roundtrip() {
-        let deg = 45.0;
-        let rad = deg_to_rad(deg);
-        let deg2 = rad_to_deg(rad);
-        assert!((deg - deg2).abs() < EPSILON);
     }
 }

@@ -22,7 +22,7 @@
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
-use crate::types::{KnotDirection, Path, Point, Scalar, Vec2, EPSILON};
+use crate::types::{KnotDirection, Path, Point, Scalar, Vec2, ANGLE_TOLERANCE, EPSILON, NEAR_ZERO};
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
@@ -256,7 +256,7 @@ fn solve_cyclic_segment(
         };
 
         let denom_ff = ee_adj + dd_adj;
-        if denom_ff.abs() < 1e-30 {
+        if denom_ff.abs() < NEAR_ZERO {
             uu[li] = 0.0;
             vv[li] = 0.0;
         } else {
@@ -267,7 +267,7 @@ fn solve_cyclic_segment(
             } else {
                 0.0
             };
-            let bk_frac = if cc.abs() < 1e-30 {
+            let bk_frac = if cc.abs() < NEAR_ZERO {
                 0.0
             } else {
                 (1.0 - ff) / cc
@@ -293,7 +293,7 @@ fn solve_cyclic_segment(
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
             // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
             let denom = ff.mul_add(-uu[last - 1], 1.0);
-            if denom.abs() < 1e-30 {
+            if denom.abs() < NEAR_ZERO {
                 theta[last] = 0.0;
             } else {
                 theta[last] = -(ff * vv[last - 1]) / denom;
@@ -554,7 +554,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
 
         // ff = C_k / (C_k + B_k - u_{k-1}*A_k)
         let denom_ff = ee_adj + dd_adj;
-        if denom_ff.abs() < 1e-30 {
+        if denom_ff.abs() < NEAR_ZERO {
             uu[i] = 0.0;
             vv[i] = 0.0;
         } else {
@@ -567,7 +567,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
             } else {
                 0.0
             };
-            let bk_frac = if cc.abs() < 1e-30 {
+            let bk_frac = if cc.abs() < NEAR_ZERO {
                 0.0
             } else {
                 (1.0 - ff) / cc
@@ -591,7 +591,7 @@ fn solve_open_segment(path: &mut Path, start: usize, end: usize, delta: &[Vec2],
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
             // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
             let denom = ff.mul_add(-uu[last - 1], 1.0);
-            if denom.abs() < 1e-30 {
+            if denom.abs() < NEAR_ZERO {
                 theta[last] = 0.0;
             } else {
                 theta[last] = -(ff * vv[last - 1]) / denom;
@@ -845,7 +845,7 @@ fn solve_choices_cyclic(path: &mut Path) {
         };
 
         let denom = ee + dd;
-        if denom.abs() < 1e-30 {
+        if denom.abs() < NEAR_ZERO {
             uu[k] = 0.0;
             vv[k] = 0.0;
             ww[k] = 0.0;
@@ -859,7 +859,7 @@ fn solve_choices_cyclic(path: &mut Path) {
         let psi_next = psi[knot_next];
         let acc = -psi_next * uu[k];
 
-        let bk_ratio = if cc.abs() < 1e-30 {
+        let bk_ratio = if cc.abs() < NEAR_ZERO {
             0.0
         } else {
             (1.0 - ff) / cc
@@ -888,7 +888,7 @@ fn solve_choices_cyclic(path: &mut Path) {
     bb_val = bb_val.mul_add(-uu[n], ww[n]);
 
     // theta[0] = aa / (1 - bb)
-    let theta0 = if (1.0 - bb_val).abs() < 1e-30 {
+    let theta0 = if (1.0 - bb_val).abs() < NEAR_ZERO {
         0.0
     } else {
         aa_val / (1.0 - bb_val)
@@ -1069,7 +1069,7 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
     let num = (sqrt2 * (st - sf / 16.0) * (sf - st / 16.0)).mul_add(ct - cf, 2.0);
     let denom = 3.0 * (0.5 * (3.0 - sqrt5)).mul_add(cf, (0.5 * (sqrt5 - 1.0)).mul_add(ct, 1.0));
 
-    if denom.abs() < 1e-30 {
+    if denom.abs() < NEAR_ZERO {
         return 0.0;
     }
 
@@ -1102,7 +1102,7 @@ fn curl_ratio(gamma: Scalar, a_tension: Scalar, b_tension: Scalar) -> Scalar {
     let b3 = beta * beta * beta;
     let num = ((3.0 - alpha) * alpha * alpha).mul_add(gamma, b3);
     let denom = a3.mul_add(gamma, (3.0 - beta) * beta * beta);
-    if denom.abs() < 1e-30 {
+    if denom.abs() < NEAR_ZERO {
         0.0
     } else {
         (num / denom).min(4.0)
@@ -1138,7 +1138,7 @@ fn turning_angle(a: Vec2, b: Vec2) -> Scalar {
     // Normalize using atan2 for robustness. Canonicalize -π to +π to match
     // MetaPost's angle convention for 180-degree turns.
     let t = diff.sin().atan2(diff.cos());
-    if (t + std::f64::consts::PI).abs() < 1e-12 {
+    if (t + std::f64::consts::PI).abs() < ANGLE_TOLERANCE {
         std::f64::consts::PI
     } else {
         t

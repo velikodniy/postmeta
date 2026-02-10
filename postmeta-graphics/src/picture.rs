@@ -15,6 +15,22 @@ use crate::types::{
 };
 
 // ---------------------------------------------------------------------------
+// Text bounding box heuristic constants
+// ---------------------------------------------------------------------------
+
+/// Estimated character width as a fraction of font size.
+///
+/// This is a rough heuristic for label positioning; accurate values would
+/// require loading font metrics (e.g., TFM or CMR tables).
+const TEXT_CHAR_WIDTH_RATIO: Scalar = 0.5;
+
+/// Ascender height as a fraction of font size.
+const TEXT_ASCENDER_RATIO: Scalar = 0.8;
+
+/// Descender depth as a fraction of font size.
+const TEXT_DESCENDER_RATIO: Scalar = 0.2;
+
+// ---------------------------------------------------------------------------
 // addto operations
 // ---------------------------------------------------------------------------
 
@@ -245,14 +261,11 @@ pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
             }
             GraphicsObject::Text(text) => {
                 // Estimate text bounding box from font size and character count.
-                // Approximate character width: 0.5 × font_size (reasonable for
-                // most proportional fonts). Height: font_size. Baseline offset
-                // (descender): ~0.2 × font_size below origin.
-                let char_width = 0.5 * text.font_size;
+                let char_width = TEXT_CHAR_WIDTH_RATIO * text.font_size;
                 #[allow(clippy::cast_precision_loss)] // text length fits in f64
                 let width = char_width * text.text.len() as Scalar;
-                let ascender = 0.8 * text.font_size;
-                let descender = 0.2 * text.font_size;
+                let ascender = TEXT_ASCENDER_RATIO * text.font_size;
+                let descender = TEXT_DESCENDER_RATIO * text.font_size;
                 // Text rectangle corners in local coordinates (origin at
                 // left baseline).
                 let corners = [

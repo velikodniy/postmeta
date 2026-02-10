@@ -11,7 +11,7 @@
 //! - `penoffset` — find the pen offset in a given direction
 
 use crate::types::{
-    index_to_scalar, GraphicsError, Knot, Path, Pen, Point, Scalar, Transform, Vec2,
+    index_to_scalar, GraphicsError, Knot, Path, Pen, Point, Scalar, Transform, Vec2, NEAR_ZERO,
 };
 
 // ---------------------------------------------------------------------------
@@ -84,8 +84,8 @@ pub fn makepath(pen: &Pen) -> Path {
                     let next = (i + 1) % vertices.len();
 
                     // Straight-line controls for polygonal pens
-                    let left_cp = lerp(vertices[prev], p, 2.0 / 3.0);
-                    let right_cp = lerp(p, vertices[next], 1.0 / 3.0);
+                    let left_cp = vertices[prev].lerp(p, 2.0 / 3.0);
+                    let right_cp = p.lerp(vertices[next], 1.0 / 3.0);
                     Knot::with_controls(p, left_cp, right_cp)
                 })
                 .collect();
@@ -155,14 +155,14 @@ pub fn penoffset(pen: &Pen, dir: Vec2) -> Point {
             // Transform coefficients: txx, txy, tyx, tyy (2x2 part)
             // Affine convention: x' = txx*x + txy*y, y' = tyx*x + tyy*y
             let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
-            if det.abs() < 1e-30 {
+            if det.abs() < NEAR_ZERO {
                 return Point::ZERO;
             }
             // Inverse transpose: columns of (T^{-1})^T = rows of T^{-1}
             let inv_t_x = t.tyy.mul_add(dir.x, -(t.tyx * dir.y)) / det;
             let inv_t_y = (-t.txy).mul_add(dir.x, t.txx * dir.y) / det;
             let len = inv_t_x.hypot(inv_t_y);
-            if len < 1e-30 {
+            if len < NEAR_ZERO {
                 return Point::ZERO;
             }
             let unit_x = inv_t_x / len;
@@ -234,22 +234,10 @@ fn cross(o: Point, a: Point, b: Point) -> Scalar {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn lerp(a: Point, b: Point, t: Scalar) -> Point {
-    Point::new(t.mul_add(b.x - a.x, a.x), t.mul_add(b.y - a.y, a.y))
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    reason = "exact float comparisons are intentional in tests"
-)]
 mod tests {
     use super::*;
     use crate::types::EPSILON;
