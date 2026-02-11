@@ -268,18 +268,43 @@ impl Interpreter {
                         has_suffixes = true;
                         self.get_x_next();
                     } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
-                        // Bracketed subscript: var[expr]
+                        // Speculatively scan for a bracketed subscript: var[expr].
+                        // If the expression is followed by `]`, this is a subscript.
+                        // Otherwise (e.g. `,` in `lambda[A,B]`), back up and let
+                        // the mediation handler deal with it (mp.web §1489-1506).
                         self.get_x_next(); // skip `[`
                         self.scan_expression()?;
-                        let subscript = match &self.cur_exp {
-                            Value::Numeric(v) => *v as i64,
-                            _ => 0,
-                        };
-                        let _ = write!(name, "[{subscript}]");
                         if self.cur.command == Command::RightBracket {
+                            // Subscript: var[expr]
+                            let subscript = match &self.cur_exp {
+                                Value::Numeric(v) => *v as i64,
+                                _ => 0,
+                            };
+                            let _ = write!(name, "[{subscript}]");
                             self.get_x_next();
+                            has_suffixes = true;
+                        } else {
+                            // Not a subscript — put the expression and
+                            // the current token back, then restore `[`
+                            // as the current command so the mediation
+                            // check after variable resolution can see it
+                            // (mp.web §1498-1506).
+                            //
+                            // Build a token list [capsule(expr), cur_tok]
+                            // so they are re-read in the right order.
+                            use crate::input::StoredToken;
+                            let ty = self.cur_type;
+                            let val = self.take_cur_exp();
+                            let mut tl = vec![StoredToken::Capsule(val, ty)];
+                            self.store_current_token(&mut tl);
+                            self.input.push_token_list(
+                                tl,
+                                Vec::new(),
+                                "mediation backtrack".into(),
+                            );
+                            self.cur.command = Command::LeftBracket;
+                            break;
                         }
-                        has_suffixes = true;
                     } else {
                         break;
                     }
