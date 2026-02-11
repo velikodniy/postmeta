@@ -29,7 +29,7 @@ impl Interpreter {
                     self.cur_expr.ty = Type::Known;
                     self.cur_expr.dep = Some(const_dep(v));
                 }
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
                 // Check for fraction: 3/4 as a primary
                 if self.cur.command == Command::Slash {
@@ -63,7 +63,7 @@ impl Interpreter {
                     let factor_dep = self.take_cur_dep();
                     let factor = self.take_cur_exp();
                     self.scan_primary()?;
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_implicit_mul(&factor)?;
                     let factor_val = factor_dep
                         .as_ref()
@@ -83,7 +83,7 @@ impl Interpreter {
                     self.cur_expr.ty = Type::String;
                 }
                 self.cur_expr.dep = None;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
                 Ok(())
             }
@@ -91,7 +91,7 @@ impl Interpreter {
             Command::Nullary => {
                 let op = self.cur.modifier;
                 self.get_x_next();
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.do_nullary(op)?;
                 self.cur_expr.dep = if let Value::Numeric(v) = self.cur_expr.exp {
                     Some(const_dep(v))
@@ -136,12 +136,12 @@ impl Interpreter {
                     // Pair or color
                     let first_dep = self.take_cur_dep();
                     let first = self.take_cur_exp();
-                    let first_binding = self.last_lhs_binding.clone();
+                    let first_binding = self.lhs_tracking.last_lhs_binding.clone();
                     self.get_x_next();
                     self.scan_expression()?;
                     let second_dep = self.take_cur_dep();
                     let second = self.take_cur_exp();
-                    let second_binding = self.last_lhs_binding.clone();
+                    let second_binding = self.lhs_tracking.last_lhs_binding.clone();
 
                     if self.cur.command == Command::Comma {
                         // Color: (r, g, b)
@@ -149,7 +149,7 @@ impl Interpreter {
                         self.scan_expression()?;
                         let third_dep = self.take_cur_dep();
                         let third = self.take_cur_exp();
-                        let third_binding = self.last_lhs_binding.clone();
+                        let third_binding = self.lhs_tracking.last_lhs_binding.clone();
 
                         let r = value_to_scalar(&first)?;
                         let g = value_to_scalar(&second)?;
@@ -157,7 +157,7 @@ impl Interpreter {
                         self.cur_expr.exp = Value::Color(postmeta_graphics::types::Color::new(r, g, b));
                         self.cur_expr.ty = Type::ColorType;
                         let _ = (first_dep, second_dep, third_dep);
-                        self.last_lhs_binding = if first_binding.is_some()
+                        self.lhs_tracking.last_lhs_binding = if first_binding.is_some()
                             || second_binding.is_some()
                             || third_binding.is_some()
                         {
@@ -179,7 +179,7 @@ impl Interpreter {
                             first_dep.unwrap_or_else(|| const_dep(x)),
                             second_dep.unwrap_or_else(|| const_dep(y)),
                         ));
-                        self.last_lhs_binding =
+                        self.lhs_tracking.last_lhs_binding =
                             if first_binding.is_some() || second_binding.is_some() {
                                 Some(LhsBinding::Pair {
                                     x: first_binding.map(Box::new),
@@ -210,7 +210,7 @@ impl Interpreter {
                 // the last expression in the group (the group's return value).
                 self.do_endgroup();
                 self.get_x_next();
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 // Intentionally keep cur_dep: the group result's dependency
                 // info must survive so that unknown numerics (e.g. from
                 // `whatever`) can participate in equations after the group.
@@ -359,9 +359,9 @@ impl Interpreter {
                 self.cur_expr.ty = Type::Known;
                 self.cur_expr.dep = Some(const_dep(self.internals.get(idx)));
                 // Track for assignment LHS
-                self.last_internal_idx = Some(idx);
-                self.last_var_id = None;
-                self.last_lhs_binding = Some(LhsBinding::Internal { idx });
+                self.lhs_tracking.last_internal_idx = Some(idx);
+                self.lhs_tracking.last_var_id = None;
+                self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
                 Ok(())
             }
@@ -381,7 +381,7 @@ impl Interpreter {
                 let first = self.take_cur_exp();
                 self.get_x_next();
                 self.scan_primary()?;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
                 self.do_primary_binary(op, &first)
             }
@@ -392,7 +392,7 @@ impl Interpreter {
                 // it's used in path construction — handle that at expression level.
                 self.cur_expr.exp = Value::Boolean(false);
                 self.cur_expr.ty = Type::Boolean;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
                 self.get_x_next();
                 Ok(())
@@ -416,7 +416,7 @@ impl Interpreter {
                     self.cur_expr.exp = Value::String(Arc::from(""));
                 }
                 self.cur_expr.ty = Type::String;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
                 Ok(())
             }
@@ -432,7 +432,7 @@ impl Interpreter {
                     self.cur_expr.exp = Value::Vacuous;
                     self.cur_expr.ty = Type::Vacuous;
                 }
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = if let Value::Numeric(v) = self.cur_expr.exp {
                     Some(const_dep(v))
                 } else {
@@ -487,7 +487,7 @@ impl Interpreter {
                 };
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
                 Ok(())
             }
@@ -496,7 +496,7 @@ impl Interpreter {
                 // Missing primary — set to vacuous
                 self.cur_expr.exp = Value::Vacuous;
                 self.cur_expr.ty = Type::Vacuous;
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
                 Ok(())
             }
@@ -579,7 +579,7 @@ impl Interpreter {
                     }
                 }
 
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
             }
         }
 
@@ -609,11 +609,11 @@ impl Interpreter {
             let right_val = self.cur_expr.exp.clone();
             let right_dep = self.cur_expr.dep.clone();
             let right_pair_dep = self.cur_expr.pair_dep.clone();
-            let right_binding = self.last_lhs_binding.clone();
+            let right_binding = self.lhs_tracking.last_lhs_binding.clone();
 
             match cmd {
                 Command::SecondaryBinary => {
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_secondary_binary(op, &left)?;
                     if op == crate::command::SecondaryBinaryOp::Times as u16 {
                         let left_const = left_dep.as_ref().and_then(constant_value);
@@ -881,7 +881,7 @@ impl Interpreter {
                     if !matches!(self.cur_expr.exp, Value::Pair(_, _)) {
                         self.cur_expr.ty = Type::Known;
                     }
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                 }
                 Command::And => {
                     // Logical and
@@ -890,7 +890,7 @@ impl Interpreter {
                     let b = value_to_bool(&right)?;
                     self.cur_expr.exp = Value::Boolean(a && b);
                     self.cur_expr.ty = Type::Boolean;
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
@@ -927,7 +927,7 @@ impl Interpreter {
                 Command::PlusOrMinus => {
                     let right_pair_dep_taken = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_plus_minus(op, &left, &right)?;
                     let factor = if op == PlusMinusOp::Plus as u16 {
                         1.0
@@ -969,7 +969,7 @@ impl Interpreter {
                 Command::TertiaryBinary => {
                     let _ = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_tertiary_binary(op, &left, &right)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
@@ -985,8 +985,8 @@ impl Interpreter {
     /// Handles expression-level binary operators and path construction.
     pub(crate) fn scan_expression(&mut self) -> InterpResult<()> {
         // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
-        let equals_is_equation = self.equals_means_equation;
-        self.equals_means_equation = false;
+        let equals_is_equation = self.lhs_tracking.equals_means_equation;
+        self.lhs_tracking.equals_means_equation = false;
 
         self.scan_tertiary()?;
 
@@ -1006,7 +1006,7 @@ impl Interpreter {
                     let left = self.take_cur_exp();
                     self.get_x_next();
                     self.scan_tertiary()?;
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_expression_binary(
                         ExpressionBinaryOp::EqualTo as u16,
                         &left,
@@ -1030,7 +1030,7 @@ impl Interpreter {
                         let left = self.take_cur_exp();
                         self.get_x_next();
                         self.scan_tertiary()?;
-                        self.last_lhs_binding = None;
+                        self.lhs_tracking.last_lhs_binding = None;
                         self.do_expression_binary(ExpressionBinaryOp::Concatenate as u16, &left)?;
                         self.cur_expr.dep = None;
                         self.cur_expr.pair_dep = None;
@@ -1049,7 +1049,7 @@ impl Interpreter {
                     let left = self.take_cur_exp();
                     self.get_x_next();
                     self.scan_tertiary()?;
-                    self.last_lhs_binding = None;
+                    self.lhs_tracking.last_lhs_binding = None;
                     self.do_expression_binary(op, &left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;

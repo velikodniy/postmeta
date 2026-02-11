@@ -69,7 +69,7 @@ impl Interpreter {
             _ => {
                 // Expression or equation — `=` should be treated as an
                 // equation delimiter, not as comparison (mp.web: var_flag = assignment).
-                self.equals_means_equation = true;
+                self.lhs_tracking.equals_means_equation = true;
                 self.scan_expression()?;
 
                 if self.cur.command == Command::Equals {
@@ -87,10 +87,10 @@ impl Interpreter {
                         let lhs_dep = self.cur_expr.dep.clone();
                         let lhs_pair_dep = self.cur_expr.pair_dep.clone();
                         let lhs = self.take_cur_exp();
-                        let lhs_binding = self.last_lhs_binding.clone();
+                        let lhs_binding = self.lhs_tracking.last_lhs_binding.clone();
                         pending_lhs.push((lhs, lhs_binding, lhs_dep, lhs_pair_dep));
                         self.get_x_next();
-                        self.equals_means_equation = true;
+                        self.lhs_tracking.equals_means_equation = true;
                         self.scan_expression()?;
                     }
 
@@ -111,9 +111,9 @@ impl Interpreter {
                     // All left-hand sides receive the final rhs value.
                     let mut pending_lhs: Vec<Option<LhsBinding>> = Vec::new();
                     while self.cur.command == Command::Assignment {
-                        pending_lhs.push(self.last_lhs_binding.clone());
+                        pending_lhs.push(self.lhs_tracking.last_lhs_binding.clone());
                         self.get_x_next();
-                        self.equals_means_equation = true;
+                        self.lhs_tracking.equals_means_equation = true;
                         self.scan_expression()?;
                     }
 

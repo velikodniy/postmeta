@@ -70,7 +70,7 @@ impl Interpreter {
     /// Execute a unary operator on `cur_exp`.
     #[expect(clippy::too_many_lines, reason = "matching all unary ops")]
     pub(super) fn do_unary(&mut self, op: u16) -> InterpResult<()> {
-        self.last_lhs_binding = None;
+        self.lhs_tracking.last_lhs_binding = None;
         match op {
             x if x == UnaryOp::Not as u16 => {
                 let b = value_to_bool(&self.cur_expr.exp)?;
@@ -688,7 +688,7 @@ impl Interpreter {
                         // Extract the primary VarId from the dep for LHS binding.
                         let primary_var = dep.iter().find_map(|t| t.var_id);
                         if let Some(vid) = primary_var {
-                            self.last_lhs_binding = Some(LhsBinding::Variable {
+                            self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
                                 id: vid,
                                 negated: false,
                             });

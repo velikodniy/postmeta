@@ -101,6 +101,39 @@ pub(super) enum LhsBinding {
     },
 }
 
+/// Tracks the latest bindable LHS expression context.
+///
+/// This state is threaded through expression parsing so statements can
+/// distinguish equations/assignments to variables, internals, and compound
+/// parts.
+pub(super) struct LhsTracking {
+    /// Last scanned variable id (for assignment LHS tracking).
+    pub last_var_id: Option<VarId>,
+    /// Last scanned variable name (for assignment LHS tracking).
+    pub last_var_name: String,
+    /// Last scanned internal quantity index (for `interim` assignment).
+    pub last_internal_idx: Option<u16>,
+    /// Binding for expression forms that can be equation left-hand sides.
+    pub last_lhs_binding: Option<LhsBinding>,
+    /// When true, `=` in `scan_expression` is treated as an equation
+    /// delimiter (not consumed). Set before calling `scan_expression` from
+    /// statement context; cleared inside `scan_expression` on entry.
+    /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
+    pub equals_means_equation: bool,
+}
+
+impl LhsTracking {
+    const fn new() -> Self {
+        Self {
+            last_var_id: None,
+            last_var_name: String::new(),
+            last_internal_idx: None,
+            last_lhs_binding: None,
+            equals_means_equation: false,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Interpreter state
 // ---------------------------------------------------------------------------
@@ -125,22 +158,10 @@ pub struct Interpreter {
     cur_expr: CurExpr,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
-    /// Last scanned variable id (for assignment LHS tracking).
-    last_var_id: Option<VarId>,
-    /// Last scanned variable name (for assignment LHS tracking).
-    last_var_name: String,
-    /// Last scanned internal quantity index (for `interim` assignment).
-    last_internal_idx: Option<u16>,
-    /// Binding for expression forms that can be equation left-hand sides.
-    last_lhs_binding: Option<LhsBinding>,
+    /// Latest bindable left-hand-side context.
+    lhs_tracking: LhsTracking,
     /// Conditional and loop control state (if-stack, loop exit flag, pending body).
     control_flow: ControlFlow,
-
-    /// When true, `=` in `scan_expression` is treated as an equation
-    /// delimiter (not consumed). Set before calling `scan_expression` from
-    /// statement context; cleared inside `scan_expression` on entry.
-    /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
-    equals_means_equation: bool,
     /// Defined macros: `SymbolId` → macro info.
     macros: std::collections::HashMap<SymbolId, MacroInfo>,
     /// Output pictures (one per `beginfig`/`endfig`).
@@ -209,12 +230,8 @@ impl Interpreter {
             save_stack: SaveStack::new(),
             cur_expr: CurExpr::new(),
             cur,
-            last_var_id: None,
-            last_var_name: String::new(),
-            last_internal_idx: None,
-            last_lhs_binding: None,
+            lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
-            equals_means_equation: false,
             macros: std::collections::HashMap::new(),
             pictures: Vec::new(),
             current_picture: Picture::new(),
@@ -360,7 +377,11 @@ impl Interpreter {
                     self.cur_expr.dep = Some(dep);
                 }
                 self.cur_expr.pair_dep = None;
-                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
+                self.lhs_tracking.last_lhs_binding = self
+                    .lhs_tracking
+                    .last_lhs_binding
+                    .as_ref()
+                    .and_then(negate_binding);
             }
             Value::Pair(x, y) => {
                 self.cur_expr.exp = Value::Pair(-x, -y);
@@ -370,16 +391,24 @@ impl Interpreter {
                     crate::equation::dep_scale(&mut dy, -1.0);
                     self.cur_expr.pair_dep = Some((dx, dy));
                 }
-                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
+                self.lhs_tracking.last_lhs_binding = self
+                    .lhs_tracking
+                    .last_lhs_binding
+                    .as_ref()
+                    .and_then(negate_binding);
             }
             Value::Color(c) => {
                 self.cur_expr.exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
                 self.cur_expr.dep = None;
                 self.cur_expr.pair_dep = None;
-                self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
+                self.lhs_tracking.last_lhs_binding = self
+                    .lhs_tracking
+                    .last_lhs_binding
+                    .as_ref()
+                    .and_then(negate_binding);
             }
             _ => {
-                self.last_lhs_binding = None;
+                self.lhs_tracking.last_lhs_binding = None;
                 self.report_error(ErrorKind::TypeError, "Cannot negate this type");
             }
         }
@@ -389,11 +418,11 @@ impl Interpreter {
     fn resolve_variable(&mut self, sym: Option<SymbolId>, name: &str) -> InterpResult<()> {
         let var_id = self.variables.lookup(name);
         // Track last scanned variable for assignment LHS
-        self.last_var_id = Some(var_id);
-        self.last_var_name.clear();
-        self.last_var_name.push_str(name);
-        self.last_internal_idx = None;
-        self.last_lhs_binding = Some(LhsBinding::Variable {
+        self.lhs_tracking.last_var_id = Some(var_id);
+        self.lhs_tracking.last_var_name.clear();
+        self.lhs_tracking.last_var_name.push_str(name);
+        self.lhs_tracking.last_internal_idx = None;
+        self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
             id: var_id,
             negated: false,
         });
