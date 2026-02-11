@@ -13,6 +13,13 @@ use postmeta_graphics::types::{
     Color, DashPattern, LineCap, LineJoin, Path, Pen, Picture, Scalar, Transform,
 };
 
+/// Tolerance for numeric equality in `MetaPost` language semantics.
+///
+/// Two numeric values that differ by less than this are considered equal
+/// by `=`/`<>` comparisons, `values_equal`, and `Value::PartialEq`.
+/// This matches `MetaPost`'s behavior where numeric precision is limited.
+pub const NUMERIC_TOLERANCE: Scalar = 1e-4;
+
 // ---------------------------------------------------------------------------
 // MetaPost type codes
 // ---------------------------------------------------------------------------
@@ -254,9 +261,9 @@ impl PartialEq for Value {
         match (self, other) {
             (Self::Vacuous, Self::Vacuous) => true,
             (Self::Boolean(a), Self::Boolean(b)) => a == b,
-            (Self::Numeric(a), Self::Numeric(b)) => (a - b).abs() < f64::EPSILON,
+            (Self::Numeric(a), Self::Numeric(b)) => (a - b).abs() < NUMERIC_TOLERANCE,
             (Self::Pair(ax, ay), Self::Pair(bx, by)) => {
-                (ax - bx).abs() < f64::EPSILON && (ay - by).abs() < f64::EPSILON
+                (ax - bx).abs() < NUMERIC_TOLERANCE && (ay - by).abs() < NUMERIC_TOLERANCE
             }
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path(a), Self::Path(b)) => a == b,
@@ -379,5 +386,49 @@ mod tests {
         assert_eq!(format!("{}", Value::Numeric(42.0)), "42");
         assert_eq!(format!("{}", Value::Pair(1.0, 2.0)), "(1,2)");
         assert_eq!(format!("{}", Value::String(Arc::from("hi"))), "\"hi\"");
+    }
+
+    // Both Value::PartialEq and the interpreter's values_equal use
+    // NUMERIC_TOLERANCE (1e-4).  These tests verify the unified behavior.
+
+    #[test]
+    fn value_eq_numeric_exact() {
+        assert_eq!(Value::Numeric(1.0), Value::Numeric(1.0));
+    }
+
+    #[test]
+    fn value_eq_numeric_within_tolerance() {
+        // A diff of 5e-5 is below the 1e-4 tolerance
+        let a = Value::Numeric(1.0);
+        let b = Value::Numeric(1.00005);
+        assert_eq!(a, b, "diff 5e-5 should be equal under NUMERIC_TOLERANCE");
+    }
+
+    #[test]
+    fn value_eq_numeric_beyond_tolerance() {
+        // A diff of 1e-3 exceeds the 1e-4 tolerance
+        let a = Value::Numeric(1.0);
+        let b = Value::Numeric(1.001);
+        assert_ne!(
+            a, b,
+            "diff 1e-3 should NOT be equal under NUMERIC_TOLERANCE"
+        );
+    }
+
+    #[test]
+    fn value_eq_pair_within_tolerance() {
+        let a = Value::Pair(1.0, 2.0);
+        let b = Value::Pair(1.00005, 2.0 - 5e-5);
+        assert_eq!(
+            a, b,
+            "pair components within NUMERIC_TOLERANCE should match"
+        );
+    }
+
+    #[test]
+    fn value_eq_pair_beyond_tolerance() {
+        let a = Value::Pair(1.0, 2.0);
+        let b = Value::Pair(1.001, 2.0);
+        assert_ne!(a, b, "pair with 1e-3 x diff should NOT match");
     }
 }

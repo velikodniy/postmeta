@@ -89,9 +89,7 @@ pub struct Interpreter {
     last_lhs_binding: Option<LhsBinding>,
     /// If-stack depth tracking for nested conditionals.
     if_stack: Vec<IfState>,
-    /// Loop nesting depth (for `exitif` to know which loop to break from).
-    #[allow(dead_code)]
-    loop_depth: u32,
+
     /// When true, `=` in `scan_expression` is treated as an equation
     /// delimiter (not consumed). Set before calling `scan_expression` from
     /// statement context; cleared inside `scan_expression` on entry.
@@ -177,7 +175,6 @@ impl Interpreter {
             last_internal_idx: None,
             last_lhs_binding: None,
             if_stack: Vec::new(),
-            loop_depth: 0,
             equals_means_equation: false,
             loop_exit: false,
             pending_loop_body: None,
@@ -231,7 +228,6 @@ impl Interpreter {
     ///
     /// After calling this, the next `get_next()` or `get_x_next()` will
     /// return the same token again. This is `mp.web`'s `back_input`.
-    #[allow(dead_code)] // Used by future steps (variable tree, implicit multiplication)
     pub(super) fn back_input(&mut self) {
         self.input.back_input(self.cur.clone());
     }
@@ -241,7 +237,6 @@ impl Interpreter {
     /// The current `cur_exp`/`cur_type` are stashed into a capsule and
     /// placed on the input stream. The next token read will be a
     /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
-    #[allow(dead_code)] // Used by future steps (variable tree, mediation disambiguation)
     pub(super) fn back_expr(&mut self) {
         let ty = self.cur_type;
         let val = self.take_cur_exp();
@@ -470,7 +465,7 @@ impl Interpreter {
 
     /// Run a `MetaPost` program from source text.
     pub fn run(&mut self, source: &str) -> InterpResult<()> {
-        self.input.push_source(source.to_owned());
+        self.input.push_source(source);
         self.get_x_next();
 
         while self.cur.command != Command::Stop {
@@ -1501,7 +1496,7 @@ mod tests {
     #[test]
     fn back_input_rescans_token() {
         let mut interp = Interpreter::new();
-        interp.input.push_source("+ 3;".to_owned());
+        interp.input.push_source("+ 3;");
         // Read "+"
         interp.get_next();
         assert_eq!(interp.cur.command, Command::PlusOrMinus);
@@ -1516,7 +1511,7 @@ mod tests {
     fn back_expr_capsule_roundtrip() {
         let mut interp = Interpreter::new();
         // Push source first (it goes on the bottom of the stack)
-        interp.input.push_source(";".to_owned());
+        interp.input.push_source(";");
         // Set up a capsule with a pair value
         interp.cur_exp = Value::Pair(5.0, 10.0);
         interp.cur_type = Type::PairType;
@@ -1535,7 +1530,7 @@ mod tests {
         // Push a numeric capsule and verify it can participate in arithmetic
         let mut interp = Interpreter::new();
         // Push source first (bottom of stack)
-        interp.input.push_source("+ 3;".to_owned());
+        interp.input.push_source("+ 3;");
         // Then push capsule (top of stack)
         interp.cur_exp = Value::Numeric(7.0);
         interp.cur_type = Type::Known;
@@ -2905,5 +2900,266 @@ mod tests {
         assert!(infos[0].contains("0"), "expected 0, got: {}", infos[0]);
         assert!(infos[1].contains("72"), "expected 72, got: {}", infos[1]);
         assert!(infos[2].contains("144"), "expected 144, got: {}", infos[2]);
+    }
+
+    // ===================================================================
+    // Regression tests for equality, step loops, scantokens, equations
+    // ===================================================================
+
+    // Lock down the interpreter's comparison tolerance behavior.
+    // Both values_equal and Value::PartialEq use NUMERIC_TOLERANCE (1e-4).
+
+    #[test]
+    fn equality_comparison_uses_interpreter_tolerance() {
+        // 1 = 1.00005 should be true (diff < 1e-4) in MetaPost semantics
+        let mut interp = Interpreter::new();
+        interp.run("if 1 = 1.00005: show 1; fi;").unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .collect();
+        assert!(
+            !infos.is_empty(),
+            "expected equality to hold for diff 5e-5"
+        );
+    }
+
+    #[test]
+    fn equality_comparison_detects_large_diff() {
+        // 1 = 1.001 should be false (diff > 1e-4 threshold for equation consistency)
+        let mut interp = Interpreter::new();
+        interp.run("if 1 = 1.001: show 1; fi;").unwrap();
+        // Should NOT have any info messages if comparison is false
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .collect();
+        assert!(
+            infos.is_empty(),
+            "1 = 1.001 should be false, but show executed"
+        );
+    }
+
+    // step/until loop edge cases
+
+    #[test]
+    fn for_step_until_zero_step_no_hang() {
+        // Zero step should produce no iterations (avoids infinite loop)
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=1 step 0 until 5: show i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .collect();
+        assert!(infos.is_empty(), "zero step should produce no iterations");
+    }
+
+    #[test]
+    fn for_step_until_inclusive_endpoint() {
+        // `for i=0 step 1 until 3` should include i=3
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=0 step 1 until 3: show i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 4, "expected 4 iterations (0,1,2,3), got: {infos:?}");
+    }
+
+    #[test]
+    fn for_step_until_negative_direction() {
+        // `for i=3 step -1 until 1` should produce 3,2,1
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=3 step -1 until 1: show i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 3, "expected 3 iterations (3,2,1), got: {infos:?}");
+    }
+
+    #[test]
+    fn for_step_until_fractional_inclusive() {
+        // `for i=0 step 0.1 until 0.3` should include 0.3 (within tolerance)
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=0 step 0.1 until 0.3: show i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.len() >= 4,
+            "expected at least 4 iterations (0, 0.1, 0.2, 0.3), got {}: {infos:?}",
+            infos.len()
+        );
+    }
+
+    #[test]
+    fn for_step_until_wrong_direction_no_iterations() {
+        // `for i=1 step -1 until 5` goes the wrong way: should produce no iterations
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=1 step -1 until 5: show i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .collect();
+        assert!(
+            infos.is_empty(),
+            "wrong direction should produce no iterations, got: {infos:?}"
+        );
+    }
+
+    // scantokens normal vs push-only parity
+
+    #[test]
+    fn scantokens_preserves_terminator() {
+        // scantokens should not eat the `;` after the string expression
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"scantokens "show 42"; show 99;"#)
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains("42")),
+            "scantokens should show 42: {infos:?}"
+        );
+        assert!(
+            infos.iter().any(|m| m.contains("99")),
+            "statement after scantokens should run: {infos:?}"
+        );
+    }
+
+    #[test]
+    fn expandafter_scantokens_same_as_direct() {
+        // expandafter scantokens should produce same result
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"expandafter show scantokens "42";"#)
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains("42")),
+            "expandafter scantokens should show 42: {infos:?}"
+        );
+    }
+
+    // Input source push/pop ordering
+
+    #[test]
+    fn nested_source_levels_lifo_order() {
+        // Verify that multiple push_source calls work in LIFO order
+        let mut interp = Interpreter::new();
+        // Push two source levels manually, then run the top-level source
+        interp.input.push_source("show 2;");
+        interp.input.push_source("show 1;");
+        interp.get_x_next();
+        while interp.cur.command != Command::Stop {
+            interp.do_statement().unwrap();
+        }
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 2, "expected 2 shows, got: {infos:?}");
+        // LIFO: "show 1" runs first (top of stack), then "show 2"
+        assert!(infos[0].contains("1"), "first should be 1: {}", infos[0]);
+        assert!(infos[1].contains("2"), "second should be 2: {}", infos[1]);
+    }
+
+    // Equation solving with transitive dependencies
+
+    #[test]
+    fn transitive_equations_solve_correctly() {
+        // x + y = 5; y + z = 7; x = 1 => y = 4, z = 3
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric x, y, z; x + y = 5; y + z = 7; x = 1; show y; show z;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains("4")),
+            "expected y=4: {infos:?}"
+        );
+        assert!(
+            infos.iter().any(|m| m.contains("3")),
+            "expected z=3: {infos:?}"
+        );
+    }
+
+    // save must not affect similar-prefix roots
+
+    #[test]
+    fn save_root_does_not_affect_similar_prefix() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "numeric a, ab; a := 1; ab := 2; \
+                 begingroup save a; a := 99; endgroup; \
+                 show a; show ab;",
+            )
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains(">> 1")),
+            "a should restore to 1: {infos:?}"
+        );
+        assert!(
+            infos.iter().any(|m| m.contains(">> 2")),
+            "ab should remain 2: {infos:?}"
+        );
+    }
+
+    // scan_expression is currently pub; this test works from inside the
+    // crate and will survive a visibility narrowing to pub(crate).
+
+    #[test]
+    fn scan_expression_internal_usage() {
+        let mut interp = Interpreter::new();
+        interp.input.push_source("3 + 4;");
+        interp.get_x_next();
+        interp.scan_expression().unwrap();
+        assert_eq!(interp.cur_exp, Value::Numeric(7.0));
     }
 }

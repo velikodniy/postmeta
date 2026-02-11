@@ -13,7 +13,7 @@ use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
 use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
-use crate::variables::{SuffixSegment, VarValue};
+use crate::variables::VarValue;
 
 use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
 use super::{Interpreter, LhsBinding};
@@ -983,7 +983,7 @@ impl Interpreter {
     /// Parse and evaluate an expression.
     ///
     /// Handles expression-level binary operators and path construction.
-    pub fn scan_expression(&mut self) -> InterpResult<()> {
+    pub(crate) fn scan_expression(&mut self) -> InterpResult<()> {
         // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
         let equals_is_equation = self.equals_means_equation;
         self.equals_means_equation = false;

@@ -14,25 +14,25 @@ use super::helpers::value_to_scalar;
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
+    /// Substitute all known and dependent variables in `dep` until only
+    /// independent variables (or a constant) remain.
     fn reduce_dep_with_knowns(&self, dep: DepList) -> DepList {
         let mut reduced = dep;
 
+        // Repeat because substituting one dependent variable may introduce
+        // another known/dependent variable into the dep list.
         loop {
             let mut changed = false;
-            let vars: Vec<_> = reduced.iter().filter_map(|t| t.var_id).collect();
 
-            for id in vars {
-                if !reduced.iter().any(|t| t.var_id == Some(id)) {
-                    continue;
-                }
-
+            for term in &reduced.clone() {
+                let Some(id) = term.var_id else { continue };
                 match self.variables.get(id) {
                     VarValue::NumericVar(NumericState::Known(v)) => {
                         reduced = dep_substitute(&reduced, id, &const_dep(*v));
                         changed = true;
                     }
-                    VarValue::NumericVar(NumericState::Dependent(dep)) => {
-                        reduced = dep_substitute(&reduced, id, dep);
+                    VarValue::NumericVar(NumericState::Dependent(sub)) => {
+                        reduced = dep_substitute(&reduced, id, sub);
                         changed = true;
                     }
                     _ => {}

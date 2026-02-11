@@ -8,7 +8,6 @@ use postmeta_graphics::bbox;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::pen;
-use postmeta_graphics::picture;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{

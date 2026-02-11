@@ -4,7 +4,6 @@
 //! brace directions, and `cycle`.
 
 use postmeta_graphics::math;
-use postmeta_graphics::path;
 use postmeta_graphics::path::hobby;
 use postmeta_graphics::types::{Knot, KnotDirection, Path, Point, Scalar};
 
@@ -135,7 +134,7 @@ impl Interpreter {
                 }
             }
 
-            let mut knot = self.value_to_knot(&point_val)?;
+            let mut knot = Self::value_to_knot(&point_val)?;
             if let Some(dir) = post_dir {
                 knot.left = dir;
             }
@@ -189,7 +188,7 @@ impl Interpreter {
     /// - `Some(PendingJoin::Tension(t))` — the next knot's `left_tension`
     /// - `Some(PendingJoin::Control(pt))` — the next knot's `left` direction (explicit)
     /// - `None` — no pending state
-    fn parse_join_options(&mut self, knots: &mut Vec<Knot>) -> InterpResult<Option<PendingJoin>> {
+    fn parse_join_options(&mut self, knots: &mut [Knot]) -> InterpResult<Option<PendingJoin>> {
         match self.cur.command {
             Command::Tension => {
                 self.get_x_next();
@@ -268,7 +267,7 @@ impl Interpreter {
     }
 
     /// Convert a value to a path knot.
-    fn value_to_knot(&self, val: &Value) -> InterpResult<Knot> {
+    fn value_to_knot(val: &Value) -> InterpResult<Knot> {
         match val {
             Value::Pair(x, y) => Ok(Knot::new(Point::new(*x, *y))),
             Value::Numeric(v) => {
@@ -308,7 +307,7 @@ impl Interpreter {
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             }
-            self.value_to_direction(&dir)
+            Self::value_to_direction(&dir)
         }
     }
 
@@ -316,7 +315,7 @@ impl Interpreter {
     ///
     /// Internal direction angles are stored in radians.
     /// Numeric inputs are interpreted as degrees per `MetaPost` syntax.
-    fn value_to_direction(&self, val: &Value) -> InterpResult<KnotDirection> {
+    fn value_to_direction(val: &Value) -> InterpResult<KnotDirection> {
         match val {
             Value::Pair(x, y) => Ok(KnotDirection::Given(math::angle(*x, *y).to_radians())),
             Value::Numeric(v) => Ok(KnotDirection::Given(v.to_radians())),
@@ -335,9 +334,7 @@ mod tests {
 
     #[test]
     fn direction_numeric_is_degrees_in_input() {
-        let interp = Interpreter::new();
-        let dir = interp
-            .value_to_direction(&Value::Numeric(90.0))
+        let dir = Interpreter::value_to_direction(&Value::Numeric(90.0))
             .expect("numeric direction should parse");
 
         match dir {
@@ -350,9 +347,7 @@ mod tests {
 
     #[test]
     fn direction_pair_is_converted_to_radians() {
-        let interp = Interpreter::new();
-        let dir = interp
-            .value_to_direction(&Value::Pair(0.0, 1.0))
+        let dir = Interpreter::value_to_direction(&Value::Pair(0.0, 1.0))
             .expect("pair direction should parse");
 
         match dir {

@@ -108,21 +108,21 @@ impl std::error::Error for ScanError {}
 // ---------------------------------------------------------------------------
 
 /// Lexical scanner for `MetaPost` source.
-pub struct Scanner<'src> {
-    /// Source bytes.
-    src: &'src [u8],
+pub struct Scanner {
+    /// Source bytes (owned).
+    src: Vec<u8>,
     /// Current byte position.
     pos: usize,
     /// Accumulated errors (non-fatal).
     errors: Vec<ScanError>,
 }
 
-impl<'src> Scanner<'src> {
+impl Scanner {
     /// Create a new scanner over the given source string.
     #[must_use]
-    pub const fn new(source: &'src str) -> Self {
+    pub fn new(source: &str) -> Self {
         Self {
-            src: source.as_bytes(),
+            src: source.as_bytes().to_vec(),
             pos: 0,
             errors: Vec::new(),
         }

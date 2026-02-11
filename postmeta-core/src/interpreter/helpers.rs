@@ -7,7 +7,7 @@ use postmeta_graphics::types::{Path, Pen, Scalar, Transform};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolTable;
-use crate::types::{Type, Value};
+use crate::types::{Type, Value, NUMERIC_TOLERANCE};
 
 pub(super) fn value_to_scalar(val: &Value) -> InterpResult<Scalar> {
     match val {
@@ -89,26 +89,11 @@ pub(super) fn value_to_transform(val: &Value) -> InterpResult<Transform> {
     }
 }
 
-/// Convert a runtime `Value` to a `StoredToken` for embedding in token lists.
-pub(super) fn value_to_stored_token(val: &Value) -> StoredToken {
-    match val {
-        Value::Numeric(_) => StoredToken::Capsule(val.clone(), Type::Known),
-        Value::String(s) => StoredToken::StringLit(s.to_string()),
-        Value::Boolean(_) => StoredToken::Capsule(val.clone(), Type::Boolean),
-        Value::Pair(..) => StoredToken::Capsule(val.clone(), Type::PairType),
-        Value::Color(..) => StoredToken::Capsule(val.clone(), Type::ColorType),
-        Value::Transform(..) => StoredToken::Capsule(val.clone(), Type::TransformType),
-        Value::Path(..) => StoredToken::Capsule(val.clone(), Type::Path),
-        Value::Pen(..) => StoredToken::Capsule(val.clone(), Type::Pen),
-        Value::Picture(..) => StoredToken::Capsule(val.clone(), Type::Picture),
-        Value::Vacuous => StoredToken::Capsule(val.clone(), Type::Vacuous),
-    }
-}
-
 /// Convert a runtime `Value` to a list of `StoredToken`s that reconstruct it.
 ///
 /// For compound types like pairs and colors, this produces the token sequence
-/// `( x , y )` or `( r , g , b )`. For simple types, returns a single token.
+/// `( x , y )` or `( r , g , b )`. For simple types, returns a single capsule
+/// or string literal token.
 pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> TokenList {
     match val {
         Value::Pair(x, y) => {
@@ -137,17 +122,31 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
                 StoredToken::Symbol(rparen),
             ]
         }
-        _ => vec![value_to_stored_token(val)],
+        Value::String(s) => vec![StoredToken::StringLit(s.to_string())],
+        _ => vec![StoredToken::Capsule(
+            val.clone(),
+            match val {
+                Value::Numeric(_) => Type::Known,
+                Value::Boolean(_) => Type::Boolean,
+                Value::Transform(..) => Type::TransformType,
+                Value::Path(..) => Type::Path,
+                Value::Pen(..) => Type::Pen,
+                Value::Picture(..) => Type::Picture,
+                // Pair and Color are handled above; String has its own arm.
+                // Vacuous and any remaining variants fall here.
+                _ => Type::Vacuous,
+            },
+        )],
     }
 }
 
 pub(super) fn values_equal(a: &Value, b: &Value) -> bool {
     match (a, b) {
-        (Value::Numeric(a), Value::Numeric(b)) => (a - b).abs() < 0.0001,
+        (Value::Numeric(a), Value::Numeric(b)) => (a - b).abs() < NUMERIC_TOLERANCE,
         (Value::Boolean(a), Value::Boolean(b)) => a == b,
         (Value::String(a), Value::String(b)) => a == b,
         (Value::Pair(ax, ay), Value::Pair(bx, by)) => {
-            (ax - bx).abs() < 0.0001 && (ay - by).abs() < 0.0001
+            (ax - bx).abs() < NUMERIC_TOLERANCE && (ay - by).abs() < NUMERIC_TOLERANCE
         }
         _ => false,
     }

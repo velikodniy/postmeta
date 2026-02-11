@@ -76,12 +76,6 @@ impl ParamType {
 pub(super) struct MacroInfo {
     /// Parameter types in order.
     pub(super) params: Vec<ParamType>,
-    /// Delimiter group index for each parameter.  Delimited parameters
-    /// (Expr/Suffix/Text) that share a `(…)` group in the definition get the
-    /// same group number.  Undelimited parameters get `u16::MAX`.
-    /// Used during expansion so that a single `(a, b, c, d)` at the call site
-    /// can span multiple definition groups (mp.web §13242).
-    pub(super) delim_groups: Vec<u16>,
     /// The macro body as a token list.
     pub(super) body: TokenList,
     /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
@@ -429,7 +423,12 @@ impl Interpreter {
                                         let end_val = self.take_cur_exp();
                                         if let Ok(end) = super::helpers::value_to_scalar(&end_val) {
                                             // Generate the range
-                                            self.generate_step_range(start, step, end, &mut values);
+                                            Self::generate_step_range(
+                                                start,
+                                                step,
+                                                end,
+                                                &mut values,
+                                            );
                                         }
                                     }
                                 }
@@ -454,32 +453,35 @@ impl Interpreter {
     }
 
     /// Generate numeric values for a `step`/`until` loop range.
-    #[allow(clippy::while_float)]
-    fn generate_step_range(&self, start: f64, step: f64, end: f64, values: &mut Vec<Value>) {
+    ///
+    /// Uses index-based computation (`start + i * step`) to avoid accumulating
+    /// floating-point drift.  The endpoint is inclusive when the overshoot is
+    /// within a small relative/absolute tolerance, matching `MetaPost` semantics.
+    fn generate_step_range(start: f64, step: f64, end: f64, values: &mut Vec<Value>) {
+        const MAX_ITERATIONS: usize = 10_000;
+
         if step.abs() < f64::EPSILON {
-            // Zero step — avoid infinite loop
             return;
         }
-        let mut v = start;
-        let tolerance = f64::EPSILON.mul_add(end.abs().max(1.0), end);
-        if step > 0.0 {
-            while v <= tolerance {
-                values.push(Value::Numeric(v));
-                v += step;
-                // Safety limit to avoid runaway loops
-                if values.len() > 10_000 {
-                    break;
-                }
+        // Wrong direction: positive step with end < start (or vice versa)
+        if (step > 0.0 && start > end + f64::EPSILON) || (step < 0.0 && start < end - f64::EPSILON)
+        {
+            return;
+        }
+        // Small tolerance so the endpoint is included despite float rounding
+        let endpoint_slack = f64::EPSILON * end.abs().max(1.0);
+        for i in 0..MAX_ITERATIONS {
+            #[allow(clippy::cast_precision_loss)]
+            let v = step.mul_add(i as f64, start);
+            let past_end = if step > 0.0 {
+                v > end + endpoint_slack
+            } else {
+                v < end - endpoint_slack
+            };
+            if past_end {
+                break;
             }
-        } else {
-            let neg_tolerance = (-f64::EPSILON).mul_add(end.abs().max(1.0), end);
-            while v >= neg_tolerance {
-                values.push(Value::Numeric(v));
-                v += step;
-                if values.len() > 10_000 {
-                    break;
-                }
-            }
+            values.push(Value::Numeric(v));
         }
     }
 
@@ -705,16 +707,13 @@ impl Interpreter {
         let body = self.scan_macro_body(&param_names);
 
         let mut param_types: Vec<ParamType> = params.iter().map(|(_, ty, _)| *ty).collect();
-        let mut delim_groups: Vec<u16> = params.iter().map(|(_, _, g)| *g).collect();
         if has_at_suffix {
             param_types.push(ParamType::UndelimitedSuffix);
-            delim_groups.push(u16::MAX);
         }
 
         // Store the macro
         let info = MacroInfo {
             params: param_types,
-            delim_groups,
             body,
             is_vardef,
             has_at_suffix,
@@ -798,10 +797,8 @@ impl Interpreter {
         let param_names = vec![lhs_name, rhs_name];
         let body = self.scan_macro_body(&param_names);
 
-        // Store the macro — binary macros have no delimited groups
         let info = MacroInfo {
             params: vec![ParamType::Expr, ParamType::Expr],
-            delim_groups: vec![u16::MAX, u16::MAX],
             body,
             is_vardef: false,
             has_at_suffix: false,
@@ -1148,18 +1145,27 @@ impl Interpreter {
     /// Scans arguments according to the macro's parameter types, then pushes
     /// the body as a token list with parameter bindings.
     pub(super) fn expand_defined_macro(&mut self) {
-        let Some(macro_sym) = self.cur.sym else {
-            self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
+        if !self.expand_defined_macro_inner() {
             self.get_next();
             self.expand_current();
             return;
+        }
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Core logic for expanding a user-defined macro: scan arguments and push
+    /// the body expansion onto the input stack.  Returns `false` on error
+    /// (caller decides whether to advance the token stream).
+    fn expand_defined_macro_inner(&mut self) -> bool {
+        let Some(macro_sym) = self.cur.sym else {
+            self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
+            return false;
         };
 
         let Some(macro_info) = self.macros.get(&macro_sym).cloned() else {
             self.report_error(ErrorKind::Internal, "Undefined macro expansion");
-            self.get_next();
-            self.expand_current();
-            return;
+            return false;
         };
 
         // Scan arguments — only advance past the macro name if there are params
@@ -1326,9 +1332,7 @@ impl Interpreter {
         self.input
             .push_token_list(expansion, args, "macro expansion".into());
 
-        // Get the next token and continue expanding
-        self.get_next();
-        self.expand_current();
+        true
     }
 
     /// Handle `input <filename>`.
@@ -1355,7 +1359,7 @@ impl Interpreter {
 
         match contents {
             Some(source) => {
-                self.input.push_source(source);
+                self.input.push_source(&source);
             }
             None => {
                 self.report_error(ErrorKind::Internal, format!("File not found: {filename}"));
@@ -1422,6 +1426,14 @@ impl Interpreter {
     /// priority, so we instead push the saved token as a one-token level
     /// *below* the source (push it first, then push the source on top).
     fn expand_scantokens(&mut self) {
+        self.expand_scantokens_inner();
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Core logic for `scantokens`: scan the string expression and push the
+    /// resulting source onto the input stack.
+    fn expand_scantokens_inner(&mut self) {
         self.get_x_next(); // skip `scantokens`, expand
 
         // Scan the string expression
@@ -1440,16 +1452,12 @@ impl Interpreter {
                 }
 
                 if !source.is_empty() {
-                    self.input.push_source(source);
+                    self.input.push_source(&source);
                 }
             } else {
                 self.report_error(ErrorKind::TypeError, "scantokens requires a string");
             }
         }
-
-        // The pushed source will be read by the next get_next
-        self.get_next();
-        self.expand_current();
     }
 
     /// Handle `expandafter`.
@@ -1490,185 +1498,18 @@ impl Interpreter {
 
     /// Push-only variant of `expand_scantokens` for use by `expandafter`.
     ///
-    /// Performs the same work as `expand_scantokens` but does NOT call
-    /// `get_next(); expand_current();` at the end.  The expansion result
-    /// (source string) is left on the input stack for the caller to read.
+    /// Same as `expand_scantokens` but does NOT call `get_next();
+    /// expand_current();` — the source is left on the input stack.
     fn expand_scantokens_push_only(&mut self) {
-        self.get_x_next(); // skip `scantokens`, expand
-
-        // Scan the string expression
-        if self.scan_primary().is_ok() {
-            if let Value::String(ref s) = self.cur_exp {
-                let source = s.to_string();
-
-                // Save the token that terminated scan_primary.
-                let mut saved = TokenList::new();
-                self.store_current_token(&mut saved);
-                if !saved.is_empty() {
-                    self.input
-                        .push_token_list(saved, Vec::new(), "scantokens-saved".into());
-                }
-
-                if !source.is_empty() {
-                    self.input.push_source(source);
-                }
-            } else {
-                self.report_error(ErrorKind::TypeError, "scantokens requires a string");
-            }
-        }
-        // Do NOT call get_next/expand_current — caller handles continuation.
+        self.expand_scantokens_inner();
     }
 
     /// Push-only variant of `expand_defined_macro` for use by `expandafter`.
     ///
-    /// Performs the same work as `expand_defined_macro` (scans arguments,
-    /// pushes body with parameter bindings) but does NOT call
-    /// `get_next(); expand_current();` at the end.  The body expansion
-    /// is left on the input stack for the caller to read.
+    /// Same as `expand_defined_macro` but does NOT call `get_next();
+    /// expand_current();` — the expansion is left on the input stack.
     fn expand_defined_macro_push_only(&mut self) {
-        let Some(macro_sym) = self.cur.sym else {
-            self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
-            return;
-        };
-
-        let Some(macro_info) = self.macros.get(&macro_sym).cloned() else {
-            self.report_error(ErrorKind::Internal, "Undefined macro expansion");
-            return;
-        };
-
-        // Scan arguments — same logic as expand_defined_macro
-        let mut args: Vec<TokenList> = Vec::new();
-
-        if !macro_info.params.is_empty() {
-            self.get_x_next();
-
-            let at_suffix_arg = if macro_info.has_at_suffix {
-                Some(self.scan_suffix_arg())
-            } else {
-                None
-            };
-
-            let mut in_delimiters = false;
-            let regular_param_count = if macro_info.has_at_suffix {
-                macro_info.params.len() - 1
-            } else {
-                macro_info.params.len()
-            };
-
-            for i in 0..regular_param_count {
-                let param_type = &macro_info.params[i];
-                match param_type {
-                    ParamType::Expr | ParamType::Suffix | ParamType::Text => {
-                        if !in_delimiters && self.cur.command == Command::LeftDelimiter {
-                            self.get_x_next();
-                            in_delimiters = true;
-                        }
-                        match param_type {
-                            ParamType::Expr => {
-                                if self.scan_expression().is_ok() {
-                                    let val = self.take_cur_exp();
-                                    args.push(value_to_stored_tokens(&val, &mut self.symbols));
-                                } else {
-                                    args.push(Vec::new());
-                                }
-                            }
-                            ParamType::Suffix => {
-                                args.push(self.scan_suffix_arg());
-                            }
-                            ParamType::Text => {
-                                args.push(self.scan_text_arg(i, &macro_info.params));
-                            }
-                            _ => {}
-                        }
-                        let next_regular_is_undelimited = if i + 1 < regular_param_count {
-                            macro_info.params[i + 1].is_undelimited()
-                        } else {
-                            false
-                        };
-                        if self.cur.command == Command::Comma {
-                            self.get_x_next();
-                        }
-                        if self.cur.command == Command::RightDelimiter
-                            && (next_regular_is_undelimited || i + 1 >= regular_param_count)
-                        {
-                            if next_regular_is_undelimited {
-                                self.get_x_next();
-                            }
-                            in_delimiters = false;
-                        }
-                    }
-                    ParamType::Primary => {
-                        self.scan_primary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
-                    }
-                    ParamType::Secondary => {
-                        self.scan_secondary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
-                    }
-                    ParamType::Tertiary => {
-                        self.scan_tertiary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
-                    }
-                    ParamType::UndelimitedExpr => {
-                        self.scan_expression().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
-                    }
-                    ParamType::UndelimitedSuffix => {
-                        args.push(self.scan_suffix_arg());
-                    }
-                    ParamType::UndelimitedText => {
-                        let mut text_tokens = TokenList::new();
-                        while self.cur.command != Command::Semicolon
-                            && self.cur.command != Command::Stop
-                        {
-                            self.store_current_token(&mut text_tokens);
-                            self.get_next();
-                        }
-                        args.push(text_tokens);
-                    }
-                }
-            }
-
-            if let Some(suffix_arg) = at_suffix_arg {
-                args.push(suffix_arg);
-            }
-        }
-
-        // Push trailing token for undelimited last param
-        let last_regular_param = if macro_info.has_at_suffix {
-            macro_info.params.iter().rev().nth(1).copied()
-        } else {
-            macro_info.params.last().copied()
-        };
-        let last_param_undelimited = last_regular_param.is_some_and(ParamType::is_undelimited);
-        if last_param_undelimited {
-            let mut trailing = TokenList::new();
-            self.store_current_token(&mut trailing);
-            if !trailing.is_empty() {
-                self.input
-                    .push_token_list(trailing, Vec::new(), "trailing token".into());
-            }
-        }
-
-        // Build the expansion token list
-        let mut expansion = macro_info.body.clone();
-
-        if macro_info.is_vardef {
-            let bg = self.symbols.lookup("begingroup");
-            let eg = self.symbols.lookup("endgroup");
-            expansion.insert(0, StoredToken::Symbol(bg));
-            expansion.push(StoredToken::Symbol(eg));
-        }
-
-        // Push the body expansion on top
-        self.input
-            .push_token_list(expansion, args, "macro expansion".into());
-
-        // Do NOT call get_next/expand_current — caller handles continuation.
+        self.expand_defined_macro_inner();
     }
 
     /// Push-only variant of `expand_expandafter`.

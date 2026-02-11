@@ -487,59 +487,6 @@ impl VarTrie {
     /// Check whether extending a variable rooted at `root` with the given
     /// `suffix_id` (a named attribute) would match a declared path.
     ///
-    /// Returns `true` if the trie has a child for `suffix_id` at the
-    /// position described by `path_so_far` (the suffix segments already
-    /// consumed). This is used by the suffix scanner to decide whether
-    /// to collect a token as part of the variable name.
-    #[must_use]
-    pub fn has_suffix(
-        &self,
-        root: SymbolId,
-        path_so_far: &[SuffixSegment],
-        suffix_id: SymbolId,
-    ) -> bool {
-        let Some(node) = self.roots.get(&root) else {
-            return false;
-        };
-        let Some(current) = Self::walk(node, path_so_far) else {
-            return false;
-        };
-        current.attrs.contains_key(&suffix_id)
-    }
-
-    /// Check whether a root variable has any structure in the trie.
-    #[must_use]
-    pub fn has_root(&self, root: SymbolId) -> bool {
-        self.roots.contains_key(&root)
-    }
-
-    /// Get the type at a given path, or `None` if the path doesn't exist.
-    #[must_use]
-    pub fn get_type(&self, root: SymbolId, suffixes: &[SuffixSegment]) -> Option<Type> {
-        let node = self.roots.get(&root)?;
-        if suffixes.is_empty() {
-            return Some(node.ty);
-        }
-        let leaf = Self::walk(node, suffixes)?;
-        Some(leaf.ty)
-    }
-
-    /// Walk a path in the trie, returning the node at the end.
-    fn walk<'a>(node: &'a TrieNode, segments: &[SuffixSegment]) -> Option<&'a TrieNode> {
-        let mut current = node;
-        for seg in segments {
-            match seg {
-                SuffixSegment::Attr(id) => {
-                    current = current.attrs.get(id)?;
-                }
-                SuffixSegment::Subscript => {
-                    current = current.collective.as_deref()?;
-                }
-            }
-        }
-        Some(current)
-    }
-
     /// Walk or create a path in the trie, returning a mutable ref to the leaf.
     fn walk_or_create<'a>(node: &'a mut TrieNode, segments: &[SuffixSegment]) -> &'a mut TrieNode {
         let mut current = node;
@@ -722,5 +669,136 @@ mod tests {
         // Outer group
         let restored = stack.restore_to_boundary();
         assert_eq!(restored.len(), 1); // the outer save
+    }
+
+    // take_name_bindings_for_root / clear_name_bindings_for_root must only
+    // match the root and its `.`/`[` descendants, not similarly-prefixed roots.
+
+    #[test]
+    fn take_name_bindings_does_not_match_similar_prefix() {
+        let mut vars = Variables::new();
+        let _a = vars.lookup("a");
+        let _ax = vars.lookup("a.x");
+        let _a1 = vars.lookup("a[1]");
+        let _ab = vars.lookup("ab"); // different root, should NOT match
+        let _abc = vars.lookup("abc.x"); // different root, should NOT match
+
+        let taken = vars.take_name_bindings_for_root("a");
+        let taken_names: Vec<&str> = taken.iter().map(|(n, _)| n.as_str()).collect();
+
+        assert!(taken_names.contains(&"a"), "should take 'a'");
+        assert!(taken_names.contains(&"a.x"), "should take 'a.x'");
+        assert!(taken_names.contains(&"a[1]"), "should take 'a[1]'");
+        assert!(!taken_names.contains(&"ab"), "should NOT take 'ab'");
+        assert!(!taken_names.contains(&"abc.x"), "should NOT take 'abc.x'");
+    }
+
+    #[test]
+    fn clear_name_bindings_removes_descendants_only() {
+        let mut vars = Variables::new();
+        let _a = vars.lookup("a");
+        let _a_y = vars.lookup("a.y");
+        let _a_1_x = vars.lookup("a[1].x");
+        let _ab = vars.lookup("ab");
+
+        vars.clear_name_bindings_for_root("a");
+
+        assert!(vars.lookup_existing("a").is_none(), "'a' should be cleared");
+        assert!(
+            vars.lookup_existing("a.y").is_none(),
+            "'a.y' should be cleared"
+        );
+        assert!(
+            vars.lookup_existing("a[1].x").is_none(),
+            "'a[1].x' should be cleared"
+        );
+        assert!(
+            vars.lookup_existing("ab").is_some(),
+            "'ab' should NOT be cleared"
+        );
+    }
+
+    // apply_linear_solution must update only dependents that reference the pivot.
+
+    #[test]
+    fn apply_linear_solution_updates_referenced_dependent_only() {
+        use crate::equation::{const_dep, DepTerm};
+
+        let mut vars = Variables::new();
+        let x = vars.alloc();
+        let y = vars.alloc();
+        let z = vars.alloc();
+
+        // Make x independent (serial 1)
+        vars.make_independent(x);
+
+        // y = 2*x + 3  (depends on x)
+        let dep_y = vec![
+            DepTerm {
+                coeff: 2.0,
+                var_id: Some(x),
+            },
+            DepTerm {
+                coeff: 3.0,
+                var_id: None,
+            },
+        ];
+        vars.make_dependent(y, dep_y);
+
+        // z = 5.0  (known, does NOT depend on x)
+        vars.make_known(z, 5.0);
+
+        // Solve: x = 10
+        let solution = const_dep(10.0);
+        vars.apply_linear_solution(x, &solution);
+
+        // x should be known(10)
+        assert!((vars.known_value(x).unwrap() - 10.0).abs() < 1e-9);
+        // y = 2*10 + 3 = 23
+        assert!((vars.known_value(y).unwrap() - 23.0).abs() < 1e-9);
+        // z should still be 5 (unchanged)
+        assert!((vars.known_value(z).unwrap() - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn apply_linear_solution_chain_substitution() {
+        use crate::equation::{const_dep, DepTerm};
+
+        let mut vars = Variables::new();
+        let x = vars.alloc(); // VarId(0)
+        let y = vars.alloc(); // VarId(1)
+        let z = vars.alloc(); // VarId(2)
+
+        vars.make_independent(x);
+        vars.make_independent(y);
+
+        // z = x + y + 1
+        let dep_z = vec![
+            DepTerm {
+                coeff: 1.0,
+                var_id: Some(y),
+            },
+            DepTerm {
+                coeff: 1.0,
+                var_id: Some(x),
+            },
+            DepTerm {
+                coeff: 1.0,
+                var_id: None,
+            },
+        ];
+        vars.make_dependent(z, dep_z);
+
+        // Solve: x = 2
+        vars.apply_linear_solution(x, &const_dep(2.0));
+        // z should now be y + 3
+
+        // Solve: y = 4
+        vars.apply_linear_solution(y, &const_dep(4.0));
+        // z should now be 7
+
+        assert!((vars.known_value(x).unwrap() - 2.0).abs() < 1e-9);
+        assert!((vars.known_value(y).unwrap() - 4.0).abs() < 1e-9);
+        assert!((vars.known_value(z).unwrap() - 7.0).abs() < 1e-9);
     }
 }

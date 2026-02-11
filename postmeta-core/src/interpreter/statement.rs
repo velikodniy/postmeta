@@ -12,7 +12,7 @@ use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture,
-    StrokeObject, Transform,
+    StrokeObject,
 };
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
@@ -757,9 +757,9 @@ impl Interpreter {
             ErrorKind::Internal, // Not really an error, but using error channel for output
             format!(">> {val}"),
         );
-        self.errors
-            .last_mut()
-            .map(|e| e.severity = crate::error::Severity::Info);
+        if let Some(e) = self.errors.last_mut() {
+            e.severity = crate::error::Severity::Info;
+        }
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
         }

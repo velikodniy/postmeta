@@ -70,9 +70,7 @@ enum InputLevel {
     /// Reading from source text.
     Source {
         /// The scanner for this source.
-        scanner: Scanner<'static>,
-        /// The source text (owned for lifetime management).
-        _source: String,
+        scanner: Scanner,
     },
     /// Reading from a token list (macro body, loop, scantokens).
     TokenList {
@@ -126,20 +124,9 @@ impl InputSystem {
     }
 
     /// Push a source text as a new input level.
-    ///
-    /// # Safety
-    /// The source string is leaked to create a `'static` reference for
-    /// the scanner. This is acceptable because input sources are typically
-    /// file contents that live for the duration of the program.
-    pub fn push_source(&mut self, source: String) {
-        // Leak the string to get a 'static reference for the scanner.
-        // This is intentional: source files live for the program's lifetime.
-        let leaked: &'static str = Box::leak(source.clone().into_boxed_str());
-        let scanner = Scanner::new(leaked);
-        self.levels.push(InputLevel::Source {
-            scanner,
-            _source: source,
-        });
+    pub fn push_source(&mut self, source: &str) {
+        let scanner = Scanner::new(source);
+        self.levels.push(InputLevel::Source { scanner });
     }
 
     /// Push a token list as a new input level (for macro expansion).
@@ -239,7 +226,7 @@ impl InputSystem {
         };
 
         match level {
-            InputLevel::Source { scanner, .. } => {
+            InputLevel::Source { scanner } => {
                 let token = scanner.next_token();
                 if token.kind.is_eof() {
                     LevelAction::Pop
@@ -402,7 +389,7 @@ mod tests {
     fn source_input_basic() {
         let mut input = InputSystem::new();
         let mut symbols = SymbolTable::new();
-        input.push_source("x + 3;".to_owned());
+        input.push_source("x + 3;");
 
         let t1 = input.next_raw_token(&mut symbols);
         assert_eq!(t1.command, Command::TagToken); // x is unknown
@@ -443,7 +430,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
 
         // Base level
-        input.push_source("begingroup".to_owned());
+        input.push_source("begingroup");
 
         let t1 = input.next_raw_token(&mut symbols);
         assert_eq!(t1.command, Command::BeginGroup);
@@ -457,7 +444,7 @@ mod tests {
     fn back_input_returns_token() {
         let mut input = InputSystem::new();
         let mut symbols = SymbolTable::new();
-        input.push_source("x + y".to_owned());
+        input.push_source("x + y");
 
         // Read "x"
         let t1 = input.next_raw_token(&mut symbols);
@@ -535,7 +522,7 @@ mod tests {
 
         let mut input = InputSystem::new();
         let mut symbols = SymbolTable::new();
-        input.push_source(";".to_owned());
+        input.push_source(";");
 
         // Push a pair capsule
         input.back_expr(Value::Pair(3.0, 7.0), Type::PairType);
@@ -589,7 +576,7 @@ mod tests {
     fn primitives_resolve() {
         let mut input = InputSystem::new();
         let mut symbols = SymbolTable::new();
-        input.push_source("if true fi".to_owned());
+        input.push_source("if true fi");
 
         let t1 = input.next_raw_token(&mut symbols);
         assert_eq!(t1.command, Command::IfTest);

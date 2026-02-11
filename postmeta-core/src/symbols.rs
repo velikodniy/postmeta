@@ -90,13 +90,8 @@ pub struct SymbolEntry {
 
 impl SymbolEntry {
     /// A tag token (unresolved variable name) with no value yet.
+    /// Also used as the fallback for out-of-range symbol lookups.
     pub const TAG: Self = Self {
-        command: Command::TagToken,
-        modifier: 0,
-    };
-
-    /// An undefined symbol.
-    pub const UNDEFINED: Self = Self {
         command: Command::TagToken,
         modifier: 0,
     };
@@ -264,7 +259,7 @@ impl SymbolTable {
             if idx < self.entries.len() {
                 self.entries[idx].1
             } else {
-                SymbolEntry::UNDEFINED
+                SymbolEntry::TAG
             }
         }
     }
@@ -460,5 +455,21 @@ mod tests {
         );
         table.clear(id);
         assert_eq!(table.get(id).command, Command::TagToken);
+    }
+
+    #[test]
+    fn get_out_of_range_returns_tag() {
+        let table = SymbolTable::new();
+        let bogus = SymbolId(999_999);
+        let entry = table.get(bogus);
+        assert_eq!(entry, SymbolEntry::TAG);
+    }
+
+    #[test]
+    fn unknown_lookup_produces_tag() {
+        let mut table = SymbolTable::new();
+        let id = table.lookup("never_seen_before");
+        let entry = table.get(id);
+        assert_eq!(entry, SymbolEntry::TAG);
     }
 }
