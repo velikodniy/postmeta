@@ -110,9 +110,11 @@ impl Internals {
     /// Create a new internals storage with all built-in quantities.
     #[must_use]
     pub fn new() -> Self {
-        let capacity = (MAX_GIVEN_INTERNAL as usize) + 16;
-        let mut values = vec![0.0; capacity];
-        let mut names = vec![String::new(); capacity];
+        let base_len = (MAX_GIVEN_INTERNAL as usize) + 1;
+        let mut values = vec![0.0; base_len];
+        let mut names = vec![String::new(); base_len];
+        values.reserve(16);
+        names.reserve(16);
 
         // Set defaults
         let defaults: &[(InternalId, Scalar, &str)] = &[
@@ -195,16 +197,14 @@ impl Internals {
     /// Register a new user-defined internal quantity.
     /// Returns the index of the new quantity.
     #[must_use]
-    pub fn new_internal(&mut self, name: &str) -> u16 {
+    pub fn new_internal(&mut self, name: &str) -> Option<u16> {
         let idx = self.values.len();
+        let Ok(result) = u16::try_from(idx) else {
+            return None;
+        };
         self.values.push(0.0);
         self.names.push(name.to_owned());
-        #[expect(
-            clippy::cast_possible_truncation,
-            reason = "internal count won't exceed u16"
-        )]
-        let result = idx as u16;
-        result
+        Some(result)
     }
 
     /// Total number of internal quantities (including slot 0).
@@ -257,10 +257,25 @@ mod tests {
     #[test]
     fn new_internal() {
         let mut int = Internals::new();
-        let idx = int.new_internal("myquantity");
-        assert!(idx > MAX_GIVEN_INTERNAL);
+        let idx = int
+            .new_internal("myquantity")
+            .expect("first user internal should fit in u16");
+        assert_eq!(idx, MAX_GIVEN_INTERNAL + 1);
         assert!((int.get(idx)).abs() < f64::EPSILON); // default 0
         assert_eq!(int.name(idx), "myquantity");
+    }
+
+    #[test]
+    fn first_user_internal_index_is_contiguous() {
+        let mut int = Internals::new();
+        let first = int
+            .new_internal("first")
+            .expect("first user internal should fit in u16");
+        let second = int
+            .new_internal("second")
+            .expect("second user internal should fit in u16");
+        assert_eq!(first, MAX_GIVEN_INTERNAL + 1);
+        assert_eq!(second, MAX_GIVEN_INTERNAL + 2);
     }
 
     #[test]

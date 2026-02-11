@@ -719,7 +719,13 @@ impl Interpreter {
             if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
                 let name = name.clone();
                 // Register the new internal
-                let idx = self.internals.new_internal(&name);
+                let Some(idx) = self.internals.new_internal(&name) else {
+                    self.report_error(
+                        ErrorKind::Overflow,
+                        format!("Too many internal quantities while adding `{name}`"),
+                    );
+                    break;
+                };
 
                 // Set the symbol to InternalQuantity
                 if let Some(sym) = self.cur.sym {
