@@ -27,8 +27,10 @@ use super::{Interpreter, LhsBinding};
 impl Interpreter {
     fn sync_currentpicture_variable(&mut self) {
         if let Some(var_id) = self.variables.lookup_existing("currentpicture") {
-            self.variables
-                .set_known(var_id, Value::Picture(self.current_picture.clone()));
+            self.variables.set_known(
+                var_id,
+                Value::Picture(self.picture_state.current_picture.clone()),
+            );
         }
     }
 
@@ -330,13 +332,13 @@ impl Interpreter {
 
     /// Get a mutable reference to the target picture for `addto`/`clip`/`setbounds`.
     ///
-    /// For `currentpicture`, returns `&mut self.current_picture` directly.
+    /// For `currentpicture`, returns `&mut self.picture_state.current_picture` directly.
     /// For named pictures, extracts the picture from the variable into
-    /// `self.named_pic_buf`, returning a mutable reference to it.
+    /// `self.picture_state.named_pic_buf`, returning a mutable reference to it.
     /// After modification, call [`Self::flush_target_picture`] to write it back.
     fn get_target_picture(&mut self, pic_name: &str) -> &mut Picture {
         if pic_name == "currentpicture" {
-            &mut self.current_picture
+            &mut self.picture_state.current_picture
         } else {
             // Extract picture from the named variable (or create empty).
             let pic = if let Some(var_id) = self.variables.lookup_existing(pic_name) {
@@ -348,12 +350,12 @@ impl Interpreter {
             } else {
                 Picture::default()
             };
-            self.named_pic_buf = Some(pic);
+            self.picture_state.named_pic_buf = Some(pic);
             // SAFETY: we just assigned `Some` above, so `unwrap` cannot fail.
             // This pattern avoids holding a borrow on `self.variables` across
             // the mutable return.
             #[allow(clippy::unwrap_used)]
-            self.named_pic_buf.as_mut().unwrap()
+            self.picture_state.named_pic_buf.as_mut().unwrap()
         }
     }
 
@@ -361,7 +363,7 @@ impl Interpreter {
     fn flush_target_picture(&mut self, pic_name: &str) {
         if pic_name == "currentpicture" {
             self.sync_currentpicture_variable();
-        } else if let Some(pic) = self.named_pic_buf.take() {
+        } else if let Some(pic) = self.picture_state.named_pic_buf.take() {
             let var_id = self.variables.lookup(pic_name);
             self.variables.set_known(var_id, Value::Picture(pic));
         }
@@ -558,10 +560,10 @@ impl Interpreter {
         let pic = if let Value::Picture(p) = val {
             p
         } else {
-            self.current_picture.clone()
+            self.picture_state.current_picture.clone()
         };
 
-        self.pictures.push(pic);
+        self.picture_state.pictures.push(pic);
 
         if self.cur.command == Command::Semicolon {
             self.get_x_next();

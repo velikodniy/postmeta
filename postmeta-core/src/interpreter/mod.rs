@@ -134,6 +134,34 @@ impl LhsTracking {
     }
 }
 
+/// Aggregates interpreter picture output/runtime drawing state.
+pub(super) struct PictureState {
+    /// Output pictures (one per `beginfig`/`endfig`).
+    pub pictures: Vec<Picture>,
+    /// Current picture being built.
+    pub current_picture: Picture,
+    /// Temporary buffer for `addto` targeting a named picture variable.
+    /// Used to avoid borrow conflicts: the picture is extracted from the
+    /// variable, modified here, then flushed back.
+    pub named_pic_buf: Option<Picture>,
+    /// Current figure number (from `beginfig`).
+    pub current_fig: Option<i32>,
+    /// Drawing state.
+    pub drawing_state: DrawingState,
+}
+
+impl PictureState {
+    fn new() -> Self {
+        Self {
+            pictures: Vec::new(),
+            current_picture: Picture::new(),
+            named_pic_buf: None,
+            current_fig: None,
+            drawing_state: DrawingState::default(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Interpreter state
 // ---------------------------------------------------------------------------
@@ -162,20 +190,10 @@ pub struct Interpreter {
     lhs_tracking: LhsTracking,
     /// Conditional and loop control state (if-stack, loop exit flag, pending body).
     control_flow: ControlFlow,
+    /// Picture output/runtime drawing state.
+    picture_state: PictureState,
     /// Defined macros: `SymbolId` → macro info.
     macros: std::collections::HashMap<SymbolId, MacroInfo>,
-    /// Output pictures (one per `beginfig`/`endfig`).
-    pub pictures: Vec<Picture>,
-    /// Current picture being built.
-    pub current_picture: Picture,
-    /// Temporary buffer for `addto` targeting a named picture variable.
-    /// Used to avoid borrow conflicts: the picture is extracted from the
-    /// variable, modified here, then flushed back.
-    named_pic_buf: Option<Picture>,
-    /// Current figure number (from `beginfig`).
-    pub current_fig: Option<i32>,
-    /// Drawing state.
-    pub drawing_state: DrawingState,
     /// Random seed.
     pub random_seed: u64,
     /// Error list.
@@ -232,12 +250,8 @@ impl Interpreter {
             cur,
             lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
+            picture_state: PictureState::new(),
             macros: std::collections::HashMap::new(),
-            pictures: Vec::new(),
-            current_picture: Picture::new(),
-            named_pic_buf: None,
-            current_fig: None,
-            drawing_state: DrawingState::default(),
             random_seed: 0,
             errors: Vec::new(),
             job_name: "output".into(),
@@ -540,7 +554,25 @@ impl Interpreter {
     /// Get the output pictures.
     #[must_use]
     pub fn output(&self) -> &[Picture] {
-        &self.pictures
+        &self.picture_state.pictures
+    }
+
+    /// Get the current picture being built.
+    #[must_use]
+    pub const fn current_picture(&self) -> &Picture {
+        &self.picture_state.current_picture
+    }
+
+    /// Get the current figure number, if one is active.
+    #[must_use]
+    pub const fn current_fig(&self) -> Option<i32> {
+        self.picture_state.current_fig
+    }
+
+    /// Get the current drawing defaults.
+    #[must_use]
+    pub const fn drawing_state(&self) -> &DrawingState {
+        &self.picture_state.drawing_state
     }
 }
 
@@ -1757,7 +1789,7 @@ mod tests {
         assert!(errors.is_empty(), "errors: {errors:?}");
 
         // The picture should have exactly one Stroke object (the dashed line).
-        let objects = &interp.current_picture.objects;
+        let objects = &interp.current_picture().objects;
         assert_eq!(
             objects.len(),
             1,
@@ -1823,7 +1855,7 @@ mod tests {
             .collect();
         assert!(errors.is_empty(), "errors: {errors:?}");
 
-        let objects = &interp.current_picture.objects;
+        let objects = &interp.current_picture().objects;
         assert_eq!(objects.len(), 1, "expected 1 object, got {}", objects.len());
 
         if let postmeta_graphics::types::GraphicsObject::Stroke(ref stroke) = objects[0] {
@@ -2053,7 +2085,7 @@ mod tests {
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
-        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
+        assert!(!interp.output().is_empty(), "expected shipped pictures");
     }
 
     #[test]
@@ -2099,7 +2131,7 @@ mod tests {
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
-        assert!(interp.pictures.len() >= 2, "expected shipped pictures");
+        assert!(interp.output().len() >= 2, "expected shipped pictures");
     }
 
     #[test]
@@ -2138,7 +2170,7 @@ mod tests {
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
 
-        let pic = interp.pictures.last().expect("expected shipped picture");
+        let pic = interp.output().last().expect("expected shipped picture");
         let fill = match pic.objects.first().expect("expected one object") {
             postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
             other => panic!("expected Fill object, got {other:?}"),
@@ -2188,7 +2220,7 @@ mod tests {
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
 
-        let pic = interp.pictures.last().expect("expected shipped picture");
+        let pic = interp.output().last().expect("expected shipped picture");
         let fill = match pic.objects.first().expect("expected one object") {
             postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
             other => panic!("expected Fill object, got {other:?}"),
@@ -2301,7 +2333,7 @@ mod tests {
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
-        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
+        assert!(!interp.output().is_empty(), "expected shipped pictures");
     }
 
     #[test]
@@ -2348,7 +2380,7 @@ mod tests {
             .filter(|e| e.severity == crate::error::Severity::Error)
             .count();
         assert!(errors == 0, "expected 0 errors, got {errors}");
-        assert!(!interp.pictures.is_empty(), "expected shipped pictures");
+        assert!(!interp.output().is_empty(), "expected shipped pictures");
     }
 
     // -----------------------------------------------------------------------

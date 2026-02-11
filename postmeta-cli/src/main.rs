@@ -199,9 +199,9 @@ fn write_output(interp: &Interpreter, output_dir: &str) {
             > 0.0,
     };
 
-    for (i, pic) in interp.pictures.iter().enumerate() {
+    for (i, pic) in interp.output().iter().enumerate() {
         let svg_str = render_with_options(pic, &opts).to_string();
-        let filename = if interp.pictures.len() == 1 {
+        let filename = if interp.output().len() == 1 {
             format!("{}.svg", interp.job_name)
         } else {
             format!("{}.{}.svg", interp.job_name, i + 1)
@@ -210,8 +210,8 @@ fn write_output(interp: &Interpreter, output_dir: &str) {
     }
 
     // If no pictures shipped but current picture has content, output it
-    if interp.pictures.is_empty() && !interp.current_picture.objects.is_empty() {
-        let svg_str = render_with_options(&interp.current_picture, &opts).to_string();
+    if interp.output().is_empty() && !interp.current_picture().objects.is_empty() {
+        let svg_str = render_with_options(interp.current_picture(), &opts).to_string();
         let filename = format!("{}.svg", interp.job_name);
         write_svg(output_dir, &filename, &svg_str);
     }

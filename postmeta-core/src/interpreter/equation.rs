@@ -260,7 +260,7 @@ impl Interpreter {
 
         if Some(var_id) == currentpicture_id {
             if let Value::Picture(p) = value {
-                self.current_picture = p.clone();
+                self.picture_state.current_picture = p.clone();
             }
         }
     }
