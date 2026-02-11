@@ -2955,6 +2955,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn substring_of_utf8_is_char_boundary_safe() {
+        // Regression: substring used byte slicing and could panic on UTF-8.
+        let mut interp = Interpreter::new();
+        interp
+            .run("show substring (1,2) of \"a😊b\";")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("😊"), "expected emoji substring in: {msg}");
+    }
+
+    #[test]
+    fn length_of_utf8_counts_characters() {
+        let mut interp = Interpreter::new();
+        interp.run("show length \"a😊b\";").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains('3'), "expected length 3 in: {msg}");
+    }
+
     // -----------------------------------------------------------------------
     // Equals-means-equation flag (= as comparison vs equation)
     // -----------------------------------------------------------------------

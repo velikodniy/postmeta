@@ -125,7 +125,12 @@ impl Interpreter {
                         self.cur_expr.exp = Value::Numeric(n);
                     }
                     Value::String(s) => {
-                        self.cur_expr.exp = Value::Numeric(s.len() as f64);
+                        #[expect(
+                            clippy::cast_precision_loss,
+                            reason = "string length in chars fits in f64 for practical inputs"
+                        )]
+                        let n = s.chars().count() as f64;
+                        self.cur_expr.exp = Value::Numeric(n);
                     }
                     Value::Pair(x, y) => {
                         // abs(pair) = sqrt(x^2 + y^2)
@@ -318,13 +323,36 @@ impl Interpreter {
             x if x == PrimaryBinaryOp::SubstringOf as u16 => {
                 let (start, end) = value_to_pair(first)?;
                 let s = value_to_string(second)?;
-                let start_idx = start.round() as usize;
-                let end_idx = end.round().min(s.len() as f64) as usize;
-                let substr = if start_idx < end_idx && start_idx < s.len() {
-                    &s[start_idx..end_idx.min(s.len())]
-                } else {
-                    ""
+
+                let chars: Vec<char> = s.chars().collect();
+                #[expect(
+                    clippy::cast_precision_loss,
+                    reason = "character count fits in f64 for practical inputs"
+                )]
+                let char_len_f64 = chars.len() as f64;
+
+                let clamp_idx = |v: f64| -> usize {
+                    if !v.is_finite() {
+                        return 0;
+                    }
+
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "index is clamped to [0, len] before cast"
+                    )]
+                    {
+                        v.round().max(0.0).min(char_len_f64) as usize
+                    }
                 };
+
+                let start_idx = clamp_idx(start);
+                let end_idx = clamp_idx(end);
+                let substr: String = if start_idx < end_idx {
+                    chars[start_idx..end_idx].iter().collect()
+                } else {
+                    String::new()
+                };
+
                 self.cur_expr.exp = Value::String(Arc::from(substr));
                 self.cur_expr.ty = Type::String;
             }
