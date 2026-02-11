@@ -151,8 +151,8 @@ impl Interpreter {
         let mut path_obj = Path::from_knots(knots, is_cyclic);
         hobby::make_choices(&mut path_obj);
 
-        self.cur_exp = Value::Path(path_obj);
-        self.cur_type = Type::Path;
+        self.cur_expr.exp = Value::Path(path_obj);
+        self.cur_expr.ty = Type::Path;
         Ok(())
     }
 
@@ -294,7 +294,7 @@ impl Interpreter {
             // {curl <numeric>}
             self.get_x_next();
             self.scan_primary()?;
-            let curl_val = value_to_scalar(&self.cur_exp)?;
+            let curl_val = value_to_scalar(&self.cur_expr.exp)?;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             }

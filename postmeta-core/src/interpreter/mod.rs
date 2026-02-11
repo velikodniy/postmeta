@@ -33,7 +33,58 @@ use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{DrawingState, Type, Value};
 use crate::variables::{NumericState, SaveStack, VarTrie, VarValue, Variables};
 
-use expand::{IfState, MacroInfo};
+use expand::{ControlFlow, MacroInfo};
+
+// ---------------------------------------------------------------------------
+// Current expression state
+// ---------------------------------------------------------------------------
+
+/// The interpreter's current expression result.
+///
+/// Groups the value, type, and linear dependency state that the expression
+/// parser writes to and consumers read from. These four fields are always
+/// mutated as a unit, so bundling them reduces `Interpreter`'s field count
+/// and makes the ownership boundary explicit.
+pub(super) struct CurExpr {
+    /// The expression value.
+    pub exp: Value,
+    /// The expression type.
+    pub ty: Type,
+    /// Scalar linear dependency list (for numeric expressions in the equation system).
+    pub dep: Option<DepList>,
+    /// Pair (x, y) dependency lists (for pair expressions in the equation system).
+    pub pair_dep: Option<(DepList, DepList)>,
+}
+
+impl CurExpr {
+    const fn new() -> Self {
+        Self {
+            exp: Value::Vacuous,
+            ty: Type::Vacuous,
+            dep: None,
+            pair_dep: None,
+        }
+    }
+
+    /// Take the expression value, resetting all fields.
+    fn take_exp(&mut self) -> Value {
+        let val = std::mem::replace(&mut self.exp, Value::Vacuous);
+        self.ty = Type::Vacuous;
+        self.dep = None;
+        self.pair_dep = None;
+        val
+    }
+
+    /// Take the scalar dependency list.
+    const fn take_dep(&mut self) -> Option<DepList> {
+        self.dep.take()
+    }
+
+    /// Take the pair dependency lists.
+    const fn take_pair_dep(&mut self) -> Option<(DepList, DepList)> {
+        self.pair_dep.take()
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
@@ -70,13 +121,8 @@ pub struct Interpreter {
     pub input: InputSystem,
     /// Save stack for `begingroup`/`endgroup`.
     pub save_stack: SaveStack,
-    /// Current expression value and type.
-    cur_exp: Value,
-    cur_type: Type,
-    /// Linear dependency form for the current numeric expression (if linear).
-    cur_dep: Option<DepList>,
-    /// Linear dependency form for the current pair expression (x/y), if linear.
-    cur_pair_dep: Option<(DepList, DepList)>,
+    /// Current expression result (value, type, and dependency state).
+    cur_expr: CurExpr,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
     /// Last scanned variable id (for assignment LHS tracking).
@@ -87,18 +133,14 @@ pub struct Interpreter {
     last_internal_idx: Option<u16>,
     /// Binding for expression forms that can be equation left-hand sides.
     last_lhs_binding: Option<LhsBinding>,
-    /// If-stack depth tracking for nested conditionals.
-    if_stack: Vec<IfState>,
+    /// Conditional and loop control state (if-stack, loop exit flag, pending body).
+    control_flow: ControlFlow,
 
     /// When true, `=` in `scan_expression` is treated as an equation
     /// delimiter (not consumed). Set before calling `scan_expression` from
     /// statement context; cleared inside `scan_expression` on entry.
     /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
     equals_means_equation: bool,
-    /// Flag set by `exitif` to signal that the current loop should terminate.
-    loop_exit: bool,
-    /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
-    pending_loop_body: Option<TokenList>,
     /// Defined macros: `SymbolId` → macro info.
     macros: std::collections::HashMap<SymbolId, MacroInfo>,
     /// Output pictures (one per `beginfig`/`endfig`).
@@ -165,19 +207,14 @@ impl Interpreter {
             internals,
             input: InputSystem::new(),
             save_stack: SaveStack::new(),
-            cur_exp: Value::Vacuous,
-            cur_type: Type::Vacuous,
-            cur_dep: None,
-            cur_pair_dep: None,
+            cur_expr: CurExpr::new(),
             cur,
             last_var_id: None,
             last_var_name: String::new(),
             last_internal_idx: None,
             last_lhs_binding: None,
-            if_stack: Vec::new(),
+            control_flow: ControlFlow::new(),
             equals_means_equation: false,
-            loop_exit: false,
-            pending_loop_body: None,
             macros: std::collections::HashMap::new(),
             pictures: Vec::new(),
             current_picture: Picture::new(),
@@ -212,16 +249,16 @@ impl Interpreter {
     fn get_x_next(&mut self) {
         // Expansion is token-oriented; it should not overwrite the current
         // expression value that the parser may already have computed.
-        let saved_exp = self.cur_exp.clone();
-        let saved_type = self.cur_type;
-        let saved_dep = self.cur_dep.clone();
-        let saved_pair_dep = self.cur_pair_dep.clone();
+        let saved_exp = self.cur_expr.exp.clone();
+        let saved_type = self.cur_expr.ty;
+        let saved_dep = self.cur_expr.dep.clone();
+        let saved_pair_dep = self.cur_expr.pair_dep.clone();
         self.get_next();
         self.expand_current();
-        self.cur_exp = saved_exp;
-        self.cur_type = saved_type;
-        self.cur_dep = saved_dep;
-        self.cur_pair_dep = saved_pair_dep;
+        self.cur_expr.exp = saved_exp;
+        self.cur_expr.ty = saved_type;
+        self.cur_expr.dep = saved_dep;
+        self.cur_expr.pair_dep = saved_pair_dep;
     }
 
     /// Push the current token back into the input stream.
@@ -238,7 +275,7 @@ impl Interpreter {
     /// placed on the input stream. The next token read will be a
     /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
     pub(super) fn back_expr(&mut self) {
-        let ty = self.cur_type;
+        let ty = self.cur_expr.ty;
         let val = self.take_cur_exp();
         self.input.back_expr(val, ty);
     }
@@ -269,19 +306,15 @@ impl Interpreter {
 
     /// Take `cur_exp`, replacing it with `Vacuous`.
     fn take_cur_exp(&mut self) -> Value {
-        let val = std::mem::replace(&mut self.cur_exp, Value::Vacuous);
-        self.cur_type = Type::Vacuous;
-        self.cur_dep = None;
-        self.cur_pair_dep = None;
-        val
+        self.cur_expr.take_exp()
     }
 
     const fn take_cur_dep(&mut self) -> Option<DepList> {
-        self.cur_dep.take()
+        self.cur_expr.take_dep()
     }
 
     const fn take_cur_pair_dep(&mut self) -> Option<(DepList, DepList)> {
-        self.cur_pair_dep.take()
+        self.cur_expr.take_pair_dep()
     }
 
     fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
@@ -319,30 +352,30 @@ impl Interpreter {
             }
         }
 
-        match &self.cur_exp {
+        match &self.cur_expr.exp {
             Value::Numeric(v) => {
-                self.cur_exp = Value::Numeric(-v);
-                if let Some(mut dep) = self.cur_dep.take() {
+                self.cur_expr.exp = Value::Numeric(-v);
+                if let Some(mut dep) = self.cur_expr.dep.take() {
                     crate::equation::dep_scale(&mut dep, -1.0);
-                    self.cur_dep = Some(dep);
+                    self.cur_expr.dep = Some(dep);
                 }
-                self.cur_pair_dep = None;
+                self.cur_expr.pair_dep = None;
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Pair(x, y) => {
-                self.cur_exp = Value::Pair(-x, -y);
-                self.cur_dep = None;
-                if let Some((mut dx, mut dy)) = self.cur_pair_dep.take() {
+                self.cur_expr.exp = Value::Pair(-x, -y);
+                self.cur_expr.dep = None;
+                if let Some((mut dx, mut dy)) = self.cur_expr.pair_dep.take() {
                     crate::equation::dep_scale(&mut dx, -1.0);
                     crate::equation::dep_scale(&mut dy, -1.0);
-                    self.cur_pair_dep = Some((dx, dy));
+                    self.cur_expr.pair_dep = Some((dx, dy));
                 }
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             Value::Color(c) => {
-                self.cur_exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
-                self.cur_dep = None;
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
+                self.cur_expr.dep = None;
+                self.cur_expr.pair_dep = None;
                 self.last_lhs_binding = self.last_lhs_binding.as_ref().and_then(negate_binding);
             }
             _ => {
@@ -367,60 +400,60 @@ impl Interpreter {
 
         match self.variables.get(var_id).clone() {
             VarValue::Known(v) => {
-                self.cur_exp = v.clone();
-                self.cur_type = v.ty();
-                self.cur_dep = match &v {
+                self.cur_expr.exp = v.clone();
+                self.cur_expr.ty = v.ty();
+                self.cur_expr.dep = match &v {
                     Value::Numeric(n) => Some(const_dep(*n)),
                     _ => None,
                 };
-                self.cur_pair_dep = if let Value::Pair(x, y) = &v {
+                self.cur_expr.pair_dep = if let Value::Pair(x, y) = &v {
                     Some((const_dep(*x), const_dep(*y)))
                 } else {
                     None
                 };
             }
             VarValue::NumericVar(NumericState::Known(v)) => {
-                self.cur_exp = Value::Numeric(v);
-                self.cur_type = Type::Known;
-                self.cur_dep = Some(const_dep(v));
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Numeric(v);
+                self.cur_expr.ty = Type::Known;
+                self.cur_expr.dep = Some(const_dep(v));
+                self.cur_expr.pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Independent { .. }) => {
-                self.cur_exp = Value::Numeric(0.0);
-                self.cur_type = Type::Independent;
-                self.cur_dep = Some(single_dep(var_id));
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Numeric(0.0);
+                self.cur_expr.ty = Type::Independent;
+                self.cur_expr.dep = Some(single_dep(var_id));
+                self.cur_expr.pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Dependent(dep)) => {
-                self.cur_exp = Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0));
-                self.cur_type = Type::Dependent;
-                self.cur_dep = Some(dep);
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0));
+                self.cur_expr.ty = Type::Dependent;
+                self.cur_expr.dep = Some(dep);
+                self.cur_expr.pair_dep = None;
             }
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
                 self.variables.make_independent(var_id);
-                self.cur_exp = Value::Numeric(0.0);
-                self.cur_type = Type::Independent;
-                self.cur_dep = Some(single_dep(var_id));
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Numeric(0.0);
+                self.cur_expr.ty = Type::Independent;
+                self.cur_expr.dep = Some(single_dep(var_id));
+                self.cur_expr.pair_dep = None;
             }
             VarValue::Pair { x, y } => {
                 let xv = self.variables.known_value(x).unwrap_or(0.0);
                 let yv = self.variables.known_value(y).unwrap_or(0.0);
-                self.cur_exp = Value::Pair(xv, yv);
-                self.cur_type = Type::PairType;
-                self.cur_dep = None;
-                self.cur_pair_dep = Some((self.numeric_dep_for_var(x), self.numeric_dep_for_var(y)));
+                self.cur_expr.exp = Value::Pair(xv, yv);
+                self.cur_expr.ty = Type::PairType;
+                self.cur_expr.dep = None;
+                self.cur_expr.pair_dep = Some((self.numeric_dep_for_var(x), self.numeric_dep_for_var(y)));
             }
             VarValue::Color { r, g, b } => {
                 let rv = self.variables.known_value(r).unwrap_or(0.0);
                 let gv = self.variables.known_value(g).unwrap_or(0.0);
                 let bv = self.variables.known_value(b).unwrap_or(0.0);
-                self.cur_exp = Value::Color(Color::new(rv, gv, bv));
-                self.cur_type = Type::ColorType;
-                self.cur_dep = None;
-                self.cur_pair_dep = None;
+                self.cur_expr.exp = Value::Color(Color::new(rv, gv, bv));
+                self.cur_expr.ty = Type::ColorType;
+                self.cur_expr.dep = None;
+                self.cur_expr.pair_dep = None;
             }
             VarValue::Transform {
                 tx,
@@ -432,7 +465,7 @@ impl Interpreter {
             } => {
                 let parts = [tx, ty, txx, txy, tyx, tyy]
                     .map(|id| self.variables.known_value(id).unwrap_or(0.0));
-                self.cur_exp = Value::Transform(Transform {
+                self.cur_expr.exp = Value::Transform(Transform {
                     tx: parts[0],
                     ty: parts[1],
                     txx: parts[2],
@@ -440,9 +473,9 @@ impl Interpreter {
                     tyx: parts[4],
                     tyy: parts[5],
                 });
-                self.cur_type = Type::TransformType;
-                self.cur_dep = None;
-                self.cur_pair_dep = None;
+                self.cur_expr.ty = Type::TransformType;
+                self.cur_expr.dep = None;
+                self.cur_expr.pair_dep = None;
             }
         }
         let _ = sym; // Used later for equation LHS tracking
@@ -1513,16 +1546,16 @@ mod tests {
         // Push source first (it goes on the bottom of the stack)
         interp.input.push_source(";");
         // Set up a capsule with a pair value
-        interp.cur_exp = Value::Pair(5.0, 10.0);
-        interp.cur_type = Type::PairType;
+        interp.cur_expr.exp = Value::Pair(5.0, 10.0);
+        interp.cur_expr.ty = Type::PairType;
         // Push it back — this goes on top of the source
         interp.back_expr();
         // Now get_x_next reads from the capsule token list (top of stack)
         interp.get_x_next();
         assert_eq!(interp.cur.command, Command::CapsuleToken);
         interp.scan_primary().unwrap();
-        assert_eq!(interp.cur_type, Type::PairType);
-        assert_eq!(interp.cur_exp.as_pair(), Some((5.0, 10.0)));
+        assert_eq!(interp.cur_expr.ty, Type::PairType);
+        assert_eq!(interp.cur_expr.exp.as_pair(), Some((5.0, 10.0)));
     }
 
     #[test]
@@ -1532,13 +1565,13 @@ mod tests {
         // Push source first (bottom of stack)
         interp.input.push_source("+ 3;");
         // Then push capsule (top of stack)
-        interp.cur_exp = Value::Numeric(7.0);
-        interp.cur_type = Type::Known;
+        interp.cur_expr.exp = Value::Numeric(7.0);
+        interp.cur_expr.ty = Type::Known;
         interp.back_expr();
         interp.get_x_next();
         interp.scan_expression().unwrap();
         // Should evaluate to 7 + 3 = 10
-        assert_eq!(interp.cur_exp, Value::Numeric(10.0));
+        assert_eq!(interp.cur_expr.exp, Value::Numeric(10.0));
     }
 
     // -----------------------------------------------------------------------
@@ -3160,6 +3193,6 @@ mod tests {
         interp.input.push_source("3 + 4;");
         interp.get_x_next();
         interp.scan_expression().unwrap();
-        assert_eq!(interp.cur_exp, Value::Numeric(7.0));
+        assert_eq!(interp.cur_expr.exp, Value::Numeric(7.0));
     }
 }

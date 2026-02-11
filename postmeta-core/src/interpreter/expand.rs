@@ -29,6 +29,30 @@ pub(super) enum IfState {
     Skipping,
 }
 
+/// Groups all conditional and loop control state.
+///
+/// Extracted from `Interpreter` to reduce the top-level field count.
+/// Only accessed by the expansion code in this module.
+#[derive(Debug)]
+pub(super) struct ControlFlow {
+    /// If-stack depth tracking for nested conditionals.
+    pub if_stack: Vec<IfState>,
+    /// Flag set by `exitif` to signal that the current loop should terminate.
+    pub loop_exit: bool,
+    /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
+    pub pending_loop_body: Option<TokenList>,
+}
+
+impl ControlFlow {
+    pub const fn new() -> Self {
+        Self {
+            if_stack: Vec::new(),
+            loop_exit: false,
+            pending_loop_body: None,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Macro definitions
 // ---------------------------------------------------------------------------
@@ -117,7 +141,7 @@ impl Interpreter {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
         let condition = if self.scan_expression().is_ok() {
-            match &self.cur_exp {
+            match &self.cur_expr.exp {
                 Value::Boolean(b) => *b,
                 Value::Numeric(v) => *v != 0.0,
                 _ => {
@@ -135,11 +159,11 @@ impl Interpreter {
         }
 
         if condition {
-            self.if_stack.push(IfState::Active);
+            self.control_flow.if_stack.push(IfState::Active);
             // `cur` is now the first token of the true branch — expand it
             self.expand_current();
         } else {
-            self.if_stack.push(IfState::Skipping);
+            self.control_flow.if_stack.push(IfState::Skipping);
             // Skip tokens until else/elseif/fi. On return, `cur` is set.
             self.skip_to_fi_or_else();
         }
@@ -152,12 +176,12 @@ impl Interpreter {
         let modifier = self.cur.modifier;
         if modifier == FiOrElseOp::Fi as u16 {
             // End of conditional
-            self.if_stack.pop();
+            self.control_flow.if_stack.pop();
             self.get_next();
             self.expand_current();
         } else if modifier == FiOrElseOp::Else as u16 || modifier == FiOrElseOp::ElseIf as u16 {
             // Active branch done — skip remaining branches to `fi`.
-            if let Some(state) = self.if_stack.last_mut() {
+            if let Some(state) = self.control_flow.if_stack.last_mut() {
                 *state = IfState::Done;
             }
             self.skip_to_fi();
@@ -185,12 +209,12 @@ impl Interpreter {
                 Command::FiOrElse if depth == 0 => {
                     let modifier = self.cur.modifier;
                     if modifier == FiOrElseOp::Fi as u16 {
-                        self.if_stack.pop();
+                        self.control_flow.if_stack.pop();
                         self.get_next();
                         self.expand_current();
                         return;
                     } else if modifier == FiOrElseOp::Else as u16 {
-                        if let Some(state) = self.if_stack.last_mut() {
+                        if let Some(state) = self.control_flow.if_stack.last_mut() {
                             *state = IfState::Active;
                         }
                         self.get_next(); // consume `else`
@@ -201,7 +225,7 @@ impl Interpreter {
                         self.expand_current();
                         return;
                     } else if modifier == FiOrElseOp::ElseIf as u16 {
-                        self.if_stack.pop();
+                        self.control_flow.if_stack.pop();
                         // Process the new `elseif` as an `if`
                         self.expand_if();
                         return;
@@ -232,7 +256,7 @@ impl Interpreter {
                 Command::FiOrElse => {
                     if self.cur.modifier == FiOrElseOp::Fi as u16 {
                         if depth == 0 {
-                            self.if_stack.pop();
+                            self.control_flow.if_stack.pop();
                             self.get_next();
                             self.expand_current();
                             return;
@@ -344,7 +368,7 @@ impl Interpreter {
         let body = self.scan_loop_body();
 
         // Store the body in the interpreter for re-pushing on RepeatLoop
-        self.pending_loop_body = Some(body.clone());
+        self.control_flow.pending_loop_body = Some(body.clone());
 
         // Push the first iteration with a RepeatLoop sentinel at the end
         let mut iteration = body;
@@ -370,24 +394,24 @@ impl Interpreter {
     ///
     /// Re-pushes the loop body for the next iteration, or stops if `exitif` fired.
     fn expand_repeat_loop(&mut self) {
-        if self.loop_exit {
+        if self.control_flow.loop_exit {
             // Exit was requested — consume the sentinel and stop looping
-            self.pending_loop_body = None;
-            self.loop_exit = false;
+            self.control_flow.pending_loop_body = None;
+            self.control_flow.loop_exit = false;
             self.get_next();
             self.expand_current();
             return;
         }
 
         // Re-push the body for the next iteration
-        if let Some(ref body) = self.pending_loop_body.clone() {
+        if let Some(ref body) = self.control_flow.pending_loop_body.clone() {
             let repeat_sym = self.symbols.lookup("__repeat_loop__");
             let mut iteration = body.clone();
             iteration.push(StoredToken::Symbol(repeat_sym));
             self.input
                 .push_token_list(iteration, Vec::new(), "forever-body".into());
         } else {
-            self.pending_loop_body = None;
+            self.control_flow.pending_loop_body = None;
         }
 
         self.get_next();
@@ -607,7 +631,7 @@ impl Interpreter {
     fn expand_exitif(&mut self) {
         self.get_x_next(); // skip `exitif`
         let should_exit = if self.scan_expression().is_ok() {
-            match &self.cur_exp {
+            match &self.cur_expr.exp {
                 Value::Boolean(b) => *b,
                 Value::Numeric(v) => *v != 0.0,
                 _ => {
@@ -623,7 +647,7 @@ impl Interpreter {
         // any RepeatLoop sentinel encountered during expand_current
         // will see the exit request.
         if should_exit {
-            self.loop_exit = true;
+            self.control_flow.loop_exit = true;
         }
 
         // Expect `;` after the condition
@@ -1403,8 +1427,8 @@ impl Interpreter {
 
         // Push a string capsule — `thelabel` will call `s infont defaultfont`
         // to convert to a picture.
-        self.cur_exp = Value::String(text);
-        self.cur_type = crate::types::Type::String;
+        self.cur_expr.exp = Value::String(text);
+        self.cur_expr.ty = crate::types::Type::String;
         self.back_expr();
 
         // Advance past the capsule and continue expansion.
@@ -1438,7 +1462,7 @@ impl Interpreter {
 
         // Scan the string expression
         if self.scan_primary().is_ok() {
-            if let Value::String(ref s) = self.cur_exp {
+            if let Value::String(ref s) = self.cur_expr.exp {
                 let source = s.to_string();
 
                 // Save the token that terminated scan_primary (mp.web's
