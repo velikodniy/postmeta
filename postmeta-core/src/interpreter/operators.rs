@@ -26,7 +26,7 @@ use super::helpers::{
     value_to_bool, value_to_pair, value_to_path, value_to_pen, value_to_scalar, value_to_string,
     value_to_transform, values_equal,
 };
-use super::Interpreter;
+use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Execute a nullary operator.
@@ -651,6 +651,11 @@ impl Interpreter {
     // =======================================================================
 
     /// Extract a part from a pair or transform.
+    ///
+    /// When the operand has a pair dependency list (i.e. the pair variable
+    /// is not fully known), the extracted component's dependency is
+    /// propagated to `cur_dep` / `last_lhs_binding` so that it can
+    /// participate in linear equation solving (e.g. `xpart A = 0`).
     fn extract_part(&mut self, part: usize) -> InterpResult<()> {
         match &self.cur_exp {
             Value::Pair(x, y) => {
@@ -665,7 +670,22 @@ impl Interpreter {
                     }
                 };
                 self.cur_exp = Value::Numeric(v);
-                self.cur_type = Type::Known;
+                // Propagate the component's dependency so equations work.
+                if let Some((dx, dy)) = self.cur_pair_dep.take() {
+                    let dep = if part == 0 { dx } else { dy };
+                    // Extract the primary VarId from the dep for LHS binding.
+                    let primary_var = dep.iter().find_map(|t| t.var_id);
+                    if let Some(vid) = primary_var {
+                        self.last_lhs_binding = Some(LhsBinding::Variable {
+                            id: vid,
+                            negated: false,
+                        });
+                    }
+                    self.cur_dep = Some(dep);
+                    self.cur_type = Type::Dependent;
+                } else {
+                    self.cur_type = Type::Known;
+                }
             }
             Value::Transform(t) => {
                 let v = match part {

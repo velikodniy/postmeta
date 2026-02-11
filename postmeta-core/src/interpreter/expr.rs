@@ -98,7 +98,13 @@ impl Interpreter {
                 self.get_x_next();
                 self.scan_primary()?;
                 self.do_unary(op)?;
-                self.cur_dep = None;
+                // Part-extraction ops (xpart, ypart, etc.) set up cur_dep
+                // themselves for equation solving; don't clear it for those.
+                // For all other unary ops the result is a known scalar,
+                // so any stale dep must be dropped.
+                if self.cur_pair_dep.is_none() && self.cur_type == Type::Known {
+                    self.cur_dep = None;
+                }
                 Ok(())
             }
 
