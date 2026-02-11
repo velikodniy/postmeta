@@ -3379,6 +3379,39 @@ mod tests {
     // Equation solving with transitive dependencies
 
     #[test]
+    fn nonlinear_equation_does_not_assign_bindable_lhs() {
+        // Regression: nonlinear equations like `z = x*y` must not silently
+        // degrade into assignment (`z := 0`) when dependency tracking is absent.
+        let mut interp = Interpreter::new();
+        interp.run("numeric x, y, z; z = x*y;").unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|e| {
+                e.kind == crate::error::ErrorKind::IncompatibleTypes
+                    && e.message.contains("Nonlinear equation")
+            }),
+            "expected nonlinear-equation diagnostic, got: {errors:?}"
+        );
+
+        let z_id = interp
+            .variables
+            .lookup_existing("z")
+            .expect("z should exist after declaration");
+        assert!(
+            !matches!(
+                interp.variables.get(z_id),
+                crate::variables::VarValue::NumericVar(crate::variables::NumericState::Known(_))
+            ),
+            "nonlinear equation must not force z to known value"
+        );
+    }
+
+    #[test]
     fn transitive_equations_solve_correctly() {
         // x + y = 5; y + z = 7; x = 1 => y = 4, z = 3
         let mut interp = Interpreter::new();

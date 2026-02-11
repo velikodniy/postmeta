@@ -94,16 +94,16 @@ impl Interpreter {
             return Ok(());
         }
 
-        if let (Some(ld), Some(rd)) = (lhs_dep, rhs_dep) {
+        if let (Some(ld), Some(rd)) = (lhs_dep.as_ref(), rhs_dep.as_ref()) {
             if lhs_binding.is_some()
-                && crate::equation::is_constant(&ld)
-                && crate::equation::is_constant(&rd)
+                && crate::equation::is_constant(ld)
+                && crate::equation::is_constant(rd)
             {
                 self.assign_binding(lhs_binding, rhs)?;
                 return Ok(());
             }
 
-            let equation_dep = self.reduce_dep_with_knowns(dep_add_scaled(&ld, &rd, -1.0));
+            let equation_dep = self.reduce_dep_with_knowns(dep_add_scaled(ld, rd, -1.0));
             match solve_equation(&equation_dep) {
                 SolveResult::Solved { var_id, dep } => {
                     self.variables.apply_linear_solution(var_id, &dep);
@@ -121,6 +121,20 @@ impl Interpreter {
         }
 
         if lhs_binding.is_some() {
+            // `=` is an equation, not assignment. If numeric dependency
+            // information is missing here, the equation is nonlinear (or
+            // otherwise not representable by the linear solver) and must not
+            // silently assign the left-hand side.
+            if matches!((lhs, rhs), (Value::Numeric(_), Value::Numeric(_)))
+                && (lhs_dep.is_none() || rhs_dep.is_none())
+            {
+                self.report_error(
+                    ErrorKind::IncompatibleTypes,
+                    "Nonlinear equation cannot be solved; use `:=` for assignment",
+                );
+                return Ok(());
+            }
+
             self.assign_binding(lhs_binding, rhs)?;
             return Ok(());
         }
