@@ -670,7 +670,11 @@ impl Interpreter {
         // any RepeatLoop sentinel encountered during expand_current
         // will see the exit request.
         if should_exit {
-            self.control_flow.loop_exit = true;
+            if self.control_flow.pending_loop_body.is_some() {
+                self.control_flow.loop_exit = true;
+            } else {
+                self.report_error(ErrorKind::BadExitIf, "No loop is in progress");
+            }
         }
 
         // Expect `;` after the condition

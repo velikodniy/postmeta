@@ -910,6 +910,56 @@ mod tests {
     }
 
     #[test]
+    fn exitif_outside_loop_reports_error() {
+        let mut interp = Interpreter::new();
+        interp.run("exitif true;").unwrap();
+
+        let errs: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errs.iter().any(|e| e.kind == crate::error::ErrorKind::BadExitIf),
+            "expected BadExitIf, got: {errs:?}"
+        );
+    }
+
+    #[test]
+    fn exitif_outside_loop_does_not_leak_into_future_forever() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric n; n := 0;\n",
+                "exitif true;\n",
+                "forever: n := n + 1; exitif n = 2; endfor;\n",
+                "show n;\n",
+            ))
+            .unwrap();
+
+        let errs: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errs.iter().any(|e| e.kind == crate::error::ErrorKind::BadExitIf),
+            "expected BadExitIf from top-level exitif, got: {errs:?}"
+        );
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains('2')),
+            "expected loop to reach n=2, got infos: {infos:?}"
+        );
+    }
+
+    #[test]
     fn eval_xpart_ypart_pair() {
         let mut interp = Interpreter::new();
         interp.run("show xpart (3, 7);").unwrap();
