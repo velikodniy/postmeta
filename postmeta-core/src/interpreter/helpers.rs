@@ -92,7 +92,7 @@ pub(super) fn value_to_transform(val: &Value) -> InterpResult<Transform> {
 /// Convert a runtime `Value` to a `StoredToken` for embedding in token lists.
 pub(super) fn value_to_stored_token(val: &Value) -> StoredToken {
     match val {
-        Value::Numeric(v) => StoredToken::Numeric(*v),
+        Value::Numeric(_) => StoredToken::Capsule(val.clone(), Type::Known),
         Value::String(s) => StoredToken::StringLit(s.to_string()),
         Value::Boolean(_) => StoredToken::Capsule(val.clone(), Type::Boolean),
         Value::Pair(..) => StoredToken::Capsule(val.clone(), Type::PairType),

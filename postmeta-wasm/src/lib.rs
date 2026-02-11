@@ -6,15 +6,16 @@ use postmeta_svg::{render_with_options, RenderOptions};
 use wasm_bindgen::prelude::*;
 
 const PLAIN_MP: &str = include_str!("../../lib/plain.mp");
+const BOXES_MP: &str = include_str!("../../lib/boxes.mp");
 
 struct EmbeddedFileSystem;
 
 impl FileSystem for EmbeddedFileSystem {
     fn read_file(&self, name: &str) -> Option<String> {
-        if name == "plain" || name == "plain.mp" {
-            Some(PLAIN_MP.to_owned())
-        } else {
-            None
+        match name {
+            "plain" | "plain.mp" => Some(PLAIN_MP.to_owned()),
+            "boxes" | "boxes.mp" => Some(BOXES_MP.to_owned()),
+            _ => None,
         }
     }
 }

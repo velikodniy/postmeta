@@ -348,6 +348,7 @@ pub enum PrimaryBinaryOp {
     SubpathOf = 89,
     DirectionTimeOf = 90,
     ArcTimeOf = 91,
+    SubstringOf = 115,
 }
 
 /// Operation codes for [`Command::SecondaryBinary`].
@@ -389,7 +390,6 @@ pub enum ExpressionBinaryOp {
     UnequalTo = 111,
     Concatenate = 112,
     IntersectionTimes = 113,
-    SubstringOf = 114,
 }
 
 /// Operation codes for [`Command::PlusOrMinus`].
@@ -518,6 +518,8 @@ pub enum TypeNameOp {
     Color = 6,
     Pair = 7,
     Numeric = 8,
+    Known = 9,
+    Unknown = 10,
 }
 
 // ---------------------------------------------------------------------------
@@ -839,6 +841,16 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "numeric",
         command: Command::TypeName,
         modifier: TypeNameOp::Numeric as u16,
+    },
+    Primitive {
+        name: "known",
+        command: Command::TypeName,
+        modifier: TypeNameOp::Known as u16,
+    },
+    Primitive {
+        name: "unknown",
+        command: Command::TypeName,
+        modifier: TypeNameOp::Unknown as u16,
     },
     // -- Delimiters & grouping --
     Primitive {
@@ -1235,8 +1247,8 @@ pub const PRIMITIVES: &[Primitive] = &[
     },
     Primitive {
         name: "substring",
-        command: Command::ExpressionBinary,
-        modifier: ExpressionBinaryOp::SubstringOf as u16,
+        command: Command::PrimaryBinary,
+        modifier: PrimaryBinaryOp::SubstringOf as u16,
     },
     // -- Comparison (use ExpressionBinary) --
     // In MetaPost, < > = are handled specially. The scanner produces symbolic

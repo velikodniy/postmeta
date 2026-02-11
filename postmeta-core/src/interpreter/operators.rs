@@ -316,6 +316,19 @@ impl Interpreter {
                 self.cur_exp = Value::Pair(pt.x, pt.y);
                 self.cur_type = Type::PairType;
             }
+            x if x == PrimaryBinaryOp::SubstringOf as u16 => {
+                let (start, end) = value_to_pair(first)?;
+                let s = value_to_string(second)?;
+                let start_idx = start.round() as usize;
+                let end_idx = end.round().min(s.len() as f64) as usize;
+                let substr = if start_idx < end_idx && start_idx < s.len() {
+                    &s[start_idx..end_idx.min(s.len())]
+                } else {
+                    ""
+                };
+                self.cur_exp = Value::String(Arc::from(substr));
+                self.cur_type = Type::String;
+            }
             _ => {
                 self.report_error(ErrorKind::InvalidExpression, "Unimplemented primary binary");
             }
@@ -572,27 +585,35 @@ impl Interpreter {
 
         match op {
             x if x == ExpressionBinaryOp::LessThan as u16 => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(&right)?;
-                self.cur_exp = Value::Boolean(a < b);
+                let result = match (left, &right) {
+                    (Value::String(a), Value::String(b)) => a < b,
+                    _ => value_to_scalar(left)? < value_to_scalar(&right)?,
+                };
+                self.cur_exp = Value::Boolean(result);
                 self.cur_type = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::LessOrEqual as u16 => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(&right)?;
-                self.cur_exp = Value::Boolean(a <= b);
+                let result = match (left, &right) {
+                    (Value::String(a), Value::String(b)) => a <= b,
+                    _ => value_to_scalar(left)? <= value_to_scalar(&right)?,
+                };
+                self.cur_exp = Value::Boolean(result);
                 self.cur_type = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::GreaterThan as u16 => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(&right)?;
-                self.cur_exp = Value::Boolean(a > b);
+                let result = match (left, &right) {
+                    (Value::String(a), Value::String(b)) => a > b,
+                    _ => value_to_scalar(left)? > value_to_scalar(&right)?,
+                };
+                self.cur_exp = Value::Boolean(result);
                 self.cur_type = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::GreaterOrEqual as u16 => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(&right)?;
-                self.cur_exp = Value::Boolean(a >= b);
+                let result = match (left, &right) {
+                    (Value::String(a), Value::String(b)) => a >= b,
+                    _ => value_to_scalar(left)? >= value_to_scalar(&right)?,
+                };
+                self.cur_exp = Value::Boolean(result);
                 self.cur_type = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::EqualTo as u16 => {
@@ -625,19 +646,6 @@ impl Interpreter {
                     }
                 }
                 self.cur_type = Type::PairType;
-            }
-            x if x == ExpressionBinaryOp::SubstringOf as u16 => {
-                let (start, end) = value_to_pair(left)?;
-                let s = value_to_string(&right)?;
-                let start_idx = start.round() as usize;
-                let end_idx = end.round().min(s.len() as f64) as usize;
-                let substr = if start_idx < end_idx && start_idx < s.len() {
-                    &s[start_idx..end_idx.min(s.len())]
-                } else {
-                    ""
-                };
-                self.cur_exp = Value::String(Arc::from(substr));
-                self.cur_type = Type::String;
             }
             _ => {
                 self.report_error(ErrorKind::InvalidExpression, "Unknown expression binary");
@@ -673,16 +681,22 @@ impl Interpreter {
                 // Propagate the component's dependency so equations work.
                 if let Some((dx, dy)) = self.cur_pair_dep.take() {
                     let dep = if part == 0 { dx } else { dy };
-                    // Extract the primary VarId from the dep for LHS binding.
-                    let primary_var = dep.iter().find_map(|t| t.var_id);
-                    if let Some(vid) = primary_var {
-                        self.last_lhs_binding = Some(LhsBinding::Variable {
-                            id: vid,
-                            negated: false,
-                        });
+                    if crate::equation::is_constant(&dep) {
+                        // Fully known component — no dependency to track.
+                        self.cur_dep = Some(dep);
+                        self.cur_type = Type::Known;
+                    } else {
+                        // Extract the primary VarId from the dep for LHS binding.
+                        let primary_var = dep.iter().find_map(|t| t.var_id);
+                        if let Some(vid) = primary_var {
+                            self.last_lhs_binding = Some(LhsBinding::Variable {
+                                id: vid,
+                                negated: false,
+                            });
+                        }
+                        self.cur_dep = Some(dep);
+                        self.cur_type = Type::Dependent;
                     }
-                    self.cur_dep = Some(dep);
-                    self.cur_type = Type::Dependent;
                 } else {
                     self.cur_type = Type::Known;
                 }

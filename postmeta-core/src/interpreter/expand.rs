@@ -8,6 +8,7 @@
 use crate::command::{Command, FiOrElseOp, IterationOp, MacroDefOp, ParamTypeOp};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{StoredToken, TokenList};
+use crate::symbols::SymbolId;
 use crate::types::Value;
 
 use super::helpers::value_to_stored_tokens;
@@ -75,6 +76,12 @@ impl ParamType {
 pub(super) struct MacroInfo {
     /// Parameter types in order.
     pub(super) params: Vec<ParamType>,
+    /// Delimiter group index for each parameter.  Delimited parameters
+    /// (Expr/Suffix/Text) that share a `(…)` group in the definition get the
+    /// same group number.  Undelimited parameters get `u16::MAX`.
+    /// Used during expansion so that a single `(a, b, c, d)` at the call site
+    /// can span multiple definition groups (mp.web §13242).
+    pub(super) delim_groups: Vec<u16>,
     /// The macro body as a token list.
     pub(super) body: TokenList,
     /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
@@ -102,6 +109,7 @@ impl Interpreter {
                 Command::Input => self.expand_input(),
                 Command::ScanTokens => self.expand_scantokens(),
                 Command::StartTex => self.expand_start_tex(),
+                Command::ExpandAfter => self.expand_expandafter(),
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -267,6 +275,8 @@ impl Interpreter {
             return;
         }
 
+        let is_forsuffixes = op == IterationOp::ForSuffixes as u16;
+
         // Parse: <variable> = <value_list> : <body> endfor
         self.get_next(); // skip `for`/`forsuffixes`
 
@@ -280,6 +290,7 @@ impl Interpreter {
             self.expand_current();
             return;
         };
+        let loop_var_sym = self.symbols.lookup(&loop_var_name);
 
         self.get_next(); // skip the variable name
 
@@ -288,46 +299,36 @@ impl Interpreter {
             self.report_error(ErrorKind::MissingToken, "Expected `=` after loop variable");
         }
 
-        // Parse value list: expr, expr, expr, ..., colon
-        let values = self.scan_loop_value_list();
+        // Parse value list.  For `for` we evaluate expressions.
+        // For `forsuffixes` we collect raw suffix tokens.
+        let value_token_lists: Vec<TokenList> = if is_forsuffixes {
+            self.scan_forsuffixes_value_list()
+        } else {
+            self.scan_loop_value_list()
+                .into_iter()
+                .map(|v| value_to_stored_tokens(&v, &mut self.symbols))
+                .collect()
+        };
 
         // Expect `:` after value list
         if self.cur.command == Command::Colon {
             self.get_next(); // consume the colon
         }
 
-        // Scan the loop body until `endfor`
-        let body = self.scan_loop_body();
+        // Scan the loop body, replacing occurrences of the loop variable
+        // with `Param(0)`.  This mirrors how macro bodies substitute
+        // parameter names, and ensures that `for`/`forsuffixes` work as
+        // token-level substitution (mp.web §13694).
+        let body = self.scan_loop_body_with_param(loop_var_sym);
 
-        // Build a combined token list with all iterations.
-        // For each value, we prepend: `<var> := <value> ;` then the body.
-        let loop_var_sym = self.symbols.lookup(&loop_var_name);
-        let assign_sym = self.symbols.lookup(":=");
-
-        let mut combined = TokenList::new();
-        for val in values.iter().rev() {
-            // Body tokens
-            combined.splice(0..0, body.iter().cloned());
-            // Prepend: <var> := <value> ;
-            // Use value_to_stored_tokens to correctly handle compound types
-            // like pairs `(x,y)` and colors `(r,g,b)`.
-            let value_tokens = value_to_stored_tokens(val, &mut self.symbols);
-            let semicolon_sym = self.symbols.lookup(";");
-            let mut prefix = vec![
-                StoredToken::Symbol(loop_var_sym),
-                StoredToken::Symbol(assign_sym),
-            ];
-            prefix.extend(value_tokens);
-            prefix.push(StoredToken::Symbol(semicolon_sym));
-            combined.splice(0..0, prefix);
-        }
-
-        if !combined.is_empty() {
+        // Push iterations in reverse order so the first is on top.
+        for val_tokens in value_token_lists.into_iter().rev() {
+            let params = vec![val_tokens];
             self.input
-                .push_token_list(combined, Vec::new(), "for-body".into());
+                .push_token_list(body.clone(), params, "for-body".into());
         }
 
-        // Get the next token from the combined body
+        // Get the first token and continue expanding
         self.get_next();
         self.expand_current();
     }
@@ -519,6 +520,85 @@ impl Interpreter {
         }
     }
 
+    /// Scan a loop body, replacing the loop variable symbol with `Param(0)`.
+    ///
+    /// This mirrors macro body scanning: every occurrence of the loop
+    /// variable is replaced with a `StoredToken::Param(0)` so that the
+    /// input system performs token-level substitution at each iteration
+    /// (mp.web §13694).  Nested `for`/`endfor` pairs are tracked to find
+    /// the matching `endfor`.
+    fn scan_loop_body_with_param(&mut self, loop_var: SymbolId) -> TokenList {
+        let mut body = TokenList::new();
+        let mut depth: u32 = 0;
+
+        loop {
+            match self.cur.command {
+                Command::Iteration => {
+                    depth += 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::MacroSpecial if self.cur.modifier == 1 => {
+                    // `endfor`
+                    if depth == 0 {
+                        return body;
+                    }
+                    depth -= 1;
+                    self.store_current_token(&mut body);
+                    self.get_next();
+                }
+                Command::Stop => {
+                    self.report_error(ErrorKind::MissingToken, "Missing `endfor`");
+                    return body;
+                }
+                _ => {
+                    // Replace the loop variable with Param(0)
+                    if self.cur.sym == Some(loop_var) && depth == 0 {
+                        body.push(StoredToken::Param(0));
+                    } else {
+                        self.store_current_token(&mut body);
+                    }
+                    self.get_next();
+                }
+            }
+        }
+    }
+
+    /// Scan the value list for `forsuffixes`.
+    ///
+    /// Unlike `scan_loop_value_list` (which evaluates expressions),
+    /// this collects raw suffix tokens separated by commas until `:`.
+    /// Each suffix value is a token list.
+    fn scan_forsuffixes_value_list(&mut self) -> Vec<TokenList> {
+        let mut values: Vec<TokenList> = Vec::new();
+        self.get_x_next(); // skip `=`
+
+        let mut current = TokenList::new();
+        loop {
+            if self.cur.command == Command::Colon || self.cur.command == Command::Stop {
+                if !current.is_empty() {
+                    values.push(current);
+                }
+                break;
+            }
+            if self.cur.command == Command::Comma {
+                values.push(current);
+                current = TokenList::new();
+                self.get_x_next();
+                continue;
+            }
+            // For `forsuffixes`, the values can be arbitrary tokens
+            // including `scantokens` which should be expanded.
+            if self.cur.command.is_expandable() {
+                self.expand_current();
+                continue;
+            }
+            self.store_current_token(&mut current);
+            self.get_next();
+        }
+        values
+    }
+
     /// Handle `exitif <boolean>;` — set the loop exit flag if condition is true.
     ///
     /// On return, `self.cur` is the first non-expandable token after `exitif`.
@@ -617,21 +697,24 @@ impl Interpreter {
         }
 
         // Scan the body until `enddef`, replacing param names with Param(idx)
-        let mut param_names: Vec<String> = params.iter().map(|(name, _)| name.clone()).collect();
+        let mut param_names: Vec<String> = params.iter().map(|(name, _, _)| name.clone()).collect();
         if has_at_suffix {
             // The `@#` suffix parameter gets the next parameter index
             param_names.push("@#".to_owned());
         }
         let body = self.scan_macro_body(&param_names);
 
-        let mut param_types: Vec<ParamType> = params.into_iter().map(|(_, ty)| ty).collect();
+        let mut param_types: Vec<ParamType> = params.iter().map(|(_, ty, _)| *ty).collect();
+        let mut delim_groups: Vec<u16> = params.iter().map(|(_, _, g)| *g).collect();
         if has_at_suffix {
             param_types.push(ParamType::UndelimitedSuffix);
+            delim_groups.push(u16::MAX);
         }
 
         // Store the macro
         let info = MacroInfo {
             params: param_types,
+            delim_groups,
             body,
             is_vardef,
             has_at_suffix,
@@ -715,9 +798,10 @@ impl Interpreter {
         let param_names = vec![lhs_name, rhs_name];
         let body = self.scan_macro_body(&param_names);
 
-        // Store the macro
+        // Store the macro — binary macros have no delimited groups
         let info = MacroInfo {
             params: vec![ParamType::Expr, ParamType::Expr],
+            delim_groups: vec![u16::MAX, u16::MAX],
             body,
             is_vardef: false,
             has_at_suffix: false,
@@ -747,10 +831,13 @@ impl Interpreter {
 
     /// Scan macro parameter list: `(expr x, suffix s, text t)`.
     ///
-    /// Returns a list of (name, type) pairs. If there are no parentheses,
-    /// returns an empty list (parameterless macro).
-    fn scan_macro_params(&mut self) -> InterpResult<Vec<(String, ParamType)>> {
-        let mut params = Vec::new();
+    /// Returns a list of (name, type, group) tuples. Delimited parameters
+    /// within the same `(…)` share a group number. Undelimited parameters
+    /// get `u16::MAX`. If there are no parentheses, returns an empty list
+    /// (parameterless macro).
+    fn scan_macro_params(&mut self) -> InterpResult<Vec<(String, ParamType, u16)>> {
+        let mut params: Vec<(String, ParamType, u16)> = Vec::new();
+        let mut group_idx: u16 = 0;
 
         // Parse delimited parameters: (expr a, suffix b, text t)
         // Multiple delimited groups are allowed: (expr a)(text t)
@@ -781,7 +868,7 @@ impl Interpreter {
                     };
                     self.get_next(); // skip param name
 
-                    params.push((name, param_type));
+                    params.push((name, param_type, group_idx));
 
                     if self.cur.command == Command::Comma {
                         self.get_next();
@@ -793,6 +880,7 @@ impl Interpreter {
                     }
                 }
             }
+            group_idx += 1;
         }
 
         // Parse undelimited parameters: primary g, expr x, suffix s, text t
@@ -810,7 +898,7 @@ impl Interpreter {
             };
             self.get_next();
 
-            params.push((name, pt));
+            params.push((name, pt, u16::MAX));
 
             // Check for `of <name>` pattern (e.g., `expr t of p`)
             if self.cur.command == Command::OfToken {
@@ -822,7 +910,7 @@ impl Interpreter {
                     String::new()
                 };
                 self.get_next();
-                params.push((of_name, ParamType::UndelimitedSuffix));
+                params.push((of_name, ParamType::UndelimitedSuffix, u16::MAX));
             }
         }
 
@@ -1008,16 +1096,23 @@ impl Interpreter {
         ];
 
         // After scanning the RHS, `self.cur` holds the first token
-        // beyond the operand.  This look-ahead may belong to an outer
-        // input level (e.g. remaining text-parameter tokens).  Append
-        // it to the body token list so it reappears naturally after
-        // the body is consumed, preventing token loss.
-        let mut body = macro_info.body;
-        self.store_current_token(&mut body);
+        // beyond the operand (the look-ahead).  mp.web §15789 uses
+        // `back_input` to push this token back BEFORE the body
+        // expansion so it is naturally read after the body is consumed.
+        //
+        // In our architecture, `back_input` uses a single slot with
+        // highest priority, so we instead push the look-ahead as a
+        // one-token level below the body.
+        let mut saved = TokenList::new();
+        self.store_current_token(&mut saved);
+        if !saved.is_empty() {
+            self.input
+                .push_token_list(saved, Vec::new(), "binary-mac-saved".into());
+        }
 
-        // Push the body (with appended look-ahead) and args
+        // Push the body on top — it will be read before the saved token.
         self.input
-            .push_token_list(body, args, "binary macro".into());
+            .push_token_list(macro_info.body, args, "binary macro".into());
 
         // Get next token from expansion and evaluate the body
         self.get_x_next();
@@ -1118,19 +1213,23 @@ impl Interpreter {
                             }
                             _ => {}
                         }
-                        // Consume comma between delimited args
-                        if self.cur.command == Command::Comma {
-                            self.get_x_next();
-                        }
-                        // Close delimiters if this is the last delimited param
-                        // or the next *regular* param is undelimited.
-                        // Note: the @# suffix (if present) was already collected
-                        // before the regular param loop; do NOT count it here.
+                        // Determine if the next regular param is undelimited.
                         let next_regular_is_undelimited = if i + 1 < regular_param_count {
                             macro_info.params[i + 1].is_undelimited()
                         } else {
                             false
                         };
+                        // After scanning the argument, we see either `,` or `)`.
+                        //
+                        // mp.web §13242: when we see `,` and the NEXT param is
+                        // delimited but in a DIFFERENT group, the comma crosses
+                        // the group boundary — no `)(`  pair is required.  We
+                        // simply consume the comma and stay in_delimiters.
+                        if self.cur.command == Command::Comma {
+                            self.get_x_next();
+                        }
+                        // Close delimiters when we see `)` and either the next
+                        // param is undelimited or this is the last delimited one.
                         if self.cur.command == Command::RightDelimiter
                             && (next_regular_is_undelimited || i + 1 >= regular_param_count)
                         {
@@ -1312,6 +1411,16 @@ impl Interpreter {
     /// Handle `scantokens <string_expr>`.
     ///
     /// Evaluates the string expression and scans it as if it were source input.
+    ///
+    /// mp.web §13039: after `scan_primary` obtains the string, the token
+    /// that terminated the primary (e.g. `;`) is pushed back via
+    /// `back_input`, then the source string is pushed on top.  This
+    /// ensures the terminator is read after the scantokens source is
+    /// exhausted.
+    ///
+    /// In our architecture `back_input` uses a single slot with highest
+    /// priority, so we instead push the saved token as a one-token level
+    /// *below* the source (push it first, then push the source on top).
     fn expand_scantokens(&mut self) {
         self.get_x_next(); // skip `scantokens`, expand
 
@@ -1319,6 +1428,17 @@ impl Interpreter {
         if self.scan_primary().is_ok() {
             if let Value::String(ref s) = self.cur_exp {
                 let source = s.to_string();
+
+                // Save the token that terminated scan_primary (mp.web's
+                // back_input).  Push it as a level below the source so it
+                // is read after the source is exhausted.
+                let mut saved = TokenList::new();
+                self.store_current_token(&mut saved);
+                if !saved.is_empty() {
+                    self.input
+                        .push_token_list(saved, Vec::new(), "scantokens-saved".into());
+                }
+
                 if !source.is_empty() {
                     self.input.push_source(source);
                 }
@@ -1330,5 +1450,310 @@ impl Interpreter {
         // The pushed source will be read by the next get_next
         self.get_next();
         self.expand_current();
+    }
+
+    /// Handle `expandafter`.
+    ///
+    /// mp.web §13032: `expandafter A B` performs ONE expansion step on B,
+    /// then places A in front of B's expansion result.
+    ///
+    /// ```text
+    /// get_t_next;  p := cur_tok;  {read A}
+    /// get_t_next;                 {read B}
+    /// if cur_cmd < min_command then expand else back_input;
+    /// back_list(p);               {push A in front}
+    /// ```
+    ///
+    /// In our architecture each expand handler ends with
+    /// `get_next(); expand_current();`, performing full expansion.
+    /// For expandafter we need exactly one step, so we call a
+    /// push-only variant of the handler that sets up the input stack
+    /// but does **not** read the first result token.  Then we push A
+    /// on top and let `get_next(); expand_current();` do the rest.
+    fn expand_expandafter(&mut self) {
+        self.expand_expandafter_push_only();
+
+        // Read the first result token and continue expanding.
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Convert `self.cur` to a `StoredToken`, if possible.
+    fn resolved_to_stored(&self) -> Option<StoredToken> {
+        match &self.cur.token.kind {
+            crate::token::TokenKind::Symbolic(_) => self.cur.sym.map(StoredToken::Symbol),
+            crate::token::TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
+            crate::token::TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
+            crate::token::TokenKind::Eof => None,
+        }
+    }
+
+    /// Push-only variant of `expand_scantokens` for use by `expandafter`.
+    ///
+    /// Performs the same work as `expand_scantokens` but does NOT call
+    /// `get_next(); expand_current();` at the end.  The expansion result
+    /// (source string) is left on the input stack for the caller to read.
+    fn expand_scantokens_push_only(&mut self) {
+        self.get_x_next(); // skip `scantokens`, expand
+
+        // Scan the string expression
+        if self.scan_primary().is_ok() {
+            if let Value::String(ref s) = self.cur_exp {
+                let source = s.to_string();
+
+                // Save the token that terminated scan_primary.
+                let mut saved = TokenList::new();
+                self.store_current_token(&mut saved);
+                if !saved.is_empty() {
+                    self.input
+                        .push_token_list(saved, Vec::new(), "scantokens-saved".into());
+                }
+
+                if !source.is_empty() {
+                    self.input.push_source(source);
+                }
+            } else {
+                self.report_error(ErrorKind::TypeError, "scantokens requires a string");
+            }
+        }
+        // Do NOT call get_next/expand_current — caller handles continuation.
+    }
+
+    /// Push-only variant of `expand_defined_macro` for use by `expandafter`.
+    ///
+    /// Performs the same work as `expand_defined_macro` (scans arguments,
+    /// pushes body with parameter bindings) but does NOT call
+    /// `get_next(); expand_current();` at the end.  The body expansion
+    /// is left on the input stack for the caller to read.
+    fn expand_defined_macro_push_only(&mut self) {
+        let Some(macro_sym) = self.cur.sym else {
+            self.report_error(ErrorKind::Internal, "DefinedMacro without symbol");
+            return;
+        };
+
+        let Some(macro_info) = self.macros.get(&macro_sym).cloned() else {
+            self.report_error(ErrorKind::Internal, "Undefined macro expansion");
+            return;
+        };
+
+        // Scan arguments — same logic as expand_defined_macro
+        let mut args: Vec<TokenList> = Vec::new();
+
+        if !macro_info.params.is_empty() {
+            self.get_x_next();
+
+            let at_suffix_arg = if macro_info.has_at_suffix {
+                Some(self.scan_suffix_arg())
+            } else {
+                None
+            };
+
+            let mut in_delimiters = false;
+            let regular_param_count = if macro_info.has_at_suffix {
+                macro_info.params.len() - 1
+            } else {
+                macro_info.params.len()
+            };
+
+            for i in 0..regular_param_count {
+                let param_type = &macro_info.params[i];
+                match param_type {
+                    ParamType::Expr | ParamType::Suffix | ParamType::Text => {
+                        if !in_delimiters && self.cur.command == Command::LeftDelimiter {
+                            self.get_x_next();
+                            in_delimiters = true;
+                        }
+                        match param_type {
+                            ParamType::Expr => {
+                                if self.scan_expression().is_ok() {
+                                    let val = self.take_cur_exp();
+                                    args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                                } else {
+                                    args.push(Vec::new());
+                                }
+                            }
+                            ParamType::Suffix => {
+                                args.push(self.scan_suffix_arg());
+                            }
+                            ParamType::Text => {
+                                args.push(self.scan_text_arg(i, &macro_info.params));
+                            }
+                            _ => {}
+                        }
+                        let next_regular_is_undelimited = if i + 1 < regular_param_count {
+                            macro_info.params[i + 1].is_undelimited()
+                        } else {
+                            false
+                        };
+                        if self.cur.command == Command::Comma {
+                            self.get_x_next();
+                        }
+                        if self.cur.command == Command::RightDelimiter
+                            && (next_regular_is_undelimited || i + 1 >= regular_param_count)
+                        {
+                            if next_regular_is_undelimited {
+                                self.get_x_next();
+                            }
+                            in_delimiters = false;
+                        }
+                    }
+                    ParamType::Primary => {
+                        self.scan_primary().ok();
+                        let val = self.take_cur_exp();
+                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                    }
+                    ParamType::Secondary => {
+                        self.scan_secondary().ok();
+                        let val = self.take_cur_exp();
+                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                    }
+                    ParamType::Tertiary => {
+                        self.scan_tertiary().ok();
+                        let val = self.take_cur_exp();
+                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                    }
+                    ParamType::UndelimitedExpr => {
+                        self.scan_expression().ok();
+                        let val = self.take_cur_exp();
+                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                    }
+                    ParamType::UndelimitedSuffix => {
+                        args.push(self.scan_suffix_arg());
+                    }
+                    ParamType::UndelimitedText => {
+                        let mut text_tokens = TokenList::new();
+                        while self.cur.command != Command::Semicolon
+                            && self.cur.command != Command::Stop
+                        {
+                            self.store_current_token(&mut text_tokens);
+                            self.get_next();
+                        }
+                        args.push(text_tokens);
+                    }
+                }
+            }
+
+            if let Some(suffix_arg) = at_suffix_arg {
+                args.push(suffix_arg);
+            }
+        }
+
+        // Push trailing token for undelimited last param
+        let last_regular_param = if macro_info.has_at_suffix {
+            macro_info.params.iter().rev().nth(1).copied()
+        } else {
+            macro_info.params.last().copied()
+        };
+        let last_param_undelimited = last_regular_param.is_some_and(ParamType::is_undelimited);
+        if last_param_undelimited {
+            let mut trailing = TokenList::new();
+            self.store_current_token(&mut trailing);
+            if !trailing.is_empty() {
+                self.input
+                    .push_token_list(trailing, Vec::new(), "trailing token".into());
+            }
+        }
+
+        // Build the expansion token list
+        let mut expansion = macro_info.body.clone();
+
+        if macro_info.is_vardef {
+            let bg = self.symbols.lookup("begingroup");
+            let eg = self.symbols.lookup("endgroup");
+            expansion.insert(0, StoredToken::Symbol(bg));
+            expansion.push(StoredToken::Symbol(eg));
+        }
+
+        // Push the body expansion on top
+        self.input
+            .push_token_list(expansion, args, "macro expansion".into());
+
+        // Do NOT call get_next/expand_current — caller handles continuation.
+    }
+
+    /// Push-only variant of `expand_expandafter`.
+    ///
+    /// Performs the full expandafter logic (read A, read B, one-step expand B,
+    /// push A in front) but does NOT call `get_next(); expand_current()` at
+    /// the end.  Used by `expand_one_step` for nested expandafter chains.
+    fn expand_expandafter_push_only(&mut self) {
+        // Read token A without expanding.
+        self.get_next();
+        let saved_a: TokenList = std::iter::once_with(|| self.resolved_to_stored())
+            .flatten()
+            .collect();
+
+        // Read token B without expanding.
+        self.get_next();
+
+        if self.cur.command.is_expandable() {
+            // Perform ONE expansion step for B.
+            self.expand_one_step();
+        } else {
+            // B is not expandable — push it back.
+            let mut saved_b = TokenList::new();
+            self.store_current_token(&mut saved_b);
+            if !saved_b.is_empty() {
+                self.input
+                    .push_token_list(saved_b, Vec::new(), "expandafter-b".into());
+            }
+        }
+
+        // Push A in front of whatever B produced.
+        if !saved_a.is_empty() {
+            self.input
+                .push_token_list(saved_a, Vec::new(), "expandafter-a".into());
+        }
+
+        // Do NOT call get_next/expand_current — caller handles continuation.
+    }
+
+    /// Perform exactly one expansion step for the token in `self.cur`.
+    ///
+    /// This dispatches to a push-only variant of the appropriate handler.
+    /// After this call, the expansion result is on the input stack but
+    /// `self.cur` is stale — the caller must call `get_next()` to read
+    /// the first result token.
+    fn expand_one_step(&mut self) {
+        match self.cur.command {
+            Command::DefinedMacro => self.expand_defined_macro_push_only(),
+            Command::ScanTokens => self.expand_scantokens_push_only(),
+            Command::ExpandAfter => self.expand_expandafter_push_only(),
+            Command::IfTest => {
+                // For conditionals, full expansion is the only sensible
+                // one-step behaviour: evaluate the condition and enter
+                // the correct branch.
+                self.expand_if();
+                // expand_if left self.cur at the first token of the
+                // branch — push it back so the caller can re-read it.
+                let mut saved = TokenList::new();
+                self.store_current_token(&mut saved);
+                if !saved.is_empty() {
+                    self.input
+                        .push_token_list(saved, Vec::new(), "expandafter-if".into());
+                }
+            }
+            Command::Input => {
+                self.expand_input();
+                let mut saved = TokenList::new();
+                self.store_current_token(&mut saved);
+                if !saved.is_empty() {
+                    self.input
+                        .push_token_list(saved, Vec::new(), "expandafter-input".into());
+                }
+            }
+            _ => {
+                // For other expandable commands (iteration, exitif,
+                // repeat_loop, etc.), fall back to full expansion and
+                // push the result back.
+                self.expand_current();
+                let mut saved = TokenList::new();
+                self.store_current_token(&mut saved);
+                if !saved.is_empty() {
+                    self.input
+                        .push_token_list(saved, Vec::new(), "expandafter-other".into());
+                }
+            }
+        }
     }
 }

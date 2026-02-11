@@ -92,6 +92,11 @@ pub struct Interpreter {
     /// Loop nesting depth (for `exitif` to know which loop to break from).
     #[allow(dead_code)]
     loop_depth: u32,
+    /// When true, `=` in `scan_expression` is treated as an equation
+    /// delimiter (not consumed). Set before calling `scan_expression` from
+    /// statement context; cleared inside `scan_expression` on entry.
+    /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
+    equals_means_equation: bool,
     /// Flag set by `exitif` to signal that the current loop should terminate.
     loop_exit: bool,
     /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
@@ -173,6 +178,7 @@ impl Interpreter {
             last_lhs_binding: None,
             if_stack: Vec::new(),
             loop_depth: 0,
+            equals_means_equation: false,
             loop_exit: false,
             pending_loop_body: None,
             macros: std::collections::HashMap::new(),
@@ -454,7 +460,8 @@ impl Interpreter {
 
     /// Record a non-fatal error.
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
-        self.errors.push(InterpreterError::new(kind, message));
+        let msg = message.into();
+        self.errors.push(InterpreterError::new(kind, msg));
     }
 
     // =======================================================================
@@ -902,6 +909,148 @@ mod tests {
             show_msg.is_some() && show_msg.unwrap().contains("99"),
             "expected show 99, got: {:?}",
             interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn expandafter_text_macro_scantokens() {
+        // expandafter mymac scantokens "abc"; should NOT consume the
+        // statement after it.  The `;` terminates the text parameter,
+        // and `message "B"` must still execute.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "def mymac text t = message \"in mymac\"; enddef;\n",
+                "message \"A\";\n",
+                "expandafter mymac scantokens \"abc\";\n",
+                "message \"B\";\n",
+                "message \"C\";\n",
+                "end\n",
+            ))
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(
+            msgs,
+            vec!["A", "in mymac", "B", "C"],
+            "expandafter consumed a following statement: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn expandafter_simple_token() {
+        // expandafter with a non-expandable B should just reorder.
+        let mut interp = Interpreter::new();
+        interp
+            .run("expandafter message \"hello\"; end")
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(msgs, vec!["hello"]);
+    }
+
+    #[test]
+    fn expandafter_triple_redefine_macro() {
+        // The triple-expandafter pattern from boxes.mp:
+        //   expandafter def expandafter clearboxes expandafter =
+        //     clearboxes message "hi";
+        //   enddef;
+        // This should APPEND `message "hi"` to clearboxes' body.
+        // Step by step:
+        //   1. expandafter reads A=`def`, reads B=`expandafter`, B is expandable
+        //   2. Inner expandafter reads A=`clearboxes`, reads B=`expandafter`, B is expandable
+        //   3. Innermost expandafter reads A=`=`, reads B=`clearboxes` (a defined macro)
+        //   4. One-step expand of clearboxes pushes its body (empty at first)
+        //   5. `=` is placed in front → scanner sees `= <old body>`
+        //   6. Back in step 2: `clearboxes` is placed in front → `clearboxes = <old body>`
+        //   7. Back in step 1: `def` is placed in front → `def clearboxes = <old body> message "hi"; enddef;`
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "def clearboxes = enddef;\n",
+                "expandafter def expandafter clearboxes expandafter =\n",
+                "  clearboxes message \"hi\";\n",
+                "enddef;\n",
+                "clearboxes;\n",
+                "end\n",
+            ))
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(
+            msgs,
+            vec!["hi"],
+            "triple expandafter should have appended 'message \"hi\"' to clearboxes: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn expandafter_triple_accumulate() {
+        // Multiple rounds of triple-expandafter accumulation.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "def clearboxes = enddef;\n",
+                "expandafter def expandafter clearboxes expandafter =\n",
+                "  clearboxes message \"A\";\n",
+                "enddef;\n",
+                "expandafter def expandafter clearboxes expandafter =\n",
+                "  clearboxes message \"B\";\n",
+                "enddef;\n",
+                "clearboxes;\n",
+                "end\n",
+            ))
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(
+            msgs,
+            vec!["A", "B"],
+            "triple expandafter should accumulate: {msgs:?}"
+        );
+    }
+
+    #[test]
+    fn known_unknown_operators() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric x;\n",
+                "if unknown x: message \"x unknown\"; fi\n",
+                "x := 5;\n",
+                "if known x: message \"x known\"; fi\n",
+                "pair p;\n",
+                "if unknown xpart p: message \"xpart p unknown\"; fi\n",
+                "p := (1,2);\n",
+                "if known xpart p: message \"xpart p known\"; fi\n",
+                "end\n",
+            ))
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(
+            msgs,
+            vec!["x unknown", "x known", "xpart p unknown", "xpart p known"]
         );
     }
 
@@ -2520,5 +2669,241 @@ mod tests {
             "expected s = hello, got: {}",
             infos[1]
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Substring reclassification (primary binary: substring X of Y)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn substring_of_basic() {
+        // substring (1,3) of "hello" = "el"
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"show substring (1,3) of "hello";"#)
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("el"), "expected 'el' in: {msg}");
+    }
+
+    #[test]
+    fn substring_of_full_range() {
+        // substring (0,5) of "hello" = "hello"
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"show substring (0,5) of "hello";"#)
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("hello"), "expected 'hello' in: {msg}");
+    }
+
+    #[test]
+    fn substring_of_empty() {
+        // substring (2,2) of "hello" = ""
+        let mut interp = Interpreter::new();
+        interp
+            .run(r#"show substring (2,2) of "hello";"#)
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        // Empty string shows as ""
+        assert!(
+            msg.contains("\"\"") || msg.contains(">>  ") || msg.ends_with(">> "),
+            "expected empty string in: {msg}"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Equals-means-equation flag (= as comparison vs equation)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn equals_as_comparison_in_if() {
+        // Inside `if`, `=` should be a comparison, not an equation
+        let mut interp = Interpreter::new();
+        interp
+            .run("if 3 = 3: message \"yes\"; fi")
+            .unwrap();
+        let msgs: Vec<&str> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(msgs, vec!["yes"]);
+    }
+
+    #[test]
+    fn equals_as_comparison_in_exitif() {
+        // `exitif n = 3` — the `=` must be comparison, not equation.
+        // Uses `forever` + `exitif` since `for` pre-pushes all iterations.
+        // `exitif` finishes the current iteration body; loop stops at endfor.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric n, s; n := 0; s := 0;\n",
+                "forever: s := s + 1; n := n + 1; exitif n = 3; endfor;\n",
+                "show n;\n",
+            ))
+            .unwrap();
+        let msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .unwrap_or("");
+        // Loop runs 3 times (n=1,2,3), exits when n=3
+        assert!(msg.contains("3"), "expected 3 in: {msg}");
+    }
+
+    #[test]
+    fn equals_as_equation_in_statement() {
+        // At statement level, `=` should be an equation
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric x; x = 42; show x;")
+            .unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("42"), "expected 42 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Binary macro lookahead fix (tertiarydef in text params)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn tertiarydef_or_in_text_param() {
+        // `or` is a tertiarydef. Using it inside a text parameter of a macro
+        // should not duplicate the closing delimiter.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "tertiarydef a or b = if a: a else: b fi enddef;\n",
+                "def test(text t) = t enddef;\n",
+                "show test(false or true);\n",
+            ))
+            .unwrap();
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+        let msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .unwrap_or("");
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // String comparison operators
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn string_less_than() {
+        let mut interp = Interpreter::new();
+        interp.run(r#"show "a" < "b";"#).unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn string_greater_than() {
+        let mut interp = Interpreter::new();
+        interp.run(r#"show "z" > "a";"#).unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn string_less_equal() {
+        let mut interp = Interpreter::new();
+        interp.run(r#"show "abc" <= "abd";"#).unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn string_greater_equal_same() {
+        let mut interp = Interpreter::new();
+        interp.run(r#"show "abc" >= "abc";"#).unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("true"), "expected true in: {msg}");
+    }
+
+    #[test]
+    fn string_comparison_false() {
+        let mut interp = Interpreter::new();
+        interp.run(r#"show "b" < "a";"#).unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("false"), "expected false in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // For-loop token substitution (for-as-expression)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn for_as_expression_sum() {
+        // `for i=1,2,3: i + endfor 0` should evaluate to 6
+        let mut interp = Interpreter::new();
+        interp
+            .run("show for i=1,2,3: i + endfor 0;")
+            .unwrap();
+        let msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .unwrap_or("");
+        assert!(msg.contains("6"), "expected 6 in: {msg}");
+    }
+
+    #[test]
+    fn forsuffixes_iterates_suffixes() {
+        // forsuffixes should iterate over suffix values
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric a.x, a.y, a.z;\n",
+                "a.x := 10; a.y := 20; a.z := 30;\n",
+                "numeric s; s := 0;\n",
+                "forsuffixes $=x,y,z: s := s + a$; endfor;\n",
+                "show s;\n",
+            ))
+            .unwrap();
+        let msg = interp
+            .errors
+            .iter()
+            .find(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .unwrap_or("");
+        assert!(msg.contains("60"), "expected 60 in: {msg}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Implicit multiplication with capsule tokens in for loops
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn for_loop_implicit_multiplication() {
+        // `for i=0 step 1 until 2: show 72i; endfor`
+        // should produce 0, 72, 144 via implicit multiplication 72*i
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=0 step 1 until 2: show 72i; endfor;")
+            .unwrap();
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 3, "expected 3 show outputs, got: {infos:?}");
+        assert!(infos[0].contains("0"), "expected 0, got: {}", infos[0]);
+        assert!(infos[1].contains("72"), "expected 72, got: {}", infos[1]);
+        assert!(infos[2].contains("144"), "expected 144, got: {}", infos[2]);
     }
 }

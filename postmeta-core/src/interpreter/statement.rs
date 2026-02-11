@@ -67,7 +67,9 @@ impl Interpreter {
             }
 
             _ => {
-                // Expression or equation
+                // Expression or equation — `=` should be treated as an
+                // equation delimiter, not as comparison (mp.web: var_flag = assignment).
+                self.equals_means_equation = true;
                 self.scan_expression()?;
 
                 if self.cur.command == Command::Equals {
@@ -88,6 +90,7 @@ impl Interpreter {
                         let lhs_binding = self.last_lhs_binding.clone();
                         pending_lhs.push((lhs, lhs_binding, lhs_dep, lhs_pair_dep));
                         self.get_x_next();
+                        self.equals_means_equation = true;
                         self.scan_expression()?;
                     }
 
@@ -110,6 +113,7 @@ impl Interpreter {
                     while self.cur.command == Command::Assignment {
                         pending_lhs.push(self.last_lhs_binding.clone());
                         self.get_x_next();
+                        self.equals_means_equation = true;
                         self.scan_expression()?;
                     }
 
@@ -141,9 +145,6 @@ impl Interpreter {
                         && self.cur.command != Command::Stop
                         && self.cur.command != Command::EndGroup
                     {
-                        self.get_x_next();
-                    }
-                    if self.cur.command == Command::Semicolon {
                         self.get_x_next();
                     }
                 }

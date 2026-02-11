@@ -159,12 +159,17 @@ fn read_source(config: &Config) -> String {
 }
 
 fn run_and_output(interp: &mut Interpreter, source: &str, output_dir: &str) {
-    if let Err(e) = interp.run(source) {
+    let run_err = interp.run(source).err();
+
+    // Always print diagnostics (messages, warnings, errors from the program)
+    // even if run() returned an error.
+    print_diagnostics(interp);
+
+    if let Some(e) = run_err {
         eprintln!("Error: {e}");
         process::exit(1);
     }
 
-    print_diagnostics(interp);
     write_output(interp, output_dir);
 }
 

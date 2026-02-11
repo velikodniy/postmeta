@@ -475,6 +475,14 @@ impl Interpreter {
                     x if x == TypeNameOp::Transform as u16 => ty == Type::TransformType,
                     x if x == TypeNameOp::Color as u16 => ty == Type::ColorType,
                     x if x == TypeNameOp::Pair as u16 => ty == Type::PairType,
+                    x if x == TypeNameOp::Known as u16 => {
+                        // mp.web §746: known if cur_type < dependent
+                        (ty as u8) < (Type::Dependent as u8)
+                    }
+                    x if x == TypeNameOp::Unknown as u16 => {
+                        // mp.web §746: unknown if cur_type >= dependent
+                        (ty as u8) >= (Type::Dependent as u8)
+                    }
                     _ => false,
                 };
                 self.cur_exp = Value::Boolean(result);
@@ -976,6 +984,10 @@ impl Interpreter {
     ///
     /// Handles expression-level binary operators and path construction.
     pub fn scan_expression(&mut self) -> InterpResult<()> {
+        // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
+        let equals_is_equation = self.equals_means_equation;
+        self.equals_means_equation = false;
+
         self.scan_tertiary()?;
 
         while self.cur.command.is_expression_op() {
@@ -983,10 +995,24 @@ impl Interpreter {
             let op = self.cur.modifier;
 
             match cmd {
-                Command::Equals => {
-                    // This is either an equation or assignment
-                    // Don't consume here — let the caller handle it
+                Command::Equals if equals_is_equation => {
+                    // In statement context, `=` is an equation/assignment
+                    // delimiter — don't consume it.
                     break;
+                }
+                Command::Equals => {
+                    // In expression context (e.g. exitif, if), `=` is an
+                    // equality comparison producing a boolean.
+                    let left = self.take_cur_exp();
+                    self.get_x_next();
+                    self.scan_tertiary()?;
+                    self.last_lhs_binding = None;
+                    self.do_expression_binary(
+                        ExpressionBinaryOp::EqualTo as u16,
+                        &left,
+                    )?;
+                    self.cur_dep = None;
+                    self.cur_pair_dep = None;
                 }
                 Command::PathJoin => {
                     // Path construction
