@@ -45,6 +45,14 @@ impl Interpreter {
                             }
                         }
                         self.get_x_next();
+                    } else {
+                        // Not a fraction — restore `/` for the secondary
+                        // level to handle as division (mp.web §15371-15374).
+                        self.back_input();
+                        self.cur.command = Command::Slash;
+                        self.cur.modifier =
+                            crate::command::SecondaryBinaryOp::Over as u16;
+                        return Ok(());
                     }
                 }
                 // Implicit multiplication: `3x`, `2bp`, `.5(1,2)`, etc.

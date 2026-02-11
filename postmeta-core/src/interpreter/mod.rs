@@ -521,6 +521,17 @@ mod tests {
     }
 
     #[test]
+    fn division_by_variable() {
+        // Regression: `360/n` was miscomputed as `360*n` because the
+        // fraction check in scan_primary consumed `/` without restoring
+        // it when the denominator was a variable (not a numeric literal).
+        let mut interp = Interpreter::new();
+        interp.run("numeric n; n := 5; show 360/n;").unwrap();
+        let msg = &interp.errors[0].message;
+        assert!(msg.contains("72"), "expected 72 in: {msg}");
+    }
+
+    #[test]
     fn eval_string() {
         let mut interp = Interpreter::new();
         interp.run("show \"hello\";").unwrap();
