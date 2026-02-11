@@ -546,6 +546,22 @@ impl VarTrie {
         leaf.ty = ty;
     }
 
+    /// Return the declared type for an exact variable path.
+    ///
+    /// For collective declarations like `pair A[]`, querying
+    /// `[SuffixSegment::Subscript]` on root `A` returns `Some(PairType)`.
+    #[must_use]
+    pub fn declared_type(&self, root: SymbolId, suffixes: &[SuffixSegment]) -> Option<Type> {
+        let mut node = self.roots.get(&root)?;
+        for seg in suffixes {
+            node = match seg {
+                SuffixSegment::Attr(id) => node.attrs.get(id)?,
+                SuffixSegment::Subscript => node.collective.as_deref()?,
+            };
+        }
+        (node.ty != Type::Undefined).then_some(node.ty)
+    }
+
     /// Check whether extending a variable rooted at `root` with the given
     /// `suffix_id` (a named attribute) would match a declared path.
     ///
@@ -702,6 +718,36 @@ mod tests {
         assert!(matches!(vars.get(pair_id), VarValue::Pair { .. }));
         assert!(matches!(vars.get(x_id), VarValue::Undefined));
         assert!(matches!(vars.get(y_id), VarValue::Undefined));
+    }
+
+    #[test]
+    fn var_trie_declared_type_for_collective_subscript() {
+        let mut trie = VarTrie::new();
+        let mut symbols = crate::symbols::SymbolTable::new();
+        let a = symbols.lookup("A");
+
+        trie.declare(a, &[SuffixSegment::Subscript], Type::PairType);
+
+        assert_eq!(trie.declared_type(a, &[]), None);
+        assert_eq!(
+            trie.declared_type(a, &[SuffixSegment::Subscript]),
+            Some(Type::PairType)
+        );
+    }
+
+    #[test]
+    fn var_trie_declared_type_for_attr_suffix() {
+        let mut trie = VarTrie::new();
+        let mut symbols = crate::symbols::SymbolTable::new();
+        let a = symbols.lookup("A");
+        let s = symbols.lookup("s");
+
+        trie.declare(a, &[SuffixSegment::Attr(s)], Type::Numeric);
+
+        assert_eq!(
+            trie.declared_type(a, &[SuffixSegment::Attr(s)]),
+            Some(Type::Numeric)
+        );
     }
 
     #[test]

@@ -555,21 +555,41 @@ impl Interpreter {
     /// the matching `endfor`.
     fn scan_loop_body_with_param(&mut self, loop_var: SymbolId) -> TokenList {
         let mut body = TokenList::new();
-        let mut depth: u32 = 0;
+        // Tracks nested loop scopes. `true` means that nested loop reuses
+        // the same loop variable symbol and therefore shadows `loop_var`.
+        let mut nested_shadow_stack: Vec<bool> = Vec::new();
+        let mut shadow_depth: usize = 0;
+        // After seeing `for`/`forsuffixes`, skip substitution for the next
+        // token (the nested loop variable declaration token).
+        let mut skip_next_substitution = false;
 
         loop {
             match self.cur.command {
                 Command::Iteration => {
-                    depth += 1;
+                    let op = self.cur.modifier;
                     self.store_current_token(&mut body);
                     self.get_next();
+
+                    if op == IterationOp::Forever as u16 {
+                        nested_shadow_stack.push(false);
+                        skip_next_substitution = false;
+                    } else {
+                        let shadows_outer = self.cur.sym == Some(loop_var);
+                        nested_shadow_stack.push(shadows_outer);
+                        if shadows_outer {
+                            shadow_depth += 1;
+                        }
+                        skip_next_substitution = true;
+                    }
                 }
                 Command::MacroSpecial if self.cur.modifier == 1 => {
                     // `endfor`
-                    if depth == 0 {
+                    if nested_shadow_stack.is_empty() {
                         return body;
                     }
-                    depth -= 1;
+                    if nested_shadow_stack.pop().is_some_and(|shadowed| shadowed) {
+                        shadow_depth = shadow_depth.saturating_sub(1);
+                    }
                     self.store_current_token(&mut body);
                     self.get_next();
                 }
@@ -578,8 +598,11 @@ impl Interpreter {
                     return body;
                 }
                 _ => {
-                    // Replace the loop variable with Param(0)
-                    if self.cur.sym == Some(loop_var) && depth == 0 {
+                    if skip_next_substitution {
+                        self.store_current_token(&mut body);
+                        skip_next_substitution = false;
+                    } else if self.cur.sym == Some(loop_var) && shadow_depth == 0 {
+                        // Replace the loop variable with Param(0)
                         body.push(StoredToken::Param(0));
                     } else {
                         self.store_current_token(&mut body);

@@ -21,7 +21,9 @@ mod operators;
 mod path_parse;
 mod statement;
 
-use postmeta_graphics::types::{Color, Picture, Transform};
+use std::sync::Arc;
+
+use postmeta_graphics::types::{Color, Path, Pen, Picture, Transform};
 
 use crate::command::Command;
 use crate::equation::{const_dep, single_dep, DepList, VarId};
@@ -31,7 +33,7 @@ use crate::input::{InputSystem, ResolvedToken, TokenList};
 use crate::internals::Internals;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{DrawingState, Type, Value};
-use crate::variables::{NumericState, SaveStack, VarTrie, VarValue, Variables};
+use crate::variables::{NumericState, SaveStack, SuffixSegment, VarTrie, VarValue, Variables};
 
 use expand::{ControlFlow, MacroInfo};
 
@@ -315,6 +317,13 @@ impl Interpreter {
     fn store_current_token(&self, list: &mut TokenList) {
         use crate::input::StoredToken;
 
+        if self.cur.command == Command::CapsuleToken {
+            if let Some((val, ty)) = &self.cur.capsule {
+                list.push(StoredToken::Capsule(val.clone(), *ty));
+            }
+            return;
+        }
+
         match &self.cur.token.kind {
             crate::token::TokenKind::Symbolic(_) => {
                 if let Some(sym) = self.cur.sym {
@@ -428,9 +437,105 @@ impl Interpreter {
         }
     }
 
+    fn initialize_declared_variable(
+        &mut self,
+        var_id: VarId,
+        name: &str,
+        root_sym: Option<SymbolId>,
+        suffixes: &[SuffixSegment],
+    ) {
+        let needs_init = matches!(
+            self.variables.get(var_id),
+            VarValue::Undefined | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
+        );
+        if !needs_init {
+            return;
+        }
+
+        let Some(root_sym) = root_sym else {
+            return;
+        };
+        let Some(declared_ty) = self.var_trie.declared_type(root_sym, suffixes) else {
+            return;
+        };
+
+        let val = match declared_ty {
+            Type::Numeric => VarValue::NumericVar(NumericState::Numeric),
+            Type::Boolean => VarValue::Known(Value::Boolean(false)),
+            Type::String => VarValue::Known(Value::String(Arc::from(""))),
+            Type::Path => VarValue::Known(Value::Path(Path::default())),
+            Type::Pen => VarValue::Known(Value::Pen(Pen::circle(0.0))),
+            Type::Picture => VarValue::Known(Value::Picture(Picture::default())),
+            Type::PairType => {
+                let x_id = self.variables.alloc();
+                let y_id = self.variables.alloc();
+                self.variables
+                    .set(x_id, VarValue::NumericVar(NumericState::Numeric));
+                self.variables
+                    .set(y_id, VarValue::NumericVar(NumericState::Numeric));
+                self.variables.register_name(&format!("{name}.x"), x_id);
+                self.variables.register_name(&format!("{name}.y"), y_id);
+                VarValue::Pair { x: x_id, y: y_id }
+            }
+            Type::ColorType => {
+                let r_id = self.variables.alloc();
+                let g_id = self.variables.alloc();
+                let b_id = self.variables.alloc();
+                self.variables
+                    .set(r_id, VarValue::NumericVar(NumericState::Numeric));
+                self.variables
+                    .set(g_id, VarValue::NumericVar(NumericState::Numeric));
+                self.variables
+                    .set(b_id, VarValue::NumericVar(NumericState::Numeric));
+                self.variables.register_name(&format!("{name}.r"), r_id);
+                self.variables.register_name(&format!("{name}.g"), g_id);
+                self.variables.register_name(&format!("{name}.b"), b_id);
+                VarValue::Color {
+                    r: r_id,
+                    g: g_id,
+                    b: b_id,
+                }
+            }
+            Type::TransformType => {
+                let tx = self.variables.alloc();
+                let ty = self.variables.alloc();
+                let txx = self.variables.alloc();
+                let txy = self.variables.alloc();
+                let tyx = self.variables.alloc();
+                let tyy = self.variables.alloc();
+                for id in [tx, ty, txx, txy, tyx, tyy] {
+                    self.variables
+                        .set(id, VarValue::NumericVar(NumericState::Numeric));
+                }
+                self.variables.register_name(&format!("{name}.tx"), tx);
+                self.variables.register_name(&format!("{name}.ty"), ty);
+                self.variables.register_name(&format!("{name}.txx"), txx);
+                self.variables.register_name(&format!("{name}.txy"), txy);
+                self.variables.register_name(&format!("{name}.tyx"), tyx);
+                self.variables.register_name(&format!("{name}.tyy"), tyy);
+                VarValue::Transform {
+                    tx,
+                    ty,
+                    txx,
+                    txy,
+                    tyx,
+                    tyy,
+                }
+            }
+            _ => return,
+        };
+        self.variables.set(var_id, val);
+    }
+
     /// Resolve a variable name to its value.
-    fn resolve_variable(&mut self, sym: Option<SymbolId>, name: &str) -> InterpResult<()> {
+    fn resolve_variable(
+        &mut self,
+        sym: Option<SymbolId>,
+        name: &str,
+        suffixes: &[SuffixSegment],
+    ) -> InterpResult<()> {
         let var_id = self.variables.lookup(name);
+        self.initialize_declared_variable(var_id, name, sym, suffixes);
         // Track last scanned variable for assignment LHS
         self.lhs_tracking.last_var_id = Some(var_id);
         self.lhs_tracking.last_var_name.clear();
@@ -521,7 +626,6 @@ impl Interpreter {
                 self.cur_expr.pair_dep = None;
             }
         }
-        let _ = sym; // Used later for equation LHS tracking
         Ok(())
     }
 
@@ -2948,6 +3052,86 @@ mod tests {
             .map(|e| e.message.as_str())
             .unwrap_or("");
         assert!(msg.contains("6"), "expected 6 in: {msg}");
+    }
+
+    #[test]
+    fn nested_for_substitutes_outer_loop_variable() {
+        // Regression: outer `for` variables must substitute inside nested
+        // loop bodies (example 132 relies on this).
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=1 step 1 until 2: for j=1 step 1 until 2: show i; endfor; endfor;")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+
+        assert_eq!(infos.len(), 4, "expected 4 show outputs, got: {infos:?}");
+        assert!(infos[0].contains("1"), "expected 1, got: {}", infos[0]);
+        assert!(infos[1].contains("1"), "expected 1, got: {}", infos[1]);
+        assert!(infos[2].contains("2"), "expected 2, got: {}", infos[2]);
+        assert!(infos[3].contains("2"), "expected 2, got: {}", infos[3]);
+    }
+
+    #[test]
+    fn nested_for_same_name_shadows_outer_loop_variable() {
+        // Guardrail: if an inner loop reuses the same variable name, it
+        // should shadow the outer loop variable.
+        let mut interp = Interpreter::new();
+        interp
+            .run("for i=1 step 1 until 2: for i=10 step 1 until 11: show i; endfor; endfor;")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+
+        assert_eq!(infos.len(), 4, "expected 4 show outputs, got: {infos:?}");
+        assert!(infos[0].contains("10"), "expected 10, got: {}", infos[0]);
+        assert!(infos[1].contains("11"), "expected 11, got: {}", infos[1]);
+        assert!(infos[2].contains("10"), "expected 10, got: {}", infos[2]);
+        assert!(infos[3].contains("11"), "expected 11, got: {}", infos[3]);
+    }
+
+    #[test]
+    fn collective_pair_subscript_is_pair_typed() {
+        // Regression: `pair A[]` must make `A[1]` a pair, not a numeric.
+        let mut interp = Interpreter::new();
+        interp
+            .run("pair A[]; show pair A[1]; show numeric A[1];")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+
+        assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
+        assert!(infos[0].contains("true"), "expected pair test true, got: {}", infos[0]);
+        assert!(infos[1].contains("false"), "expected numeric test false, got: {}", infos[1]);
+    }
+
+    #[test]
+    fn collective_pair_subscript_works_in_for_sum_expression() {
+        // Regression from examples 133/134: summing A[i] must stay pair arithmetic.
+        let mut interp = Interpreter::new();
+        let result = interp.run(concat!(
+            "numeric n; n := 3;\n",
+            "pair A[];\n",
+            "for i=1 step 1 until n-1: A[i+1] - A[i] = (0,1); endfor;\n",
+            "show (0,0) for i=1 step 1 until n: + A[i] endfor;\n",
+        ));
+
+        assert!(result.is_ok(), "expected run to succeed, got: {result:?}");
     }
 
     #[test]

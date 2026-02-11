@@ -13,7 +13,7 @@ use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
 use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
-use crate::variables::VarValue;
+use crate::variables::{SuffixSegment, VarValue};
 
 use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
 use super::{Interpreter, LhsBinding};
@@ -242,6 +242,7 @@ impl Interpreter {
                 };
 
                 let mut has_suffixes = false;
+                let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
                 // Check early if this is a standalone vardef macro.
                 let is_root_vardef =
@@ -263,6 +264,9 @@ impl Interpreter {
                             || self.cur.command == Command::InternalQuantity)
                     {
                         if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                            if let Some(sym) = self.cur.sym {
+                                suffix_segs.push(SuffixSegment::Attr(sym));
+                            }
                             name.push('.');
                             name.push_str(s);
                         }
@@ -272,6 +276,7 @@ impl Interpreter {
                         // Bare numeric subscript: pen_3
                         if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
                             let _ = write!(name, "[{}]", v as i64);
+                            suffix_segs.push(SuffixSegment::Subscript);
                         }
                         has_suffixes = true;
                         self.get_x_next();
@@ -289,6 +294,7 @@ impl Interpreter {
                                 _ => 0,
                             };
                             let _ = write!(name, "[{subscript}]");
+                            suffix_segs.push(SuffixSegment::Subscript);
                             self.get_x_next();
                             has_suffixes = true;
                         } else {
@@ -350,7 +356,7 @@ impl Interpreter {
                     return self.scan_primary();
                 }
 
-                self.resolve_variable(root_sym, &name)
+                self.resolve_variable(root_sym, &name, &suffix_segs)
             }
 
             Command::InternalQuantity => {
