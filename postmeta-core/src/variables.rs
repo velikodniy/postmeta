@@ -104,6 +104,10 @@ pub struct Variables {
     /// that reference it. Maintained by `set()` so `apply_linear_solution` can
     /// find affected dependents in O(k) instead of scanning all variables.
     dep_index: HashMap<VarId, HashSet<VarId>>,
+    /// Root name → set of all full names (root + suffixes) in `name_to_id`.
+    /// Enables O(k) lookup for `take_name_bindings_for_root` and
+    /// `clear_name_bindings_for_root` instead of scanning all names.
+    names_by_root: HashMap<String, HashSet<String>>,
 }
 
 impl Variables {
@@ -115,6 +119,32 @@ impl Variables {
             name_to_id: HashMap::with_capacity(256),
             next_serial: 1,
             dep_index: HashMap::new(),
+            names_by_root: HashMap::new(),
+        }
+    }
+
+    /// Extract the root portion of a variable name (before the first `.` or `[`).
+    fn root_of(name: &str) -> &str {
+        name.find(['.', '[']).map_or(name, |i| &name[..i])
+    }
+
+    /// Record a name in the root index.
+    fn add_to_root_index(&mut self, name: &str) {
+        let root = Self::root_of(name).to_owned();
+        self.names_by_root
+            .entry(root)
+            .or_default()
+            .insert(name.to_owned());
+    }
+
+    /// Remove a name from the root index.
+    fn remove_from_root_index(&mut self, name: &str) {
+        let root = Self::root_of(name);
+        if let Some(set) = self.names_by_root.get_mut(root) {
+            set.remove(name);
+            if set.is_empty() {
+                self.names_by_root.remove(root);
+            }
         }
     }
 
@@ -132,6 +162,7 @@ impl Variables {
         }
         let id = self.alloc();
         self.name_to_id.insert(name.to_owned(), id);
+        self.add_to_root_index(name);
         id
     }
 
@@ -140,32 +171,25 @@ impl Variables {
     /// Used when creating compound type sub-parts (e.g. `p.x`, `p.y` for a pair `p`).
     pub fn register_name(&mut self, name: &str, id: VarId) {
         self.name_to_id.insert(name.to_owned(), id);
+        self.add_to_root_index(name);
     }
 
     /// Remove a name binding and return the previously bound variable id.
     pub fn unbind_name(&mut self, name: &str) -> Option<VarId> {
-        self.name_to_id.remove(name)
-    }
-
-    fn matches_root_or_suffix(name: &str, root: &str) -> bool {
-        if name == root {
-            return true;
+        let result = self.name_to_id.remove(name);
+        if result.is_some() {
+            self.remove_from_root_index(name);
         }
-
-        name.strip_prefix(root)
-            .is_some_and(|tail| tail.starts_with('.') || tail.starts_with('['))
+        result
     }
 
     /// Remove all bindings for a root name and its suffix/subscript descendants.
     ///
     /// Examples for root `a`: `a`, `a.x`, `a[1]`, `a[1].x`.
     pub fn take_name_bindings_for_root(&mut self, root: &str) -> Vec<(String, VarId)> {
-        let names: Vec<String> = self
-            .name_to_id
-            .keys()
-            .filter(|name| Self::matches_root_or_suffix(name, root))
-            .cloned()
-            .collect();
+        let Some(names) = self.names_by_root.remove(root) else {
+            return Vec::new();
+        };
 
         let mut taken = Vec::with_capacity(names.len());
         for name in names {
@@ -179,12 +203,9 @@ impl Variables {
 
     /// Clear current bindings for a root name and all its descendants.
     pub fn clear_name_bindings_for_root(&mut self, root: &str) {
-        let names: Vec<String> = self
-            .name_to_id
-            .keys()
-            .filter(|name| Self::matches_root_or_suffix(name, root))
-            .cloned()
-            .collect();
+        let Some(names) = self.names_by_root.remove(root) else {
+            return;
+        };
 
         for name in names {
             self.name_to_id.remove(&name);
@@ -195,8 +216,10 @@ impl Variables {
     pub fn restore_name_binding(&mut self, name: &str, prev: Option<VarId>) {
         if let Some(id) = prev {
             self.name_to_id.insert(name.to_owned(), id);
+            self.add_to_root_index(name);
         } else {
             self.name_to_id.remove(name);
+            self.remove_from_root_index(name);
         }
     }
 
