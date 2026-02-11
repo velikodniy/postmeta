@@ -11,7 +11,7 @@
 //! - **Dependent**: linear combination of independents
 //! - **Compound**: a pair/color/transform with sub-parts
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use postmeta_graphics::types::Scalar;
 
@@ -100,6 +100,10 @@ pub struct Variables {
     name_to_id: HashMap<String, VarId>,
     /// Next serial number for independent variables.
     next_serial: u32,
+    /// Reverse dependency index: independent `VarId` → set of dependent `VarId`s
+    /// that reference it. Maintained by `set()` so `apply_linear_solution` can
+    /// find affected dependents in O(k) instead of scanning all variables.
+    dep_index: HashMap<VarId, HashSet<VarId>>,
 }
 
 impl Variables {
@@ -110,6 +114,7 @@ impl Variables {
             values: Vec::with_capacity(256),
             name_to_id: HashMap::with_capacity(256),
             next_serial: 1,
+            dep_index: HashMap::new(),
         }
     }
 
@@ -212,12 +217,37 @@ impl Variables {
         }
     }
 
-    /// Set a variable's value.
+    /// Set a variable's value, maintaining the reverse dependency index.
     pub fn set(&mut self, id: VarId, value: VarValue) {
         let idx = id.0 as usize;
-        if idx < self.values.len() {
-            self.values[idx] = value;
+        if idx >= self.values.len() {
+            return;
         }
+
+        // Remove old dep-index entries for this variable.
+        if let VarValue::NumericVar(NumericState::Dependent(ref old_dep)) = self.values[idx] {
+            for term in old_dep {
+                if let Some(ref_id) = term.var_id {
+                    if let Some(set) = self.dep_index.get_mut(&ref_id) {
+                        set.remove(&id);
+                        if set.is_empty() {
+                            self.dep_index.remove(&ref_id);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add new dep-index entries.
+        if let VarValue::NumericVar(NumericState::Dependent(ref new_dep)) = value {
+            for term in new_dep {
+                if let Some(ref_id) = term.var_id {
+                    self.dep_index.entry(ref_id).or_default().insert(id);
+                }
+            }
+        }
+
+        self.values[idx] = value;
     }
 
     /// Set a variable to a known value.
@@ -308,7 +338,7 @@ impl Variables {
     }
 
     /// Apply a solved linear equation `pivot = dep` and substitute it into all
-    /// existing dependent variables.
+    /// existing dependent variables that reference the pivot.
     pub fn apply_linear_solution(&mut self, pivot: VarId, dep: &DepList) {
         if let Some(v) = constant_value(dep) {
             self.make_known(pivot, v);
@@ -316,13 +346,22 @@ impl Variables {
             self.make_dependent(pivot, dep.clone());
         }
 
+        // Use the reverse dependency index to find only variables that
+        // actually reference the pivot, instead of scanning all variables.
+        let dependents: Vec<VarId> = self
+            .dep_index
+            .get(&pivot)
+            .map(|s| s.iter().copied().collect())
+            .unwrap_or_default();
+
         let mut updates: Vec<(VarId, NumericState)> = Vec::new();
-        for i in 0..self.values.len() {
-            let id = VarId(i as u32);
+        for id in dependents {
             if id == pivot {
                 continue;
             }
-            if let VarValue::NumericVar(NumericState::Dependent(existing)) = &self.values[i] {
+            if let VarValue::NumericVar(NumericState::Dependent(existing)) =
+                &self.values[id.0 as usize]
+            {
                 let new_dep = dep_substitute(existing, pivot, dep);
                 if let Some(v) = constant_value(&new_dep) {
                     updates.push((id, NumericState::Known(v)));
