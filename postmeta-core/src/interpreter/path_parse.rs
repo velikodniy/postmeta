@@ -54,12 +54,17 @@ impl Interpreter {
         };
 
         loop {
-            // Parse optional pre-join direction {dir} or {curl n}
-            let pre_dir = if self.cur.command == Command::LeftBrace {
+            // Parse optional pre-join direction {dir} or {curl n}.
+            // Multiple consecutive directions can appear when macros like
+            // `--` expand to `{curl 1}..{curl 1}` — the last one wins.
+            let mut pre_dir = if self.cur.command == Command::LeftBrace {
                 Some(self.scan_brace_direction()?)
             } else {
                 None
             };
+            while self.cur.command == Command::LeftBrace {
+                pre_dir = Some(self.scan_brace_direction()?);
+            }
 
             // Parse the join operator
             let join_type = if self.cur.command == Command::PathJoin {
