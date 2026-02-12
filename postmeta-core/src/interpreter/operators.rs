@@ -2,6 +2,7 @@
 //!
 //! Implements all nullary, unary, and binary operators at each precedence level.
 
+use std::cmp::Ordering;
 use std::sync::Arc;
 
 use postmeta_graphics::bbox;
@@ -28,6 +29,21 @@ use super::helpers::{
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
+    fn compare_values(
+        left: &Value,
+        right: &Value,
+        predicate: fn(Ordering) -> bool,
+    ) -> InterpResult<bool> {
+        if let (Value::String(a), Value::String(b)) = (left, right) {
+            Ok(predicate(a.cmp(b)))
+        } else {
+            let l = value_to_scalar(left)?;
+            let r = value_to_scalar(right)?;
+            let ord = l.partial_cmp(&r).unwrap_or(Ordering::Equal);
+            Ok(predicate(ord))
+        }
+    }
+
     /// Execute a nullary operator.
     pub(super) fn do_nullary(&mut self, op: NullaryOp) -> InterpResult<()> {
         match op {
@@ -618,34 +634,22 @@ impl Interpreter {
 
         match op {
             ExpressionBinaryOp::LessThan => {
-                let result = match (left, &right) {
-                    (Value::String(a), Value::String(b)) => a < b,
-                    _ => value_to_scalar(left)? < value_to_scalar(&right)?,
-                };
+                let result = Self::compare_values(left, &right, |ord| ord == Ordering::Less)?;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
             ExpressionBinaryOp::LessOrEqual => {
-                let result = match (left, &right) {
-                    (Value::String(a), Value::String(b)) => a <= b,
-                    _ => value_to_scalar(left)? <= value_to_scalar(&right)?,
-                };
+                let result = Self::compare_values(left, &right, |ord| ord != Ordering::Greater)?;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
             ExpressionBinaryOp::GreaterThan => {
-                let result = match (left, &right) {
-                    (Value::String(a), Value::String(b)) => a > b,
-                    _ => value_to_scalar(left)? > value_to_scalar(&right)?,
-                };
+                let result = Self::compare_values(left, &right, |ord| ord == Ordering::Greater)?;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
             ExpressionBinaryOp::GreaterOrEqual => {
-                let result = match (left, &right) {
-                    (Value::String(a), Value::String(b)) => a >= b,
-                    _ => value_to_scalar(left)? >= value_to_scalar(&right)?,
-                };
+                let result = Self::compare_values(left, &right, |ord| ord != Ordering::Less)?;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
