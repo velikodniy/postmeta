@@ -105,11 +105,11 @@ fn format_diagnostic(err: &InterpreterError) -> String {
 }
 
 fn render_svg_preview(interpreter: &Interpreter) -> String {
-    let picture = interpreter.pictures.last().or({
-        if interpreter.current_picture.objects.is_empty() {
+    let picture = interpreter.output().last().or({
+        if interpreter.current_picture().objects.is_empty() {
             None
         } else {
-            Some(&interpreter.current_picture)
+            Some(interpreter.current_picture())
         }
     });
 
@@ -150,5 +150,48 @@ mod tests {
 
         assert!(output.has_error, "expected compile error");
         assert!(!output.diagnostics.is_empty(), "expected diagnostics");
+    }
+
+    #[test]
+    fn empty_program_returns_no_svg() {
+        let output = compile_program("end;");
+
+        assert!(
+            !output.has_error,
+            "unexpected diagnostics: {}",
+            output.diagnostics
+        );
+        assert!(
+            output.svg.is_empty(),
+            "expected empty SVG for empty program"
+        );
+    }
+
+    #[test]
+    fn multiple_figures_renders_last() {
+        let output = compile_program(
+            "input plain; beginfig(1); draw fullcircle scaled 10; endfig; beginfig(2); draw unitsquare scaled 20; endfig; end;",
+        );
+
+        assert!(
+            !output.has_error,
+            "unexpected diagnostics: {}",
+            output.diagnostics
+        );
+        assert!(output.svg.contains("<svg"), "missing SVG root");
+    }
+
+    #[test]
+    fn fill_produces_svg_path() {
+        let output =
+            compile_program("input plain; beginfig(1); fill fullcircle scaled 50; endfig; end;");
+
+        assert!(
+            !output.has_error,
+            "unexpected diagnostics: {}",
+            output.diagnostics
+        );
+        assert!(output.svg.contains("<svg"), "missing SVG root");
+        assert!(output.svg.contains("path"), "missing filled path in SVG");
     }
 }
