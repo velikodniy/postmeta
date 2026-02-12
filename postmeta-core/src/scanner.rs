@@ -83,8 +83,17 @@ const fn is_isolated(class: u8) -> bool {
 // ---------------------------------------------------------------------------
 
 /// An error encountered during scanning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanErrorKind {
+    InvalidCharacter,
+    UnterminatedString,
+}
+
+/// An error encountered during scanning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanError {
+    /// Machine-readable error kind.
+    pub kind: ScanErrorKind,
     /// Human-readable error message.
     pub message: String,
     /// Location of the error.
@@ -158,6 +167,7 @@ impl Scanner {
                 INVALID => {
                     self.pos += 1;
                     self.errors.push(ScanError {
+                        kind: ScanErrorKind::InvalidCharacter,
                         message: format!("invalid character: {c:#04x}"),
                         span: Span::new(u32_pos(start), u32_pos(self.pos)),
                     });
@@ -318,6 +328,7 @@ impl Scanner {
         } else {
             // Unterminated string
             self.errors.push(ScanError {
+                kind: ScanErrorKind::UnterminatedString,
                 message: "unterminated string literal".into(),
                 span: Span::new(u32_pos(start), u32_pos(self.pos)),
             });
@@ -478,6 +489,15 @@ mod tests {
         // "world" is a separate symbolic token
         assert_eq!(tokens[1].kind, TokenKind::Symbolic("world".into()));
         assert_eq!(scanner.errors().len(), 1);
+        assert_eq!(scanner.errors()[0].kind, ScanErrorKind::UnterminatedString);
+    }
+
+    #[test]
+    fn invalid_character_error_kind() {
+        let mut scanner = Scanner::new("abc\u{7f}def");
+        let _ = scanner.scan_all();
+        assert_eq!(scanner.errors().len(), 1);
+        assert_eq!(scanner.errors()[0].kind, ScanErrorKind::InvalidCharacter);
     }
 
     // -- symbolic tokens --

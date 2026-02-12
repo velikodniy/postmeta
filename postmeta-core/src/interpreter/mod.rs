@@ -31,6 +31,7 @@ use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, TokenList};
 use crate::internals::Internals;
+use crate::scanner::ScanErrorKind;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{DrawingState, Type, Value};
 use crate::variables::{NumericState, SaveStack, SuffixSegment, VarTrie, VarValue, Variables};
@@ -265,10 +266,9 @@ impl Interpreter {
     fn get_next(&mut self) {
         self.cur = self.input.next_raw_token(&mut self.symbols);
         for scan_error in self.input.take_scan_errors() {
-            let kind = if scan_error.message.contains("unterminated string") {
-                ErrorKind::UnterminatedString
-            } else {
-                ErrorKind::InvalidCharacter
+            let kind = match scan_error.kind {
+                ScanErrorKind::InvalidCharacter => ErrorKind::InvalidCharacter,
+                ScanErrorKind::UnterminatedString => ErrorKind::UnterminatedString,
             };
             self.errors
                 .push(InterpreterError::new(kind, scan_error.message).with_span(scan_error.span));
