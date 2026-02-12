@@ -166,13 +166,7 @@ impl Interpreter {
                 self.get_x_next();
                 let val = if op == Some(StrOpOp::Str) {
                     // `str` <suffix> — converts suffix to string
-                    let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
-                    {
-                        s.clone()
-                    } else {
-                        String::new()
-                    };
-                    self.get_x_next();
+                    let name = self.scan_str_suffix()?;
                     Value::String(Arc::from(name.as_str()))
                 } else {
                     // readfrom etc. — not yet implemented
@@ -634,6 +628,50 @@ impl Interpreter {
         }
 
         self.resolve_variable(root_sym, &name, &suffix_segs)
+    }
+
+    /// Parse suffix text after `str` and return its string form.
+    fn scan_str_suffix(&mut self) -> InterpResult<String> {
+        let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+            s.clone()
+        } else {
+            return Ok(String::new());
+        };
+        self.get_x_next();
+
+        loop {
+            if self.cur.command == Command::TagToken || self.cur.command == Command::InternalQuantity
+            {
+                if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                    name.push('.');
+                    name.push_str(s);
+                }
+                self.get_x_next();
+            } else if self.cur.command == Command::NumericToken {
+                if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
+                    let _ = write!(name, "[{}]", v as i64);
+                }
+                self.get_x_next();
+            } else if self.cur.command == Command::LeftBracket {
+                self.get_x_next(); // skip `[`
+                let subscript_result = self.scan_expression()?;
+                let subscript = match subscript_result.exp {
+                    Value::Numeric(v) => v as i64,
+                    _ => 0,
+                };
+                let _ = write!(name, "[{subscript}]");
+                if self.cur.command == Command::RightBracket {
+                    self.get_x_next();
+                } else {
+                    self.report_error(ErrorKind::MissingToken, "Expected `]` in suffix");
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        Ok(name)
     }
 
     // =====================================================================

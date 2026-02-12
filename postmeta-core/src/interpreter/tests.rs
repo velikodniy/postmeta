@@ -1086,6 +1086,28 @@ fn str_operator_multi_char() {
     assert!(msg.contains("foo"), "expected foo in: {msg}");
 }
 
+#[test]
+fn str_operator_collects_suffix_chain() {
+    let mut interp = Interpreter::new();
+    interp.run("show str foo.bar.baz;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(
+        msg.contains("foo.bar.baz"),
+        "expected suffix chain in: {msg}"
+    );
+}
+
+#[test]
+fn str_operator_collects_subscript_suffix() {
+    let mut interp = Interpreter::new();
+    interp.run("show str z[1+1].x;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(
+        msg.contains("z[2].x"),
+        "expected subscript suffix in: {msg}"
+    );
+}
+
 // -----------------------------------------------------------------------
 // Undelimited macro parameters
 // -----------------------------------------------------------------------
