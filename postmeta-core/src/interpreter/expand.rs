@@ -1553,9 +1553,12 @@ impl Interpreter {
 
         // Push a string capsule — `thelabel` will call `s infont defaultfont`
         // to convert to a picture.
-        self.cur_expr.exp = Value::String(text);
-        self.cur_expr.ty = crate::types::Type::String;
-        self.back_expr();
+        self.back_expr_value(super::ExprResultValue {
+            exp: Value::String(text),
+            ty: crate::types::Type::String,
+            dep: None,
+            pair_dep: None,
+        });
 
         // Advance past the capsule and continue expansion.
         self.get_next();

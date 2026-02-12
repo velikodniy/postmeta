@@ -1276,11 +1276,13 @@ fn back_expr_capsule_roundtrip() {
     let mut interp = Interpreter::new();
     // Push source first (it goes on the bottom of the stack)
     interp.input.push_source(";");
-    // Set up a capsule with a pair value
-    interp.cur_expr.exp = Value::Pair(5.0, 10.0);
-    interp.cur_expr.ty = Type::PairType;
-    // Push it back — this goes on top of the source
-    interp.back_expr();
+    // Set up a capsule with a pair value and push it back
+    interp.back_expr_value(super::ExprResultValue {
+        exp: Value::Pair(5.0, 10.0),
+        ty: Type::PairType,
+        dep: None,
+        pair_dep: None,
+    });
     // Now get_x_next reads from the capsule token list (top of stack)
     interp.get_x_next();
     assert_eq!(interp.cur.command, Command::CapsuleToken);
@@ -1296,9 +1298,12 @@ fn back_expr_numeric_in_expression() {
     // Push source first (bottom of stack)
     interp.input.push_source("+ 3;");
     // Then push capsule (top of stack)
-    interp.cur_expr.exp = Value::Numeric(7.0);
-    interp.cur_expr.ty = Type::Known;
-    interp.back_expr();
+    interp.back_expr_value(super::ExprResultValue {
+        exp: Value::Numeric(7.0),
+        ty: Type::Known,
+        dep: None,
+        pair_dep: None,
+    });
     interp.get_x_next();
     let result = interp.scan_expression().unwrap();
     // Should evaluate to 7 + 3 = 10

@@ -335,8 +335,12 @@ impl Interpreter {
     /// The current `cur_exp`/`cur_type` are stashed into a capsule and
     /// placed on the input stream. The next token read will be a
     /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
-    pub(super) fn back_expr(&mut self) {
-        let result = self.take_cur_result();
+    /// Push an expression result back into the input as a capsule token.
+    ///
+    /// The value is stashed into a capsule and placed on the input stream.
+    /// The next token read will be a `CapsuleToken` carrying that value.
+    /// This is `mp.web`'s `back_expr`.
+    pub(super) fn back_expr_value(&mut self, result: ExprResultValue) {
         self.state
             .input
             .back_expr(result.exp, result.ty, result.dep, result.pair_dep);

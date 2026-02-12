@@ -30,9 +30,12 @@ enum PendingJoin {
 }
 
 impl Interpreter {
-    /// Parse a path expression starting from the current point/expression.
-    pub(super) fn scan_path_construction(&mut self) -> InterpResult<()> {
-        let first_expr = self.take_cur_result().exp;
+    /// Parse a path expression starting from the given left-hand value.
+    pub(super) fn scan_path_construction(
+        &mut self,
+        left: super::ExprResultValue,
+    ) -> InterpResult<super::ExprResultValue> {
+        let first_expr = left.exp;
         let (mut knots, mut is_cyclic) = match first_expr {
             Value::Pair(x, y) => (vec![Knot::new(Point::new(x, y))], false),
             Value::Path(p) => (p.knots, p.is_cyclic),
@@ -163,9 +166,12 @@ impl Interpreter {
         let mut path_obj = Path::from_knots(knots, is_cyclic);
         hobby::make_choices(&mut path_obj);
 
-        self.cur_expr.exp = Value::Path(path_obj);
-        self.cur_expr.ty = Type::Path;
-        Ok(())
+        Ok(super::ExprResultValue {
+            exp: Value::Path(path_obj),
+            ty: Type::Path,
+            dep: None,
+            pair_dep: None,
+        })
     }
 
     /// Concatenate path knots for `&`.

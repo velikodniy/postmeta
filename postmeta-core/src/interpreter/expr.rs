@@ -1200,15 +1200,17 @@ impl Interpreter {
             }
             Command::PathJoin => {
                     // Path construction
-                    self.scan_path_construction()?;
-                    self.cur_expr.dep = None;
-                    self.cur_expr.pair_dep = None;
+                    let left = self.take_cur_result();
+                    let result = self.scan_path_construction(left)?;
+                    self.set_cur_result(result);
                 return Ok(true);
             }
             Command::Ampersand => {
                     // & is path join for pairs/paths, string concat otherwise
                     if matches!(self.cur_expr.ty, Type::PairType | Type::Path) {
-                        self.scan_path_construction()?;
+                        let left = self.take_cur_result();
+                        let result = self.scan_path_construction(left)?;
+                        self.set_cur_result(result);
                     } else {
                         // String concatenation
                         let left = self.take_cur_result().exp;
@@ -1256,9 +1258,9 @@ impl Interpreter {
                 }
             Command::LeftBrace => {
                     // Direction specification — start of path construction
-                    self.scan_path_construction()?;
-                    self.cur_expr.dep = None;
-                    self.cur_expr.pair_dep = None;
+                    let left = self.take_cur_result();
+                    let result = self.scan_path_construction(left)?;
+                    self.set_cur_result(result);
                 return Ok(true);
             }
             _ => return Ok(true),
