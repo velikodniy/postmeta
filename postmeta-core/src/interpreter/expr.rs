@@ -701,10 +701,43 @@ impl Interpreter {
         self.scan_rhs_tighter_than_bp(bp)
     }
 
+    fn scan_infix_bp(&mut self, bp: u8, equals_is_equation: bool) -> InterpResult<()> {
+        self.scan_rhs_tighter_than_bp(bp)?;
+        if bp == Command::BP_SECONDARY {
+            self.scan_secondary_infix_loop()
+        } else if bp == Command::BP_TERTIARY {
+            self.scan_tertiary_infix_loop()
+        } else if bp == Command::BP_EXPRESSION {
+            self.scan_expression_infix_loop(equals_is_equation)
+        } else {
+            Err(InterpreterError::new(
+                ErrorKind::UnexpectedToken,
+                "Unsupported infix binding power",
+            ))
+        }
+    }
+
     /// Parse and evaluate a secondary expression.
     pub(super) fn scan_secondary(&mut self) -> InterpResult<()> {
-        self.scan_primary()?;
+        self.scan_infix_bp(Command::BP_SECONDARY, false)
+    }
 
+    /// Parse and evaluate a tertiary expression.
+    pub(super) fn scan_tertiary(&mut self) -> InterpResult<()> {
+        self.scan_infix_bp(Command::BP_TERTIARY, false)
+    }
+
+    /// Parse and evaluate an expression.
+    ///
+    /// Handles expression-level binary operators and path construction.
+    pub(crate) fn scan_expression(&mut self) -> InterpResult<()> {
+        // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
+        let equals_is_equation = self.lhs_tracking.equals_means_equation;
+        self.lhs_tracking.equals_means_equation = false;
+        self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)
+    }
+
+    fn scan_secondary_infix_loop(&mut self) -> InterpResult<()> {
         while self.cur.command.infix_binding_power() == Some(Command::BP_SECONDARY) {
             let cmd = self.cur.command;
 
@@ -1028,10 +1061,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Parse and evaluate a tertiary expression.
-    pub(super) fn scan_tertiary(&mut self) -> InterpResult<()> {
-        self.scan_secondary()?;
-
+    fn scan_tertiary_infix_loop(&mut self) -> InterpResult<()> {
         while self.cur.command.infix_binding_power() == Some(Command::BP_TERTIARY) {
             let cmd = self.cur.command;
 
@@ -1119,16 +1149,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Parse and evaluate an expression.
-    ///
-    /// Handles expression-level binary operators and path construction.
-    pub(crate) fn scan_expression(&mut self) -> InterpResult<()> {
-        // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
-        let equals_is_equation = self.lhs_tracking.equals_means_equation;
-        self.lhs_tracking.equals_means_equation = false;
-
-        self.scan_tertiary()?;
-
+    fn scan_expression_infix_loop(&mut self, equals_is_equation: bool) -> InterpResult<()> {
         while self.cur.command.infix_binding_power() == Some(Command::BP_EXPRESSION) {
             let cmd = self.cur.command;
             let op = self.cur.modifier;
