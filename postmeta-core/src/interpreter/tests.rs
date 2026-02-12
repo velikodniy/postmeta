@@ -141,6 +141,23 @@ fn eval_operator_precedence_layers() {
 }
 
 #[test]
+fn eval_left_associative_infix_ops() {
+    let mut interp = Interpreter::new();
+    interp.run("show 10 - 3 - 2; show 20 / 5 / 2;").unwrap();
+    assert_eq!(interp.errors.len(), 2);
+    assert!(
+        interp.errors[0].message.contains("5"),
+        "expected 5 in: {}",
+        interp.errors[0].message
+    );
+    assert!(
+        interp.errors[1].message.contains("2"),
+        "expected 2 in: {}",
+        interp.errors[1].message
+    );
+}
+
+#[test]
 fn eval_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\" & \" world\";").unwrap();
