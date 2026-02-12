@@ -775,7 +775,7 @@ impl Interpreter {
                         ));
                     };
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_secondary_binary(op, &left)?;
+                    self.do_secondary_binary(op, &left, &right_val)?;
                     if op == SecondaryBinaryOp::Times {
                         let left_const = left_dep.as_ref().and_then(constant_value);
                         let right_const = right_dep.as_ref().and_then(constant_value);
@@ -1165,8 +1165,9 @@ impl Interpreter {
                     let left = self.take_cur_result().exp;
                     self.get_x_next();
                     self.scan_rhs_for_infix_command(cmd)?;
+                    let right = self.take_cur_result().exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left)?;
+                    self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left, &right)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
             }
@@ -1186,8 +1187,13 @@ impl Interpreter {
                         let left = self.take_cur_result().exp;
                         self.get_x_next();
                         self.scan_rhs_for_infix_command(cmd)?;
+                        let right = self.take_cur_result().exp;
                         self.lhs_tracking.last_lhs_binding = None;
-                        self.do_expression_binary(ExpressionBinaryOp::Concatenate, &left)?;
+                        self.do_expression_binary(
+                            ExpressionBinaryOp::Concatenate,
+                            &left,
+                            &right,
+                        )?;
                         self.cur_expr.dep = None;
                         self.cur_expr.pair_dep = None;
                     }
@@ -1211,11 +1217,12 @@ impl Interpreter {
                     let left = self.take_cur_result().exp;
                     self.get_x_next();
                     self.scan_rhs_for_infix_command(cmd)?;
+                    let right = self.take_cur_result().exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_expression_binary(op, &left)?;
+                    self.do_expression_binary(op, &left, &right)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-            }
+                }
             Command::LeftBrace => {
                     // Direction specification — start of path construction
                     self.scan_path_construction()?;

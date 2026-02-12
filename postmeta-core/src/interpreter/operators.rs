@@ -385,13 +385,12 @@ impl Interpreter {
         &mut self,
         op: SecondaryBinaryOp,
         left: &Value,
+        right: &Value,
     ) -> InterpResult<()> {
-        let right = self.take_cur_exp();
-
         match op {
             SecondaryBinaryOp::Times => {
                 // Scalar * scalar, or scalar * pair, or pair * scalar
-                match (left, &right) {
+                match (left, right) {
                     (Value::Numeric(a), Value::Numeric(b)) => {
                         self.cur_expr.exp = Value::Numeric(a * b);
                         self.cur_expr.ty = Type::Known;
@@ -413,46 +412,46 @@ impl Interpreter {
                 }
             }
             SecondaryBinaryOp::Scaled => {
-                let factor = value_to_scalar(&right)?;
+                let factor = value_to_scalar(right)?;
                 self.apply_transform(left, &transform::scaled(factor))?;
             }
             SecondaryBinaryOp::Shifted => {
-                let (dx, dy) = value_to_pair(&right)?;
+                let (dx, dy) = value_to_pair(right)?;
                 self.apply_transform(left, &transform::shifted(dx, dy))?;
             }
             SecondaryBinaryOp::Rotated => {
-                let angle = value_to_scalar(&right)?;
+                let angle = value_to_scalar(right)?;
                 self.apply_transform(left, &transform::rotated(angle))?;
             }
             SecondaryBinaryOp::XScaled => {
-                let factor = value_to_scalar(&right)?;
+                let factor = value_to_scalar(right)?;
                 self.apply_transform(left, &transform::xscaled(factor))?;
             }
             SecondaryBinaryOp::YScaled => {
-                let factor = value_to_scalar(&right)?;
+                let factor = value_to_scalar(right)?;
                 self.apply_transform(left, &transform::yscaled(factor))?;
             }
             SecondaryBinaryOp::Slanted => {
-                let factor = value_to_scalar(&right)?;
+                let factor = value_to_scalar(right)?;
                 self.apply_transform(left, &transform::slanted(factor))?;
             }
             SecondaryBinaryOp::ZScaled => {
-                let (a, b) = value_to_pair(&right)?;
+                let (a, b) = value_to_pair(right)?;
                 self.apply_transform(left, &transform::zscaled(a, b))?;
             }
             SecondaryBinaryOp::Transformed => {
-                let t = value_to_transform(&right)?;
+                let t = value_to_transform(right)?;
                 self.apply_transform(left, &t)?;
             }
             SecondaryBinaryOp::DotProd => {
                 let (ax, ay) = value_to_pair(left)?;
-                let (bx, by) = value_to_pair(&right)?;
+                let (bx, by) = value_to_pair(right)?;
                 self.cur_expr.exp = Value::Numeric(ax.mul_add(bx, ay * by));
                 self.cur_expr.ty = Type::Known;
             }
             SecondaryBinaryOp::Infont => {
                 let text = value_to_string(left)?;
-                let font_name = value_to_string(&right)?;
+                let font_name = value_to_string(right)?;
                 // Default font size — MetaPost uses 10pt for design size.
                 // `plain.mp` applies `scaled defaultscale` after infont.
                 let font_size = 10.0;
@@ -573,10 +572,9 @@ impl Interpreter {
         &mut self,
         op: ExpressionBinaryOp,
         left: &Value,
+        right: &Value,
     ) -> InterpResult<()> {
-        let right = self.take_cur_exp();
-
-        let (value, ty) = expression_binary_value(op, left, &right)?;
+        let (value, ty) = expression_binary_value(op, left, right)?;
         self.cur_expr.exp = value;
         self.cur_expr.ty = ty;
         Ok(())
