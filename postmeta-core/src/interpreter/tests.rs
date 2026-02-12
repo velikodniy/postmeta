@@ -175,6 +175,23 @@ fn eval_expression_rhs_parses_tighter_precedence() {
 }
 
 #[test]
+fn eval_expression_operators_are_left_associative() {
+    let mut interp = Interpreter::new();
+    interp.run("show 1 < 2 = true; show 3 > 2 = true;").unwrap();
+    assert_eq!(interp.errors.len(), 2);
+    assert!(
+        interp.errors[0].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[0].message
+    );
+    assert!(
+        interp.errors[1].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[1].message
+    );
+}
+
+#[test]
 fn eval_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\" & \" world\";").unwrap();

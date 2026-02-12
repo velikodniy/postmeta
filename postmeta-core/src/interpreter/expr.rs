@@ -676,29 +676,6 @@ impl Interpreter {
         self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
-    const fn tighter_infix_bp(bp: u8) -> Option<u8> {
-        if bp == Command::BP_EXPRESSION {
-            Some(Command::BP_TERTIARY)
-        } else if bp == Command::BP_TERTIARY {
-            Some(Command::BP_SECONDARY)
-        } else {
-            None
-        }
-    }
-
-    fn scan_rhs_tighter_than_bp(&mut self, bp: u8) -> InterpResult<()> {
-        if let Some(tighter_bp) = Self::tighter_infix_bp(bp) {
-            self.scan_infix_bp(tighter_bp, false)
-        } else if bp == Command::BP_SECONDARY {
-            self.scan_primary()
-        } else {
-            Err(InterpreterError::new(
-                ErrorKind::UnexpectedToken,
-                "Unsupported infix binding power",
-            ))
-        }
-    }
-
     fn scan_rhs_for_infix_command(&mut self, cmd: Command) -> InterpResult<()> {
         let Some(bp) = cmd.infix_binding_power() else {
             return Err(InterpreterError::new(
@@ -706,12 +683,16 @@ impl Interpreter {
                 "Expected infix command",
             ));
         };
-        self.scan_rhs_tighter_than_bp(bp)
+        self.scan_infix_bp(bp + 1, false)
     }
 
-    fn scan_infix_bp(&mut self, bp: u8, equals_is_equation: bool) -> InterpResult<()> {
-        self.scan_rhs_tighter_than_bp(bp)?;
-        while self.cur.command.infix_binding_power() == Some(bp) {
+    fn scan_infix_bp(&mut self, min_bp: u8, equals_is_equation: bool) -> InterpResult<()> {
+        self.scan_primary()?;
+        while let Some(bp) = self.cur.command.infix_binding_power() {
+            if bp < min_bp {
+                break;
+            }
+
             let should_break = if bp == Command::BP_SECONDARY {
                 self.scan_secondary_infix_op()?
             } else if bp == Command::BP_TERTIARY {
