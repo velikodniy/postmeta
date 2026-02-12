@@ -1,10 +1,13 @@
-//! Expression parser — four precedence levels.
+//! Expression parser — Pratt-style with three binding power levels.
 //!
-//! The recursive-descent parser follows `MetaPost`'s four precedence levels:
-//! - `scan_primary`: atoms, unary operators, grouping
-//! - `scan_secondary`: `*`, `/`, `scaled`, `rotated`, etc.
-//! - `scan_tertiary`: `+`, `-`, `++`, `+-+`
-//! - `scan_expression`: `=`, `<`, `>`, path construction
+//! The parser uses a single Pratt loop ([`Interpreter::scan_infix_bp`]) with:
+//! - `scan_primary` as the nud (prefix/atom) handler
+//! - `scan_infix_led` as the unified led (infix) handler
+//!
+//! Three binding power tiers match `MetaPost`'s grammar:
+//! - **Secondary** (BP 30): `*`, `/`, `and`, `scaled`, `rotated`, etc.
+//! - **Tertiary** (BP 20): `+`, `-`, `++`, `+-+`
+//! - **Expression** (BP 10): `=`, `<`, `>`, `&`, path construction
 
 use std::fmt::Write;
 use std::sync::Arc;
