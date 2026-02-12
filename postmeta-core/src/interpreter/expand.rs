@@ -12,7 +12,7 @@ use crate::symbols::SymbolId;
 use crate::types::Value;
 
 use super::helpers::value_to_stored_tokens;
-use super::Interpreter;
+use super::{ExprResultValue, Interpreter};
 
 // ---------------------------------------------------------------------------
 // Conditional state
@@ -1171,7 +1171,7 @@ impl Interpreter {
     /// The left operand has already been evaluated and taken. The current
     /// token is the operator name. We need to scan the right operand at the
     /// next lower precedence level, then expand the body.
-    pub(super) fn expand_binary_macro(&mut self, left: &Value) -> InterpResult<()> {
+    pub(super) fn expand_binary_macro(&mut self, left: &Value) -> InterpResult<ExprResultValue> {
         let Some(op_sym) = self.cur.sym else {
             return Err(InterpreterError::new(
                 ErrorKind::Internal,
@@ -1224,10 +1224,7 @@ impl Interpreter {
 
         // Get next token from expansion and evaluate the body
         self.get_x_next();
-        let result = self.scan_expression()?;
-        self.set_cur_result(result);
-
-        Ok(())
+        self.scan_expression()
     }
 
     /// Skip tokens until we reach `enddef` (for error recovery).
