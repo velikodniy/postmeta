@@ -686,6 +686,28 @@ impl Interpreter {
         self.scan_infix_bp(bp + 1, false)
     }
 
+    fn scan_current_infix_op(&mut self, equals_is_equation: bool) -> InterpResult<bool> {
+        match self.cur.command {
+            Command::SecondaryPrimaryMacro
+            | Command::SecondaryBinary
+            | Command::Slash
+            | Command::And => self.scan_secondary_infix_op(),
+            Command::TertiarySecondaryMacro | Command::PlusOrMinus | Command::TertiaryBinary => {
+                self.scan_tertiary_infix_op()
+            }
+            Command::Equals
+            | Command::PathJoin
+            | Command::Ampersand
+            | Command::ExpressionTertiaryMacro
+            | Command::ExpressionBinary
+            | Command::LeftBrace => self.scan_expression_infix_op(equals_is_equation),
+            _ => Err(InterpreterError::new(
+                ErrorKind::UnexpectedToken,
+                "Expected infix command",
+            )),
+        }
+    }
+
     fn scan_infix_bp(&mut self, min_bp: u8, equals_is_equation: bool) -> InterpResult<()> {
         self.scan_primary()?;
         while let Some(bp) = self.cur.command.infix_binding_power() {
@@ -693,18 +715,7 @@ impl Interpreter {
                 break;
             }
 
-            let should_break = if bp == Command::BP_SECONDARY {
-                self.scan_secondary_infix_op()?
-            } else if bp == Command::BP_TERTIARY {
-                self.scan_tertiary_infix_op()?
-            } else if bp == Command::BP_EXPRESSION {
-                self.scan_expression_infix_op(equals_is_equation)?
-            } else {
-                return Err(InterpreterError::new(
-                    ErrorKind::UnexpectedToken,
-                    "Unsupported infix binding power",
-                ));
-            };
+            let should_break = self.scan_current_infix_op(equals_is_equation)?;
             if should_break {
                 break;
             }
