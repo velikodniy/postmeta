@@ -27,13 +27,13 @@ use postmeta_graphics::types::{Color, Path, Pen, Picture, Transform};
 
 use crate::command::Command;
 use crate::equation::{const_dep, single_dep, DepList, VarId};
-use crate::error::{ErrorKind, InterpResult, InterpreterError};
+use crate::error::{ErrorKind, InterpResult, InterpreterError, Severity};
 use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, TokenList};
 use crate::internals::Internals;
 use crate::scanner::ScanErrorKind;
 use crate::symbols::{SymbolId, SymbolTable};
-use crate::types::{DrawingState, Type, Value};
+use crate::types::{Type, Value};
 use crate::variables::{NumericState, SaveStack, SuffixSegment, VarTrie, VarValue, Variables};
 
 use expand::{ControlFlow, MacroInfo};
@@ -66,6 +66,47 @@ impl ExprResultValue {
             exp: Value::Vacuous,
             ty: Type::Vacuous,
             dep: None,
+            pair_dep: None,
+        }
+    }
+
+    const fn typed(exp: Value, ty: Type) -> Self {
+        Self {
+            ty,
+            exp,
+            dep: None,
+            pair_dep: None,
+        }
+    }
+
+    const fn plain(exp: Value) -> Self {
+        let ty = exp.ty();
+        Self::typed(exp, ty)
+    }
+
+    fn numeric_known(v: f64) -> Self {
+        Self {
+            exp: Value::Numeric(v),
+            ty: Type::Known,
+            dep: Some(const_dep(v)),
+            pair_dep: None,
+        }
+    }
+
+    fn numeric_independent(id: VarId) -> Self {
+        Self {
+            exp: Value::Numeric(0.0),
+            ty: Type::Independent,
+            dep: Some(single_dep(id)),
+            pair_dep: None,
+        }
+    }
+
+    fn numeric_dependent(dep: DepList) -> Self {
+        Self {
+            exp: Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0)),
+            ty: Type::Dependent,
+            dep: Some(dep),
             pair_dep: None,
         }
     }
@@ -120,20 +161,14 @@ pub(super) struct PictureState {
     /// Used to avoid borrow conflicts: the picture is extracted from the
     /// variable, modified here, then flushed back.
     pub named_pic_buf: Option<Picture>,
-    /// Current figure number (from `beginfig`).
-    pub current_fig: Option<i32>,
-    /// Drawing state.
-    pub drawing_state: DrawingState,
 }
 
 impl PictureState {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self {
             pictures: Vec::new(),
             current_picture: Picture::new(),
             named_pic_buf: None,
-            current_fig: None,
-            drawing_state: DrawingState::default(),
         }
     }
 }
@@ -314,13 +349,8 @@ impl Interpreter {
         use crate::input::StoredToken;
 
         if self.cur.command == Command::CapsuleToken {
-            if let Some((val, ty, dep, pair_dep)) = &self.cur.capsule {
-                list.push(StoredToken::Capsule(
-                    val.clone(),
-                    *ty,
-                    dep.clone(),
-                    pair_dep.clone(),
-                ));
+            if let Some(payload) = &self.cur.capsule {
+                list.push(StoredToken::Capsule(payload.clone()));
             }
             return;
         }
@@ -430,6 +460,21 @@ impl Interpreter {
         }
     }
 
+    fn default_var_value_for_type(&mut self, ty: Type, name: &str) -> Option<VarValue> {
+        match ty {
+            Type::Numeric => Some(VarValue::NumericVar(NumericState::Numeric)),
+            Type::Boolean => Some(VarValue::Known(Value::Boolean(false))),
+            Type::String => Some(VarValue::Known(Value::String(Arc::from("")))),
+            Type::Path => Some(VarValue::Known(Value::Path(Path::default()))),
+            Type::Pen => Some(VarValue::Known(Value::Pen(Pen::circle(0.0)))),
+            Type::Picture => Some(VarValue::Known(Value::Picture(Picture::default()))),
+            Type::PairType => Some(self.alloc_pair_value(name)),
+            Type::ColorType => Some(self.alloc_color_value(name)),
+            Type::TransformType => Some(self.alloc_transform_value(name)),
+            _ => None,
+        }
+    }
+
     /// Negate the current expression (unary minus).
     fn negate_value(&mut self, mut result: ExprResultValue) -> ExprResultValue {
         fn negate_binding(binding: &LhsBinding) -> Option<LhsBinding> {
@@ -481,8 +526,6 @@ impl Interpreter {
             }
             Value::Color(c) => {
                 result.exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
-                result.dep = None;
-                result.pair_dep = None;
                 self.lhs_tracking.last_lhs_binding = self
                     .lhs_tracking
                     .last_lhs_binding
@@ -519,17 +562,8 @@ impl Interpreter {
             return;
         };
 
-        let val = match declared_ty {
-            Type::Numeric => VarValue::NumericVar(NumericState::Numeric),
-            Type::Boolean => VarValue::Known(Value::Boolean(false)),
-            Type::String => VarValue::Known(Value::String(Arc::from(""))),
-            Type::Path => VarValue::Known(Value::Path(Path::default())),
-            Type::Pen => VarValue::Known(Value::Pen(Pen::circle(0.0))),
-            Type::Picture => VarValue::Known(Value::Picture(Picture::default())),
-            Type::PairType => self.alloc_pair_value(name),
-            Type::ColorType => self.alloc_color_value(name),
-            Type::TransformType => self.alloc_transform_value(name),
-            _ => return,
+        let Some(val) = self.default_var_value_for_type(declared_ty, name) else {
+            return;
         };
         self.variables.set(var_id, val);
     }
@@ -551,6 +585,7 @@ impl Interpreter {
 
         let result = match self.variables.get(var_id).clone() {
             VarValue::Known(v) => {
+                let ty = v.ty();
                 let dep = match &v {
                     Value::Numeric(n) => Some(const_dep(*n)),
                     _ => None,
@@ -561,41 +596,23 @@ impl Interpreter {
                     None
                 };
                 ExprResultValue {
-                    ty: v.ty(),
                     exp: v,
+                    ty,
                     dep,
                     pair_dep,
                 }
             }
-            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue {
-                exp: Value::Numeric(v),
-                ty: Type::Known,
-                dep: Some(const_dep(v)),
-                pair_dep: None,
-            },
-            VarValue::NumericVar(NumericState::Independent { .. }) => ExprResultValue {
-                exp: Value::Numeric(0.0),
-                ty: Type::Independent,
-                dep: Some(single_dep(var_id)),
-                pair_dep: None,
-            },
-            VarValue::NumericVar(NumericState::Dependent(dep)) => ExprResultValue {
-                exp: Value::Numeric(
-                    crate::equation::constant_value(&dep).unwrap_or(0.0),
-                ),
-                ty: Type::Dependent,
-                dep: Some(dep),
-                pair_dep: None,
-            },
+            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue::numeric_known(v),
+            VarValue::NumericVar(NumericState::Independent { .. }) => {
+                ExprResultValue::numeric_independent(var_id)
+            }
+            VarValue::NumericVar(NumericState::Dependent(dep)) => {
+                ExprResultValue::numeric_dependent(dep)
+            }
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
                 self.variables.make_independent(var_id);
-                ExprResultValue {
-                    exp: Value::Numeric(0.0),
-                    ty: Type::Independent,
-                    dep: Some(single_dep(var_id)),
-                    pair_dep: None,
-                }
+                ExprResultValue::numeric_independent(var_id)
             }
             VarValue::Pair { x, y } => {
                 let xv = self.variables.known_value(x).unwrap_or(0.0);
@@ -614,12 +631,7 @@ impl Interpreter {
                 let rv = self.variables.known_value(r).unwrap_or(0.0);
                 let gv = self.variables.known_value(g).unwrap_or(0.0);
                 let bv = self.variables.known_value(b).unwrap_or(0.0);
-                ExprResultValue {
-                    exp: Value::Color(Color::new(rv, gv, bv)),
-                    ty: Type::ColorType,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(Value::Color(Color::new(rv, gv, bv)))
             }
             VarValue::Transform {
                 tx,
@@ -631,19 +643,14 @@ impl Interpreter {
             } => {
                 let parts = [tx, ty, txx, txy, tyx, tyy]
                     .map(|id| self.variables.known_value(id).unwrap_or(0.0));
-                ExprResultValue {
-                    exp: Value::Transform(Transform {
-                        tx: parts[0],
-                        ty: parts[1],
-                        txx: parts[2],
-                        txy: parts[3],
-                        tyx: parts[4],
-                        tyy: parts[5],
-                    }),
-                    ty: Type::TransformType,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(Value::Transform(Transform {
+                    tx: parts[0],
+                    ty: parts[1],
+                    txx: parts[2],
+                    txy: parts[3],
+                    tyx: parts[4],
+                    tyy: parts[5],
+                }))
             }
         };
         Ok(result)
@@ -657,6 +664,14 @@ impl Interpreter {
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
         let msg = message.into();
         self.errors.push(InterpreterError::new(kind, msg));
+    }
+
+    /// Record an informational diagnostic.
+    fn report_info(&mut self, message: impl Into<String>) {
+        self.errors.push(
+            InterpreterError::new(ErrorKind::Internal, message.into())
+                .with_severity(Severity::Info),
+        );
     }
 
     // =======================================================================
@@ -687,17 +702,6 @@ impl Interpreter {
         &self.state.picture_state.current_picture
     }
 
-    /// Get the current figure number, if one is active.
-    #[must_use]
-    pub const fn current_fig(&self) -> Option<i32> {
-        self.state.picture_state.current_fig
-    }
-
-    /// Get the current drawing defaults.
-    #[must_use]
-    pub const fn drawing_state(&self) -> &DrawingState {
-        &self.state.picture_state.drawing_state
-    }
 }
 
 impl std::ops::Deref for Interpreter {

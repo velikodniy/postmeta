@@ -47,12 +47,7 @@ impl Interpreter {
                 };
                 self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
-                ExprResultValue {
-                    exp: val,
-                    ty: Type::String,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(val)
             }
 
             Command::Nullary => {
@@ -130,12 +125,7 @@ impl Interpreter {
                 // Track for assignment LHS
                 self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
-                ExprResultValue {
-                    exp: Value::Numeric(v),
-                    ty: Type::Known,
-                    dep: Some(const_dep(v)),
-                    pair_dep: None,
-                }
+                ExprResultValue::numeric_known(v)
             }
 
             Command::PrimaryBinary => {
@@ -162,23 +152,13 @@ impl Interpreter {
                 };
                 let second = second_result.exp;
                 let (val, ty) = Self::do_primary_binary(op, &first, &second)?;
-                ExprResultValue {
-                    exp: val,
-                    ty,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::typed(val, ty)
             }
 
             Command::Cycle => {
                 self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
-                ExprResultValue {
-                    exp: Value::Boolean(false),
-                    ty: Type::Boolean,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(Value::Boolean(false))
             }
 
             Command::StrOp => {
@@ -199,32 +179,21 @@ impl Interpreter {
                     Value::String(Arc::from(""))
                 };
                 self.lhs_tracking.last_lhs_binding = None;
-                ExprResultValue {
-                    exp: val,
-                    ty: Type::String,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(val)
             }
 
             Command::CapsuleToken => {
-                let result =
-                    if let Some((val, ty, dep, pair_dep)) = self.cur.capsule.take() {
-                        ExprResultValue {
-                            exp: val,
-                            ty,
-                            dep,
-                            pair_dep,
-                        }
-                    } else {
-                        // CapsuleToken without payload — shouldn't happen, treat as vacuous
-                        ExprResultValue {
-                            exp: Value::Vacuous,
-                            ty: Type::Vacuous,
-                            dep: None,
-                            pair_dep: None,
-                        }
-                    };
+                let result = if let Some(payload) = self.cur.capsule.take() {
+                    ExprResultValue {
+                        exp: payload.value,
+                        ty: payload.ty,
+                        dep: payload.dep,
+                        pair_dep: payload.pair_dep,
+                    }
+                } else {
+                    // CapsuleToken without payload — shouldn't happen, treat as vacuous
+                    ExprResultValue::vacuous()
+                };
                 self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
                 result
@@ -265,23 +234,14 @@ impl Interpreter {
                     _ => false,
                 };
                 self.lhs_tracking.last_lhs_binding = None;
-                ExprResultValue {
-                    exp: Value::Boolean(result),
-                    ty: Type::Boolean,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(Value::Boolean(result))
             }
 
             _ => {
                 // Missing primary — set to vacuous
                 self.lhs_tracking.last_lhs_binding = None;
-                ExprResultValue {
-                    exp: Value::Vacuous,
-                    ty: Type::Vacuous,
-                    dep: None,
-                    pair_dep: None,
-                }
+                self.report_error(ErrorKind::MissingToken, "Missing primary expression");
+                ExprResultValue::vacuous()
             }
         };
 
@@ -296,12 +256,7 @@ impl Interpreter {
         } else {
             0.0
         };
-        let mut result = ExprResultValue {
-            exp: Value::Numeric(v),
-            ty: Type::Known,
-            dep: Some(const_dep(v)),
-            pair_dep: None,
-        };
+        let mut result = ExprResultValue::numeric_known(v);
         self.lhs_tracking.last_lhs_binding = None;
         self.get_x_next();
 
@@ -399,12 +354,9 @@ impl Interpreter {
                 } else {
                     None
                 };
-                ExprResultValue {
-                    exp: Value::Color(postmeta_graphics::types::Color::new(r, g, b)),
-                    ty: Type::ColorType,
-                    dep: None,
-                    pair_dep: None,
-                }
+                ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(
+                    r, g, b,
+                )))
             } else {
                 // Pair: (x, y)
                 let x = value_to_scalar(&first)?;
@@ -558,18 +510,15 @@ impl Interpreter {
                     pair_dep,
                 }
             }
-            (Value::Color(bc), Value::Color(cc)) => ExprResultValue {
-                exp: Value::Color(postmeta_graphics::types::Color::new(
+            (Value::Color(bc), Value::Color(cc)) => ExprResultValue::plain(Value::Color(
+                postmeta_graphics::types::Color::new(
                     one_minus_a * bc.r + a * cc.r,
                     one_minus_a * bc.g + a * cc.g,
                     one_minus_a * bc.b + a * cc.b,
-                )),
-                ty: Type::ColorType,
-                dep: None,
-                pair_dep: None,
-            },
-            (Value::Transform(bt), Value::Transform(ct)) => ExprResultValue {
-                exp: Value::Transform(postmeta_graphics::types::Transform {
+                ),
+            )),
+            (Value::Transform(bt), Value::Transform(ct)) => ExprResultValue::plain(
+                Value::Transform(postmeta_graphics::types::Transform {
                     tx: one_minus_a * bt.tx + a * ct.tx,
                     ty: one_minus_a * bt.ty + a * ct.ty,
                     txx: one_minus_a * bt.txx + a * ct.txx,
@@ -577,10 +526,7 @@ impl Interpreter {
                     tyx: one_minus_a * bt.tyx + a * ct.tyx,
                     tyy: one_minus_a * bt.tyy + a * ct.tyy,
                 }),
-                ty: Type::TransformType,
-                dep: None,
-                pair_dep: None,
-            },
+            ),
             (bv, cv) => {
                 return Err(InterpreterError::new(
                     ErrorKind::TypeError,
@@ -653,14 +599,14 @@ impl Interpreter {
                     // the current token back, then restore `[`
                     // as the current command so the mediation
                     // check after variable resolution can see it.
-                    use crate::input::StoredToken;
+                    use crate::input::{CapsulePayload, StoredToken};
                     let result = subscript_result;
-                    let mut tl = vec![StoredToken::Capsule(
-                        result.exp,
-                        result.ty,
-                        result.dep,
-                        result.pair_dep,
-                    )];
+                    let mut tl = vec![StoredToken::Capsule(CapsulePayload {
+                        value: result.exp,
+                        ty: result.ty,
+                        dep: result.dep,
+                        pair_dep: result.pair_dep,
+                    })];
                     self.store_current_token(&mut tl);
                     self.input
                         .push_token_list(tl, Vec::new(), "mediation backtrack".into());
@@ -821,12 +767,9 @@ impl Interpreter {
                 let a = value_to_bool(&left_val)?;
                 let b = value_to_bool(&right.exp)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                Ok(InfixAction::Continue(ExprResultValue {
-                    exp: Value::Boolean(a && b),
-                    ty: Type::Boolean,
-                    dep: None,
-                    pair_dep: None,
-                }))
+                Ok(InfixAction::Continue(ExprResultValue::plain(Value::Boolean(
+                    a && b,
+                ))))
             }
 
             // ----- Tertiary level: +, -, ++, +-+ -----
@@ -866,12 +809,7 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_tertiary_binary(op, &left_val, &right.exp)?;
-                Ok(InfixAction::Continue(ExprResultValue {
-                    exp: val,
-                    ty,
-                    dep: None,
-                    pair_dep: None,
-                }))
+                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
             }
 
             // ----- Expression level: =, <, >, path join, &, ... -----
@@ -888,12 +826,7 @@ impl Interpreter {
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) =
                     Self::do_expression_binary(ExpressionBinaryOp::EqualTo, &left_val, &right.exp)?;
-                Ok(InfixAction::Continue(ExprResultValue {
-                    exp: val,
-                    ty,
-                    dep: None,
-                    pair_dep: None,
-                }))
+                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
             }
 
             Command::ExpressionBinary => {
@@ -908,12 +841,7 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_expression_binary(op, &left_val, &right.exp)?;
-                Ok(InfixAction::Continue(ExprResultValue {
-                    exp: val,
-                    ty,
-                    dep: None,
-                    pair_dep: None,
-                }))
+                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
             }
 
             // ----- Path construction and & -----
@@ -937,12 +865,7 @@ impl Interpreter {
                         &left_val,
                         &right.exp,
                     )?;
-                    Ok(InfixAction::Break(ExprResultValue {
-                        exp: val,
-                        ty,
-                        dep: None,
-                        pair_dep: None,
-                    }))
+                    Ok(InfixAction::Break(ExprResultValue::typed(val, ty)))
                 }
             }
 
@@ -1077,12 +1000,7 @@ impl Interpreter {
                     pair_dep: pair_deps,
                 }
             }
-            _ => ExprResultValue {
-                exp: val,
-                ty,
-                dep: None,
-                pair_dep: None,
-            },
+            _ => ExprResultValue::typed(val, ty),
         }
     }
 
@@ -1104,12 +1022,7 @@ impl Interpreter {
                     dep: None,
                     pair_dep: Some((const_dep(0.0), const_dep(0.0))),
                 },
-                _ => ExprResultValue {
-                    exp: Value::Numeric(0.0),
-                    ty: Type::Known,
-                    dep: Some(const_dep(0.0)),
-                    pair_dep: None,
-                },
+                _ => ExprResultValue::numeric_known(0.0),
             });
         }
         Ok(match left_val {

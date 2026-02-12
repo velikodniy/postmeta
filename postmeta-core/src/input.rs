@@ -14,7 +14,13 @@ use crate::token::{Token, TokenKind};
 use crate::types::{Type, Value};
 
 /// Captured expression state used by capsule tokens.
-pub type CapsulePayload = (Value, Type, Option<DepList>, Option<(DepList, DepList)>);
+#[derive(Debug, Clone)]
+pub struct CapsulePayload {
+    pub value: Value,
+    pub ty: Type,
+    pub dep: Option<DepList>,
+    pub pair_dep: Option<(DepList, DepList)>,
+}
 
 // ---------------------------------------------------------------------------
 // Resolved token — what the parser sees after hash lookup
@@ -60,7 +66,7 @@ pub enum StoredToken {
     /// When the expression parser needs to push a value back into the input
     /// stream (e.g., after discovering that `[` was not the start of a
     /// mediation), the value is wrapped in a capsule token.
-    Capsule(Value, Type, Option<DepList>, Option<(DepList, DepList)>),
+    Capsule(CapsulePayload),
 }
 
 /// A token list (macro body, loop body, etc.).
@@ -85,9 +91,6 @@ enum InputLevel {
         pos: usize,
         /// Parameters for macro expansion.
         params: Vec<TokenList>,
-        /// Name of this input level (for error messages).
-        #[allow(dead_code)]
-        name: String,
     },
 }
 
@@ -145,12 +148,11 @@ impl InputSystem {
     }
 
     /// Push a token list as a new input level (for macro expansion).
-    pub fn push_token_list(&mut self, tokens: TokenList, params: Vec<TokenList>, name: String) {
+    pub fn push_token_list(&mut self, tokens: TokenList, params: Vec<TokenList>, _name: String) {
         self.levels.push(InputLevel::TokenList {
             tokens,
             pos: 0,
             params,
-            name,
         });
     }
 
@@ -192,7 +194,12 @@ impl InputSystem {
         pair_dep: Option<(DepList, DepList)>,
     ) {
         self.push_token_list(
-            vec![StoredToken::Capsule(value, ty, dep, pair_dep)],
+            vec![StoredToken::Capsule(CapsulePayload {
+                value,
+                ty,
+                dep,
+                pair_dep,
+            })],
             Vec::new(),
             "backed-up expr".into(),
         );
@@ -233,12 +240,11 @@ impl InputSystem {
                     self.levels.pop();
                 }
                 LevelAction::Continue => {}
-                LevelAction::PushParam(param_tokens, idx) => {
+                LevelAction::PushParam(param_tokens, _idx) => {
                     self.levels.push(InputLevel::TokenList {
                         tokens: param_tokens,
                         pos: 0,
                         params: Vec::new(),
-                        name: format!("param {idx}"),
                     });
                 }
             }
@@ -314,11 +320,8 @@ impl InputSystem {
                             capsule: None,
                         })
                     }
-                    StoredToken::Capsule(val, ty, dep, pair_dep) => {
-                        let val = val.clone();
-                        let ty = *ty;
-                        let dep = dep.clone();
-                        let pair_dep = pair_dep.clone();
+                    StoredToken::Capsule(payload) => {
+                        let payload = payload.clone();
                         LevelAction::Token(ResolvedToken {
                             command: Command::CapsuleToken,
                             modifier: 0,
@@ -327,7 +330,7 @@ impl InputSystem {
                                 kind: TokenKind::Symbolic("<capsule>".to_owned()),
                                 span: crate::token::Span::at(0),
                             },
-                            capsule: Some((val, ty, dep, pair_dep)),
+                            capsule: Some(payload),
                         })
                     }
                     StoredToken::Param(idx) => {
@@ -346,15 +349,10 @@ impl InputSystem {
     }
 
     /// Check if the input stack is empty.
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.levels.is_empty() && self.backed_up.is_none()
-    }
-
-    /// Current input depth (for debugging).
-    #[must_use]
-    pub fn depth(&self) -> usize {
-        self.levels.len()
     }
 }
 
@@ -408,13 +406,8 @@ fn resolve_token(token: &Token, symbols: &mut SymbolTable) -> ResolvedToken {
 
 fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
     if tok.command == Command::CapsuleToken {
-        if let Some((val, ty, dep, pair_dep)) = &tok.capsule {
-            return Some(StoredToken::Capsule(
-                val.clone(),
-                *ty,
-                dep.clone(),
-                pair_dep.clone(),
-            ));
+        if let Some(payload) = &tok.capsule {
+            return Some(StoredToken::Capsule(payload.clone()));
         }
         return None;
     }
@@ -561,11 +554,11 @@ mod tests {
         let t = input.next_raw_token(&mut symbols);
         assert_eq!(t.command, Command::CapsuleToken);
         assert!(t.capsule.is_some());
-        let (val, ty, dep, pair_dep) = t.capsule.unwrap();
-        assert_eq!(ty, Type::Known);
-        assert_eq!(val.as_numeric(), Some(99.0));
-        assert!(dep.is_none());
-        assert!(pair_dep.is_none());
+        let payload = t.capsule.unwrap();
+        assert_eq!(payload.ty, Type::Known);
+        assert_eq!(payload.value.as_numeric(), Some(99.0));
+        assert!(payload.dep.is_none());
+        assert!(payload.pair_dep.is_none());
     }
 
     #[test]
@@ -582,11 +575,11 @@ mod tests {
         // Should get capsule first
         let t = input.next_raw_token(&mut symbols);
         assert_eq!(t.command, Command::CapsuleToken);
-        let (val, ty, dep, pair_dep) = t.capsule.unwrap();
-        assert_eq!(ty, Type::PairType);
-        assert_eq!(val.as_pair(), Some((3.0, 7.0)));
-        assert!(dep.is_none());
-        assert!(pair_dep.is_none());
+        let payload = t.capsule.unwrap();
+        assert_eq!(payload.ty, Type::PairType);
+        assert_eq!(payload.value.as_pair(), Some((3.0, 7.0)));
+        assert!(payload.dep.is_none());
+        assert!(payload.pair_dep.is_none());
 
         // Then ";"
         let t2 = input.next_raw_token(&mut symbols);

@@ -5,7 +5,7 @@
 use postmeta_graphics::types::{Path, Pen, Scalar, Transform};
 
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::input::{StoredToken, TokenList};
+use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolTable;
 use crate::types::{Type, Value};
 
@@ -86,9 +86,9 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             ]
         }
         Value::String(s) => vec![StoredToken::StringLit(s.to_string())],
-        _ => vec![StoredToken::Capsule(
-            val.clone(),
-            match val {
+        _ => vec![StoredToken::Capsule(CapsulePayload {
+            value: val.clone(),
+            ty: match val {
                 Value::Numeric(_) => Type::Known,
                 Value::Boolean(_) => Type::Boolean,
                 Value::Transform(..) => Type::TransformType,
@@ -99,8 +99,8 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
                 // Vacuous and any remaining variants fall here.
                 _ => Type::Vacuous,
             },
-            None,
-            None,
-        )],
+            dep: None,
+            pair_dep: None,
+        })],
     }
 }

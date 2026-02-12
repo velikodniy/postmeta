@@ -175,12 +175,23 @@ impl Internals {
         }
     }
 
+    /// Get the value of a built-in internal quantity by enum id.
+    #[must_use]
+    pub fn get_id(&self, id: InternalId) -> Scalar {
+        self.get(id as u16)
+    }
+
     /// Set the value of an internal quantity by index.
     pub fn set(&mut self, index: u16, value: Scalar) {
         let idx = index as usize;
         if idx < self.values.len() {
             self.values[idx] = value;
         }
+    }
+
+    /// Set the value of a built-in internal quantity by enum id.
+    pub fn set_id(&mut self, id: InternalId, value: Scalar) {
+        self.set(id as u16, value);
     }
 
     /// Get the name of an internal quantity.
