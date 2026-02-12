@@ -681,8 +681,7 @@ impl Interpreter {
             return self.scan_primary();
         }
 
-        self.resolve_variable(root_sym, &name, &suffix_segs)?;
-        Ok(self.take_cur_result())
+        self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
     fn scan_rhs_for_infix_command(&mut self, cmd: Command) -> InterpResult<()> {

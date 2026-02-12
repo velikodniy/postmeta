@@ -571,13 +571,13 @@ impl Interpreter {
         self.variables.set(var_id, val);
     }
 
-    /// Resolve a variable name to its value.
+    /// Resolve a variable name to its value, returning the result.
     fn resolve_variable(
         &mut self,
         sym: Option<SymbolId>,
         name: &str,
         suffixes: &[SuffixSegment],
-    ) -> InterpResult<()> {
+    ) -> InterpResult<ExprResultValue> {
         let var_id = self.variables.lookup(name);
         self.initialize_declared_variable(var_id, name, sym, suffixes);
         // Track last scanned variable for assignment LHS
@@ -586,62 +586,77 @@ impl Interpreter {
             negated: false,
         });
 
-        match self.variables.get(var_id).clone() {
+        let result = match self.variables.get(var_id).clone() {
             VarValue::Known(v) => {
-                self.cur_expr.exp = v.clone();
-                self.cur_expr.ty = v.ty();
-                self.cur_expr.dep = match &v {
+                let dep = match &v {
                     Value::Numeric(n) => Some(const_dep(*n)),
                     _ => None,
                 };
-                self.cur_expr.pair_dep = if let Value::Pair(x, y) = &v {
+                let pair_dep = if let Value::Pair(x, y) = &v {
                     Some((const_dep(*x), const_dep(*y)))
                 } else {
                     None
                 };
+                ExprResultValue {
+                    ty: v.ty(),
+                    exp: v,
+                    dep,
+                    pair_dep,
+                }
             }
-            VarValue::NumericVar(NumericState::Known(v)) => {
-                self.cur_expr.exp = Value::Numeric(v);
-                self.cur_expr.ty = Type::Known;
-                self.cur_expr.dep = Some(const_dep(v));
-                self.cur_expr.pair_dep = None;
-            }
-            VarValue::NumericVar(NumericState::Independent { .. }) => {
-                self.cur_expr.exp = Value::Numeric(0.0);
-                self.cur_expr.ty = Type::Independent;
-                self.cur_expr.dep = Some(single_dep(var_id));
-                self.cur_expr.pair_dep = None;
-            }
-            VarValue::NumericVar(NumericState::Dependent(dep)) => {
-                self.cur_expr.exp = Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0));
-                self.cur_expr.ty = Type::Dependent;
-                self.cur_expr.dep = Some(dep);
-                self.cur_expr.pair_dep = None;
-            }
+            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue {
+                exp: Value::Numeric(v),
+                ty: Type::Known,
+                dep: Some(const_dep(v)),
+                pair_dep: None,
+            },
+            VarValue::NumericVar(NumericState::Independent { .. }) => ExprResultValue {
+                exp: Value::Numeric(0.0),
+                ty: Type::Independent,
+                dep: Some(single_dep(var_id)),
+                pair_dep: None,
+            },
+            VarValue::NumericVar(NumericState::Dependent(dep)) => ExprResultValue {
+                exp: Value::Numeric(
+                    crate::equation::constant_value(&dep).unwrap_or(0.0),
+                ),
+                ty: Type::Dependent,
+                dep: Some(dep),
+                pair_dep: None,
+            },
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
                 self.variables.make_independent(var_id);
-                self.cur_expr.exp = Value::Numeric(0.0);
-                self.cur_expr.ty = Type::Independent;
-                self.cur_expr.dep = Some(single_dep(var_id));
-                self.cur_expr.pair_dep = None;
+                ExprResultValue {
+                    exp: Value::Numeric(0.0),
+                    ty: Type::Independent,
+                    dep: Some(single_dep(var_id)),
+                    pair_dep: None,
+                }
             }
             VarValue::Pair { x, y } => {
                 let xv = self.variables.known_value(x).unwrap_or(0.0);
                 let yv = self.variables.known_value(y).unwrap_or(0.0);
-                self.cur_expr.exp = Value::Pair(xv, yv);
-                self.cur_expr.ty = Type::PairType;
-                self.cur_expr.dep = None;
-                self.cur_expr.pair_dep = Some((self.numeric_dep_for_var(x), self.numeric_dep_for_var(y)));
+                ExprResultValue {
+                    exp: Value::Pair(xv, yv),
+                    ty: Type::PairType,
+                    dep: None,
+                    pair_dep: Some((
+                        self.numeric_dep_for_var(x),
+                        self.numeric_dep_for_var(y),
+                    )),
+                }
             }
             VarValue::Color { r, g, b } => {
                 let rv = self.variables.known_value(r).unwrap_or(0.0);
                 let gv = self.variables.known_value(g).unwrap_or(0.0);
                 let bv = self.variables.known_value(b).unwrap_or(0.0);
-                self.cur_expr.exp = Value::Color(Color::new(rv, gv, bv));
-                self.cur_expr.ty = Type::ColorType;
-                self.cur_expr.dep = None;
-                self.cur_expr.pair_dep = None;
+                ExprResultValue {
+                    exp: Value::Color(Color::new(rv, gv, bv)),
+                    ty: Type::ColorType,
+                    dep: None,
+                    pair_dep: None,
+                }
             }
             VarValue::Transform {
                 tx,
@@ -653,20 +668,22 @@ impl Interpreter {
             } => {
                 let parts = [tx, ty, txx, txy, tyx, tyy]
                     .map(|id| self.variables.known_value(id).unwrap_or(0.0));
-                self.cur_expr.exp = Value::Transform(Transform {
-                    tx: parts[0],
-                    ty: parts[1],
-                    txx: parts[2],
-                    txy: parts[3],
-                    tyx: parts[4],
-                    tyy: parts[5],
-                });
-                self.cur_expr.ty = Type::TransformType;
-                self.cur_expr.dep = None;
-                self.cur_expr.pair_dep = None;
+                ExprResultValue {
+                    exp: Value::Transform(Transform {
+                        tx: parts[0],
+                        ty: parts[1],
+                        txx: parts[2],
+                        txy: parts[3],
+                        tyx: parts[4],
+                        tyy: parts[5],
+                    }),
+                    ty: Type::TransformType,
+                    dep: None,
+                    pair_dep: None,
+                }
             }
-        }
-        Ok(())
+        };
+        Ok(result)
     }
 
     // =======================================================================
