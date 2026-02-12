@@ -23,7 +23,7 @@ use crate::types::{Type, Value};
 
 use super::helpers::{
     value_to_bool, value_to_pair, value_to_path, value_to_pen, value_to_scalar, value_to_string,
-    value_to_transform, values_equal,
+    value_to_transform,
 };
 use super::{Interpreter, LhsBinding};
 
@@ -644,12 +644,12 @@ impl Interpreter {
                 self.cur_expr.ty = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::EqualTo as u16 => {
-                let result = values_equal(left, &right);
+                let result = left == &right;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
             x if x == ExpressionBinaryOp::UnequalTo as u16 => {
-                let result = !values_equal(left, &right);
+                let result = left != &right;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }

@@ -7,7 +7,7 @@ use postmeta_graphics::types::{Path, Pen, Scalar, Transform};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolTable;
-use crate::types::{Type, Value, NUMERIC_TOLERANCE};
+use crate::types::{Type, Value};
 
 pub(super) fn value_to_scalar(val: &Value) -> InterpResult<Scalar> {
     match val {
@@ -139,17 +139,5 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             None,
             None,
         )],
-    }
-}
-
-pub(super) fn values_equal(a: &Value, b: &Value) -> bool {
-    match (a, b) {
-        (Value::Numeric(a), Value::Numeric(b)) => (a - b).abs() < NUMERIC_TOLERANCE,
-        (Value::Boolean(a), Value::Boolean(b)) => a == b,
-        (Value::String(a), Value::String(b)) => a == b,
-        (Value::Pair(ax, ay), Value::Pair(bx, by)) => {
-            (ax - bx).abs() < NUMERIC_TOLERANCE && (ay - by).abs() < NUMERIC_TOLERANCE
-        }
-        _ => false,
     }
 }
