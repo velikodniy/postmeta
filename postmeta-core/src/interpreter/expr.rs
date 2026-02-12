@@ -127,18 +127,12 @@ impl Interpreter {
                     ));
                 };
                 self.get_x_next();
-                // Take the operand, but preserve pair_dep for part-extraction
-                // ops that propagate it into the equation solver.
                 let operand_result = self.scan_primary()?;
-                self.cur_expr.pair_dep = operand_result.pair_dep;
-                self.do_unary(op, operand_result.exp)?;
-                // Part-extraction ops (xpart, ypart, etc.) set up cur_dep
-                // themselves for equation solving; don't clear it for those.
-                // For all other unary ops the result is a known scalar,
-                // so any stale dep must be dropped.
-                if self.cur_expr.pair_dep.is_none() && self.cur_expr.ty == Type::Known {
-                    self.cur_expr.dep = None;
-                }
+                let result = self.do_unary(op, operand_result.exp, operand_result.pair_dep)?;
+                self.cur_expr.exp = result.exp;
+                self.cur_expr.ty = result.ty;
+                self.cur_expr.dep = result.dep;
+                self.cur_expr.pair_dep = result.pair_dep;
                 Ok(())
             }
 

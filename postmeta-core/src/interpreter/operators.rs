@@ -64,31 +64,39 @@ impl Interpreter {
         }
     }
 
-    /// Execute a unary operator.
+    /// Execute a unary operator, returning the result.
     ///
     /// Most operators are pure: they transform an input value into an output
     /// `(Value, Type)` via [`Self::eval_unary`].  The part-extraction operators
     /// (`xpart`, `ypart`, etc.) additionally propagate pair dependency info for
-    /// the equation solver, which requires mutable access to `self`.
-    pub(super) fn do_unary(&mut self, op: UnaryOp, input: Value) -> InterpResult<()> {
+    /// the equation solver.
+    pub(super) fn do_unary(
+        &mut self,
+        op: UnaryOp,
+        input: Value,
+        pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
+    ) -> InterpResult<super::ExprResultValue> {
         self.lhs_tracking.last_lhs_binding = None;
 
         // Part-extraction operators need pair_dep access — handle them here.
         match op {
-            UnaryOp::XPart => return self.extract_part(&input, 0),
-            UnaryOp::YPart => return self.extract_part(&input, 1),
-            UnaryOp::XXPart => return self.extract_part(&input, 2),
-            UnaryOp::XYPart => return self.extract_part(&input, 3),
-            UnaryOp::YXPart => return self.extract_part(&input, 4),
-            UnaryOp::YYPart => return self.extract_part(&input, 5),
+            UnaryOp::XPart => return self.extract_part(&input, 0, pair_dep),
+            UnaryOp::YPart => return self.extract_part(&input, 1, pair_dep),
+            UnaryOp::XXPart => return self.extract_part(&input, 2, pair_dep),
+            UnaryOp::XYPart => return self.extract_part(&input, 3, pair_dep),
+            UnaryOp::YXPart => return self.extract_part(&input, 4, pair_dep),
+            UnaryOp::YYPart => return self.extract_part(&input, 5, pair_dep),
             _ => {}
         }
 
         // All remaining unary operators are pure value transformations.
         let (val, ty) = Self::eval_unary(op, &input, &mut self.random_seed)?;
-        self.cur_expr.exp = val;
-        self.cur_expr.ty = ty;
-        Ok(())
+        Ok(super::ExprResultValue {
+            exp: val,
+            ty,
+            dep: None,
+            pair_dep: None,
+        })
     }
 
     /// Pure evaluation of a unary operator.
@@ -512,9 +520,15 @@ impl Interpreter {
     ///
     /// When the operand has a pair dependency list (i.e. the pair variable
     /// is not fully known), the extracted component's dependency is
-    /// propagated to `cur_dep` / `last_lhs_binding` so that it can
-    /// participate in linear equation solving (e.g. `xpart A = 0`).
-    fn extract_part(&mut self, input: &Value, part: usize) -> InterpResult<()> {
+    /// propagated to the returned result's `dep` and to
+    /// `last_lhs_binding` so that it can participate in linear equation
+    /// solving (e.g. `xpart A = 0`).
+    fn extract_part(
+        &mut self,
+        input: &Value,
+        part: usize,
+        pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
+    ) -> InterpResult<super::ExprResultValue> {
         match input {
             Value::Pair(x, y) => {
                 let v = match part {
@@ -527,14 +541,17 @@ impl Interpreter {
                         ))
                     }
                 };
-                self.cur_expr.exp = Value::Numeric(v);
                 // Propagate the component's dependency so equations work.
-                if let Some((dx, dy)) = self.cur_expr.pair_dep.take() {
+                if let Some((dx, dy)) = pair_dep {
                     let dep = if part == 0 { dx } else { dy };
                     if crate::equation::is_constant(&dep) {
                         // Fully known component — no dependency to track.
-                        self.cur_expr.dep = Some(dep);
-                        self.cur_expr.ty = Type::Known;
+                        Ok(super::ExprResultValue {
+                            exp: Value::Numeric(v),
+                            ty: Type::Known,
+                            dep: Some(dep),
+                            pair_dep: None,
+                        })
                     } else {
                         // Extract the primary VarId from the dep for LHS binding.
                         let primary_var = dep.iter().find_map(|t| t.var_id);
@@ -544,11 +561,20 @@ impl Interpreter {
                                 negated: false,
                             });
                         }
-                        self.cur_expr.dep = Some(dep);
-                        self.cur_expr.ty = Type::Dependent;
+                        Ok(super::ExprResultValue {
+                            exp: Value::Numeric(v),
+                            ty: Type::Dependent,
+                            dep: Some(dep),
+                            pair_dep: None,
+                        })
                     }
                 } else {
-                    self.cur_expr.ty = Type::Known;
+                    Ok(super::ExprResultValue {
+                        exp: Value::Numeric(v),
+                        ty: Type::Known,
+                        dep: None,
+                        pair_dep: None,
+                    })
                 }
             }
             Value::Transform(t) => {
@@ -566,17 +592,18 @@ impl Interpreter {
                         ))
                     }
                 };
-                self.cur_expr.exp = Value::Numeric(v);
-                self.cur_expr.ty = Type::Known;
+                Ok(super::ExprResultValue {
+                    exp: Value::Numeric(v),
+                    ty: Type::Known,
+                    dep: None,
+                    pair_dep: None,
+                })
             }
-            _ => {
-                return Err(InterpreterError::new(
-                    ErrorKind::TypeError,
-                    format!("{} has no xpart/ypart", input.ty()),
-                ));
-            }
+            _ => Err(InterpreterError::new(
+                ErrorKind::TypeError,
+                format!("{} has no xpart/ypart", input.ty()),
+            )),
         }
-        Ok(())
     }
 
     /// Extract a color part, returning `(Value::Numeric, Type::Known)`.
