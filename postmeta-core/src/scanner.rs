@@ -187,6 +187,11 @@ impl Scanner {
         &self.errors
     }
 
+    /// Drain accumulated scan errors.
+    pub fn take_errors(&mut self) -> Vec<ScanError> {
+        std::mem::take(&mut self.errors)
+    }
+
     // -- internal helpers --
 
     /// Skip whitespace and `%`-comments.

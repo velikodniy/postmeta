@@ -6,6 +6,7 @@
 //! input levels, matching `mp.web`'s input stack.
 
 use crate::command::Command;
+use crate::scanner::ScanError;
 use crate::scanner::Scanner;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::token::{Token, TokenKind};
@@ -111,6 +112,8 @@ pub struct InputSystem {
     /// but simplified to a single slot since `MetaPost` never backs up more
     /// than one token at a time (multiple push-backs use token lists).
     backed_up: Option<ResolvedToken>,
+    /// Scanner diagnostics collected while producing tokens.
+    pending_scan_errors: Vec<ScanError>,
 }
 
 impl InputSystem {
@@ -120,7 +123,13 @@ impl InputSystem {
         Self {
             levels: Vec::new(),
             backed_up: None,
+            pending_scan_errors: Vec::new(),
         }
+    }
+
+    /// Drain scanner diagnostics gathered since the last call.
+    pub fn take_scan_errors(&mut self) -> Vec<ScanError> {
+        std::mem::take(&mut self.pending_scan_errors)
     }
 
     /// Push a source text as a new input level.
@@ -228,6 +237,7 @@ impl InputSystem {
         match level {
             InputLevel::Source { scanner } => {
                 let token = scanner.next_token();
+                self.pending_scan_errors.extend(scanner.take_errors());
                 if token.kind.is_eof() {
                     LevelAction::Pop
                 } else {

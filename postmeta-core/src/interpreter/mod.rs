@@ -273,6 +273,15 @@ impl Interpreter {
     /// Get the next token (raw, no expansion).
     fn get_next(&mut self) {
         self.cur = self.input.next_raw_token(&mut self.symbols);
+        for scan_error in self.input.take_scan_errors() {
+            let kind = if scan_error.message.contains("unterminated string") {
+                ErrorKind::UnterminatedString
+            } else {
+                ErrorKind::InvalidCharacter
+            };
+            self.errors
+                .push(InterpreterError::new(kind, scan_error.message).with_span(scan_error.span));
+        }
     }
 
     /// Get the next token, expanding macros and conditionals.
@@ -1984,6 +1993,43 @@ mod tests {
                 e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `}`")
             }),
             "expected missing right brace diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn scanner_unterminated_string_is_reported() {
+        let mut interp = Interpreter::new();
+        interp.run("show \"unterminated").unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == crate::error::ErrorKind::UnterminatedString),
+            "expected unterminated-string scanner diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn scanner_invalid_character_is_reported() {
+        let mut interp = Interpreter::new();
+        let src = format!("show 1;{}show 2;", '\u{1f}');
+        interp.run(&src).unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.kind == crate::error::ErrorKind::InvalidCharacter),
+            "expected invalid-character scanner diagnostic, got: {errors:?}"
         );
     }
 
