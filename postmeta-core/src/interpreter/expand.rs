@@ -423,8 +423,13 @@ impl Interpreter {
     ///
     /// Re-pushes the loop body for the next iteration, or stops if `exitif` fired.
     fn expand_repeat_loop(&mut self) {
-        if let Some(frame) = self.control_flow.forever_stack.last_mut() {
-            if frame.exit_requested {
+        if let Some((exit_requested, body)) = self
+            .control_flow
+            .forever_stack
+            .last()
+            .map(|frame| (frame.exit_requested, frame.body.clone()))
+        {
+            if exit_requested {
                 // Exit was requested for this loop.
                 self.control_flow.forever_stack.pop();
                 self.get_next();
@@ -433,10 +438,11 @@ impl Interpreter {
             }
 
             // Re-push the body for the next iteration.
-            let repeat_sym = self.symbols.lookup("__repeat_loop__");
-            let mut iteration = frame.body.clone();
+            let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
+            let mut iteration = body;
             iteration.push(StoredToken::Symbol(repeat_sym));
-            self.input
+            self.state
+                .input
                 .push_token_list(iteration, Vec::new(), "forever-body".into());
         }
 

@@ -59,6 +59,19 @@ pub(super) struct CurExpr {
     pub pair_dep: Option<(DepList, DepList)>,
 }
 
+/// Immutable expression evaluation result.
+///
+/// This is the value-oriented counterpart of [`CurExpr`]. It is used when
+/// callers need to move expression results across parser boundaries without
+/// sharing mutable interpreter state.
+#[derive(Clone)]
+pub(super) struct ExprResultValue {
+    pub exp: Value,
+    pub ty: Type,
+    pub dep: Option<DepList>,
+    pub pair_dep: Option<(DepList, DepList)>,
+}
+
 impl CurExpr {
     const fn new() -> Self {
         Self {
@@ -86,6 +99,31 @@ impl CurExpr {
     /// Take the pair dependency lists.
     const fn take_pair_dep(&mut self) -> Option<(DepList, DepList)> {
         self.pair_dep.take()
+    }
+
+    fn snapshot(&self) -> ExprResultValue {
+        ExprResultValue {
+            exp: self.exp.clone(),
+            ty: self.ty,
+            dep: self.dep.clone(),
+            pair_dep: self.pair_dep.clone(),
+        }
+    }
+
+    fn take_result(&mut self) -> ExprResultValue {
+        ExprResultValue {
+            exp: std::mem::replace(&mut self.exp, Value::Vacuous),
+            ty: std::mem::replace(&mut self.ty, Type::Vacuous),
+            dep: self.dep.take(),
+            pair_dep: self.pair_dep.take(),
+        }
+    }
+
+    fn set_result(&mut self, result: ExprResultValue) {
+        self.exp = result.exp;
+        self.ty = result.ty;
+        self.dep = result.dep;
+        self.pair_dep = result.pair_dep;
     }
 }
 
@@ -156,12 +194,13 @@ impl PictureState {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Interpreter state
-// ---------------------------------------------------------------------------
-
-/// The `MetaPost` interpreter.
-pub struct Interpreter {
+/// Long-lived interpreter machine state.
+///
+/// This groups the mutable subsystems that represent the `MetaPost` "world":
+/// symbol/variable tables, input stack, internals, macro table, and drawing
+/// output buffers. The parser/expression front-end state stays on
+/// [`Interpreter`] (`cur`, `cur_expr`, `lhs_tracking`).
+pub struct MachineState {
     /// Filesystem for `input` commands.
     fs: Box<dyn FileSystem>,
     /// Symbol table (names → command codes).
@@ -176,14 +215,6 @@ pub struct Interpreter {
     pub input: InputSystem,
     /// Save stack for `begingroup`/`endgroup`.
     pub save_stack: SaveStack,
-    /// Current expression result (value, type, and dependency state).
-    cur_expr: CurExpr,
-    /// Current resolved token (set by `get_next`).
-    cur: ResolvedToken,
-    /// Latest bindable left-hand-side context.
-    lhs_tracking: LhsTracking,
-    /// Conditional and loop control state (if-stack, loop exit flag, pending body).
-    control_flow: ControlFlow,
     /// Picture output/runtime drawing state.
     picture_state: PictureState,
     /// Defined macros: `SymbolId` → macro info.
@@ -196,6 +227,24 @@ pub struct Interpreter {
     pub job_name: String,
     /// Next delimiter id for `delimiters` command (0 is reserved for `()`).
     next_delimiter_id: u16,
+}
+
+// ---------------------------------------------------------------------------
+// Interpreter state
+// ---------------------------------------------------------------------------
+
+/// The `MetaPost` interpreter.
+pub struct Interpreter {
+    /// Long-lived machine state.
+    state: MachineState,
+    /// Current expression result (value, type, and dependency state).
+    cur_expr: CurExpr,
+    /// Current resolved token (set by `get_next`).
+    cur: ResolvedToken,
+    /// Latest bindable left-hand-side context.
+    lhs_tracking: LhsTracking,
+    /// Conditional and loop control state (if-stack, loop exit flag, pending body).
+    control_flow: ControlFlow,
 }
 
 impl Interpreter {
@@ -233,29 +282,31 @@ impl Interpreter {
         };
 
         Self {
-            fs: Box::new(crate::filesystem::NullFileSystem),
-            symbols,
-            variables: Variables::new(),
-            var_trie: VarTrie::new(),
-            internals,
-            input: InputSystem::new(),
-            save_stack: SaveStack::new(),
+            state: MachineState {
+                fs: Box::new(crate::filesystem::NullFileSystem),
+                symbols,
+                variables: Variables::new(),
+                var_trie: VarTrie::new(),
+                internals,
+                input: InputSystem::new(),
+                save_stack: SaveStack::new(),
+                picture_state: PictureState::new(),
+                macros: std::collections::HashMap::new(),
+                random_seed: 0,
+                errors: Vec::new(),
+                job_name: "output".into(),
+                next_delimiter_id: 1, // 0 is reserved for built-in ()
+            },
             cur_expr: CurExpr::new(),
             cur,
             lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
-            picture_state: PictureState::new(),
-            macros: std::collections::HashMap::new(),
-            random_seed: 0,
-            errors: Vec::new(),
-            job_name: "output".into(),
-            next_delimiter_id: 1, // 0 is reserved for built-in ()
         }
     }
 
     /// Set the filesystem for `input` commands.
     pub fn set_filesystem(&mut self, fs: Box<dyn FileSystem>) {
-        self.fs = fs;
+        self.state.fs = fs;
     }
 
     // =======================================================================
@@ -264,13 +315,14 @@ impl Interpreter {
 
     /// Get the next token (raw, no expansion).
     fn get_next(&mut self) {
-        self.cur = self.input.next_raw_token(&mut self.symbols);
-        for scan_error in self.input.take_scan_errors() {
+        self.cur = self.state.input.next_raw_token(&mut self.state.symbols);
+        for scan_error in self.state.input.take_scan_errors() {
             let kind = match scan_error.kind {
                 ScanErrorKind::InvalidCharacter => ErrorKind::InvalidCharacter,
                 ScanErrorKind::UnterminatedString => ErrorKind::UnterminatedString,
             };
-            self.errors
+            self.state
+                .errors
                 .push(InterpreterError::new(kind, scan_error.message).with_span(scan_error.span));
         }
     }
@@ -282,16 +334,10 @@ impl Interpreter {
     fn get_x_next(&mut self) {
         // Expansion is token-oriented; it should not overwrite the current
         // expression value that the parser may already have computed.
-        let saved_exp = self.cur_expr.exp.clone();
-        let saved_type = self.cur_expr.ty;
-        let saved_dep = self.cur_expr.dep.clone();
-        let saved_pair_dep = self.cur_expr.pair_dep.clone();
+        let saved = self.cur_expr.snapshot();
         self.get_next();
         self.expand_current();
-        self.cur_expr.exp = saved_exp;
-        self.cur_expr.ty = saved_type;
-        self.cur_expr.dep = saved_dep;
-        self.cur_expr.pair_dep = saved_pair_dep;
+        self.set_cur_result(saved);
     }
 
     /// Push the current token back into the input stream.
@@ -299,7 +345,8 @@ impl Interpreter {
     /// After calling this, the next `get_next()` or `get_x_next()` will
     /// return the same token again. This is `mp.web`'s `back_input`.
     pub(super) fn back_input(&mut self) {
-        self.input.back_input(self.cur.clone());
+        let cur = self.cur.clone();
+        self.state.input.back_input(cur);
     }
 
     /// Push the current expression back into the input as a capsule token.
@@ -308,11 +355,10 @@ impl Interpreter {
     /// placed on the input stream. The next token read will be a
     /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
     pub(super) fn back_expr(&mut self) {
-        let dep = self.take_cur_dep();
-        let pair_dep = self.take_cur_pair_dep();
-        let ty = self.cur_expr.ty;
-        let val = self.take_cur_exp();
-        self.input.back_expr(val, ty, dep, pair_dep);
+        let result = self.take_cur_result();
+        self.state
+            .input
+            .back_expr(result.exp, result.ty, result.dep, result.pair_dep);
     }
 
     /// Store the current token into a token list.
@@ -354,6 +400,14 @@ impl Interpreter {
     /// Take `cur_exp`, replacing it with `Vacuous`.
     fn take_cur_exp(&mut self) -> Value {
         self.cur_expr.take_exp()
+    }
+
+    fn take_cur_result(&mut self) -> ExprResultValue {
+        self.cur_expr.take_result()
+    }
+
+    fn set_cur_result(&mut self, result: ExprResultValue) {
+        self.cur_expr.set_result(result);
     }
 
     const fn take_cur_dep(&mut self) -> Option<DepList> {
@@ -658,7 +712,7 @@ impl Interpreter {
 
     /// Run a `MetaPost` program from source text.
     pub fn run(&mut self, source: &str) -> InterpResult<()> {
-        self.input.push_source(source);
+        self.state.input.push_source(source);
         self.get_x_next();
 
         while self.cur.command != Command::Stop {
@@ -671,25 +725,39 @@ impl Interpreter {
     /// Get the output pictures.
     #[must_use]
     pub fn output(&self) -> &[Picture] {
-        &self.picture_state.pictures
+        &self.state.picture_state.pictures
     }
 
     /// Get the current picture being built.
     #[must_use]
     pub const fn current_picture(&self) -> &Picture {
-        &self.picture_state.current_picture
+        &self.state.picture_state.current_picture
     }
 
     /// Get the current figure number, if one is active.
     #[must_use]
     pub const fn current_fig(&self) -> Option<i32> {
-        self.picture_state.current_fig
+        self.state.picture_state.current_fig
     }
 
     /// Get the current drawing defaults.
     #[must_use]
     pub const fn drawing_state(&self) -> &DrawingState {
-        &self.picture_state.drawing_state
+        &self.state.picture_state.drawing_state
+    }
+}
+
+impl std::ops::Deref for Interpreter {
+    type Target = MachineState;
+
+    fn deref(&self) -> &Self::Target {
+        &self.state
+    }
+}
+
+impl std::ops::DerefMut for Interpreter {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.state
     }
 }
 

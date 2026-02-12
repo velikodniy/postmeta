@@ -28,11 +28,11 @@ use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     fn sync_currentpicture_variable(&mut self) {
-        if let Some(var_id) = self.variables.lookup_existing("currentpicture") {
-            self.variables.set_known(
-                var_id,
-                Value::Picture(self.picture_state.current_picture.clone()),
-            );
+        if let Some(var_id) = self.state.variables.lookup_existing("currentpicture") {
+            let picture = self.state.picture_state.current_picture.clone();
+            self.state
+                .variables
+                .set_known(var_id, Value::Picture(picture));
         }
     }
 
@@ -580,13 +580,14 @@ impl Interpreter {
         self.get_x_next();
         if self.cur.command == Command::InternalQuantity {
             let idx = self.cur.modifier;
-            self.save_stack.save_internal(idx, self.internals.get(idx));
+            let prev = self.state.internals.get(idx);
+            self.state.save_stack.save_internal(idx, prev);
             self.get_x_next();
             if self.cur.command == Command::Assignment {
                 self.get_x_next();
                 self.scan_expression()?;
                 let val = value_to_scalar(&self.cur_expr.exp)?;
-                self.internals.set(idx, val);
+                self.state.internals.set(idx, val);
             }
         }
         self.eat_semicolon();
