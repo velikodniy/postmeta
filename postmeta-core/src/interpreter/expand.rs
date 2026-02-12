@@ -1392,9 +1392,10 @@ impl Interpreter {
                         args.push(self.scan_suffix_arg());
                     }
                     ParamType::UndelimitedText => {
-                        // Collect tokens until semicolon
+                        // Collect tokens until semicolon/endgroup
                         let mut text_tokens = TokenList::new();
                         while self.cur.command != Command::Semicolon
+                            && self.cur.command != Command::EndGroup
                             && self.cur.command != Command::Stop
                         {
                             self.store_current_token(&mut text_tokens);
@@ -1419,11 +1420,22 @@ impl Interpreter {
         // was already collected before the regular params, so check the last
         // regular param instead.
         let last_regular_param = if macro_info.has_at_suffix {
-            macro_info.params.iter().rev().nth(1).copied()
+            let regular_count = macro_info.params.len().saturating_sub(1);
+            macro_info
+                .params
+                .get(regular_count.saturating_sub(1))
+                .copied()
         } else {
             macro_info.params.last().copied()
         };
-        let last_param_undelimited = last_regular_param.is_some_and(ParamType::is_undelimited);
+        let last_param = last_regular_param.or_else(|| {
+            if macro_info.has_at_suffix {
+                macro_info.params.last().copied()
+            } else {
+                None
+            }
+        });
+        let last_param_undelimited = last_param.is_some_and(ParamType::is_undelimited);
         if last_param_undelimited {
             let mut trailing = TokenList::new();
             self.store_current_token(&mut trailing);

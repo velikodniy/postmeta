@@ -76,6 +76,11 @@ impl Interpreter {
                         dep_scale(&mut d, factor_val);
                         d
                     });
+                    if let Some((mut dx, mut dy)) = self.cur_expr.pair_dep.take() {
+                        dep_scale(&mut dx, factor_val);
+                        dep_scale(&mut dy, factor_val);
+                        self.cur_expr.pair_dep = Some((dx, dy));
+                    }
                 }
                 Ok(())
             }
@@ -924,8 +929,11 @@ impl Interpreter {
                         match left {
                             Value::Numeric(a) => {
                                 self.cur_expr.exp = Value::Numeric(a / b);
-                                let right_const = right_dep.as_ref().and_then(constant_value);
-                                self.cur_expr.dep = right_const.and_then(|c| {
+                                let divisor = right_dep
+                                    .as_ref()
+                                    .and_then(constant_value)
+                                    .or_else(|| value_to_scalar(&right).ok());
+                                self.cur_expr.dep = divisor.and_then(|c| {
                                     if c.abs() < f64::EPSILON {
                                         None
                                     } else {

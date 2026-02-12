@@ -325,11 +325,16 @@ impl Interpreter {
     fn do_addto(&mut self) -> InterpResult<()> {
         self.get_x_next();
 
-        // Get the target picture variable name
-        let pic_name = self
-            .cur_symbolic_name()
-            .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
-        self.get_x_next();
+        // Optional target picture name. If omitted, default to currentpicture.
+        let pic_name = if self.cur.command == Command::TagToken {
+            let name = self
+                .cur_symbolic_name()
+                .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
+            self.get_x_next();
+            name
+        } else {
+            "currentpicture".to_owned()
+        };
 
         // Expect contour / doublepath / also
         let thing = ThingToAddOp::from_modifier(self.cur.modifier);
@@ -467,15 +472,22 @@ impl Interpreter {
         let is_clip = BoundsOp::from_modifier(self.cur.modifier) == Some(BoundsOp::Clip);
         self.get_x_next();
 
-        // Get picture name
-        let pic_name = self
-            .cur_symbolic_name()
-            .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
-        self.get_x_next();
+        // Optional picture name before `to`. If omitted, target currentpicture.
+        let pic_name = if self.cur.command == Command::TagToken {
+            let name = self
+                .cur_symbolic_name()
+                .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
+            self.get_x_next();
+            name
+        } else {
+            "currentpicture".to_owned()
+        };
 
         // Expect "to"
         if self.cur.command == Command::ToToken {
             self.get_x_next();
+        } else {
+            self.report_error(ErrorKind::MissingToken, "Expected `to` in clip/setbounds");
         }
 
         self.scan_expression()?;
@@ -501,10 +513,17 @@ impl Interpreter {
         self.scan_expression()?;
         let val = self.take_cur_exp();
 
-        let pic = if let Value::Picture(p) = val {
-            p
-        } else {
-            self.picture_state.current_picture.clone()
+        let pic = match val {
+            Value::Picture(p) => p,
+            Value::Vacuous => self.picture_state.current_picture.clone(),
+            other => {
+                self.report_error(
+                    ErrorKind::TypeError,
+                    format!("shipout requires a picture, got {}", other.ty()),
+                );
+                self.eat_semicolon();
+                return Ok(());
+            }
         };
 
         self.picture_state.pictures.push(pic);

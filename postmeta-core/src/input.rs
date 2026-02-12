@@ -166,10 +166,14 @@ impl InputSystem {
     /// `back_input` is always preceded by consuming the previously backed-up
     /// token, so double push-back indicates a logic error.
     pub fn back_input(&mut self, token: ResolvedToken) {
-        debug_assert!(
-            self.backed_up.is_none(),
-            "back_input called while a token is already backed up"
-        );
+        // Preserve any already backed-up token instead of silently dropping it.
+        // The newest token should be returned first, so spill the previous one
+        // to a lower-priority token-list level.
+        if let Some(prev) = self.backed_up.take()
+            && let Some(stored) = resolved_to_stored_token(&prev)
+        {
+            self.push_token_list(vec![stored], Vec::new(), "backed-up spill".into());
+        }
         self.backed_up = Some(token);
     }
 
@@ -344,7 +348,7 @@ impl InputSystem {
     /// Check if the input stack is empty.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.levels.is_empty()
+        self.levels.is_empty() && self.backed_up.is_none()
     }
 
     /// Current input depth (for debugging).
@@ -399,6 +403,27 @@ fn resolve_token(token: &Token, symbols: &mut SymbolTable) -> ResolvedToken {
             token: token.clone(),
             capsule: None,
         },
+    }
+}
+
+fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
+    if tok.command == Command::CapsuleToken {
+        if let Some((val, ty, dep, pair_dep)) = &tok.capsule {
+            return Some(StoredToken::Capsule(
+                val.clone(),
+                *ty,
+                dep.clone(),
+                pair_dep.clone(),
+            ));
+        }
+        return None;
+    }
+
+    match &tok.token.kind {
+        TokenKind::Symbolic(_) => tok.sym.map(StoredToken::Symbol),
+        TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
+        TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
+        TokenKind::Eof => None,
     }
 }
 
@@ -599,6 +624,59 @@ mod tests {
         let t2 = input.next_raw_token(&mut symbols);
         assert_eq!(t2.command, Command::CapsuleToken);
         assert!(t2.capsule.is_some());
+    }
+
+    #[test]
+    fn is_empty_accounts_for_backed_token() {
+        let mut input = InputSystem::new();
+        let token = ResolvedToken {
+            command: Command::Semicolon,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::Symbolic(";".to_owned()),
+                span: crate::token::Span::at(0),
+            },
+            capsule: None,
+        };
+
+        input.back_input(token);
+        assert!(!input.is_empty(), "backed token means input is not empty");
+    }
+
+    #[test]
+    fn back_input_twice_preserves_both_tokens() {
+        let mut input = InputSystem::new();
+        let mut symbols = SymbolTable::new();
+
+        let first = ResolvedToken {
+            command: Command::NumericToken,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::Numeric(1.0),
+                span: crate::token::Span::at(0),
+            },
+            capsule: None,
+        };
+        let second = ResolvedToken {
+            command: Command::NumericToken,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::Numeric(2.0),
+                span: crate::token::Span::at(0),
+            },
+            capsule: None,
+        };
+
+        input.back_input(first);
+        input.back_input(second);
+
+        let t1 = input.next_raw_token(&mut symbols);
+        let t2 = input.next_raw_token(&mut symbols);
+        assert_eq!(t1.token.kind, TokenKind::Numeric(2.0));
+        assert_eq!(t2.token.kind, TokenKind::Numeric(1.0));
     }
 
     #[test]

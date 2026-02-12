@@ -102,6 +102,14 @@ impl Interpreter {
             // Check for cycle
             if self.cur.command == Command::Cycle {
                 is_cyclic = true;
+                if knots.is_empty() {
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        "Cannot close `cycle` on an empty path",
+                    );
+                    self.get_x_next();
+                    break;
+                }
                 if let Some(dir) = post_dir {
                     knots[0].left = dir;
                 }
@@ -132,6 +140,11 @@ impl Interpreter {
                     Self::append_path_concat(&mut knots, rhs.knots);
                     continue;
                 }
+
+                return Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!("`&` requires a path on the right, got {}", point_val.ty()),
+                ));
             }
 
             let mut knot = Self::value_to_knot(&point_val)?;
