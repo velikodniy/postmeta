@@ -2955,8 +2955,7 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
         .collect();
     assert!(
         errors.iter().any(|e| {
-            e.kind == crate::error::ErrorKind::IncompatibleTypes
-                && e.message.contains("Nonlinear equation")
+            e.kind == crate::error::ErrorKind::IncompatibleTypes && e.message.contains("Nonlinear")
         }),
         "expected nonlinear-equation diagnostic, got: {errors:?}"
     );

@@ -108,21 +108,18 @@ impl Interpreter {
             return Ok(());
         }
 
+        // If one side is numeric with missing deps (nonlinear result) and the
+        // equation has a bindable LHS, do NOT silently assign — the deps were
+        // lost due to nonlinearity.  Nonlinear dependency errors are reported
+        // at the operation site (mul_deps); here we just prevent silent
+        // assignment of the junk value.
         if matches!((lhs, rhs), (Value::Numeric(_), Value::Numeric(_)))
             && (lhs_dep.is_none() || rhs_dep.is_none())
         {
-            self.report_error(
-                ErrorKind::IncompatibleTypes,
-                "Nonlinear equation cannot be solved; use `:=` for assignment",
-            );
             return Ok(());
         }
 
         if lhs_binding.is_some() {
-            // `=` is an equation, not assignment. If numeric dependency
-            // information is missing here, the equation is nonlinear (or
-            // otherwise not representable by the linear solver) and must not
-            // silently assign the left-hand side.
             self.assign_binding(lhs_binding, rhs)?;
             return Ok(());
         }

@@ -788,7 +788,7 @@ impl Interpreter {
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_secondary_binary(op, &left_val, &right.exp)?;
                 let result = if op == SecondaryBinaryOp::Times {
-                    Self::mul_deps(val, ty, &left_val, left_dep, left_pair_dep, &right)
+                    self.mul_deps(val, ty, &left_val, left_dep, left_pair_dep, &right)
                 } else {
                     self.transform_deps(
                         val,
@@ -956,6 +956,7 @@ impl Interpreter {
 
     /// Compute dependency info for multiplication (`*`).
     fn mul_deps(
+        &mut self,
         val: Value,
         ty: Type,
         left_val: &Value,
@@ -970,12 +971,24 @@ impl Interpreter {
             Value::Numeric(_) => {
                 let dep = left_const.map_or_else(
                     || {
-                        right_const.and_then(|factor| {
-                            left_dep.map(|mut d| {
+                        let result = right_const.and_then(|factor| {
+                            left_dep.as_ref().map(|d| {
+                                let mut d = d.clone();
                                 dep_scale(&mut d, factor);
                                 d
                             })
-                        })
+                        });
+                        // Both operands are non-constant dependents: nonlinear
+                        if result.is_none()
+                            && left_dep.as_ref().is_some_and(|d| constant_value(d).is_none())
+                            && right.dep.as_ref().is_some_and(|d| constant_value(d).is_none())
+                        {
+                            self.report_error(
+                                ErrorKind::IncompatibleTypes,
+                                "Nonlinear dependency in multiplication",
+                            );
+                        }
+                        result
                     },
                     |factor| {
                         right.dep.clone().map(|mut d| {
@@ -1000,6 +1013,10 @@ impl Interpreter {
                             constant_value(dx).is_none() || constant_value(dy).is_none()
                         });
                         if left_linear && right_linear {
+                            self.report_error(
+                                ErrorKind::IncompatibleTypes,
+                                "Nonlinear dependency in multiplication",
+                            );
                             None
                         } else if left_linear {
                             let dep = left_dep.unwrap_or_else(|| const_dep(0.0));
@@ -1029,6 +1046,10 @@ impl Interpreter {
                             .as_ref()
                             .is_some_and(|d| constant_value(d).is_none());
                         if left_linear && right_linear {
+                            self.report_error(
+                                ErrorKind::IncompatibleTypes,
+                                "Nonlinear dependency in multiplication",
+                            );
                             None
                         } else if right_linear {
                             let dep = right.dep.clone().unwrap_or_else(|| const_dep(0.0));

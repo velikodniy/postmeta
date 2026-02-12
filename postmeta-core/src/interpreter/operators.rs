@@ -91,10 +91,19 @@ impl Interpreter {
 
         // All remaining unary operators are pure value transformations.
         let (val, ty) = Self::eval_unary(op, &input, &mut self.random_seed)?;
+        // Synthesize const_dep for known numeric results so that dependency
+        // tracking is preserved through subsequent arithmetic (e.g.,
+        // `alpha = angle(A) - angle(B)` where both angle calls return known
+        // values that need to flow through subtraction into the equation solver).
+        let dep = if let Value::Numeric(v) = &val {
+            Some(crate::equation::const_dep(*v))
+        } else {
+            None
+        };
         Ok(super::ExprResultValue {
             exp: val,
             ty,
-            dep: None,
+            dep,
             pair_dep: None,
         })
     }
