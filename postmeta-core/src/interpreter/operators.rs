@@ -520,48 +520,9 @@ impl Interpreter {
         left: &Value,
         right: &Value,
     ) -> InterpResult<()> {
-        let is_plus = op == PlusMinusOp::Plus;
-
-        match (left, right) {
-            (Value::Numeric(a), Value::Numeric(b)) => {
-                self.cur_expr.exp = Value::Numeric(if is_plus { a + b } else { a - b });
-                self.cur_expr.ty = Type::Known;
-            }
-            (Value::Pair(ax, ay), Value::Pair(bx, by)) => {
-                self.cur_expr.exp = if is_plus {
-                    Value::Pair(ax + bx, ay + by)
-                } else {
-                    Value::Pair(ax - bx, ay - by)
-                };
-                self.cur_expr.ty = Type::PairType;
-            }
-            (Value::Color(a), Value::Color(b)) => {
-                self.cur_expr.exp = Value::Color(if is_plus {
-                    Color::new(a.r + b.r, a.g + b.g, a.b + b.b)
-                } else {
-                    Color::new(a.r - b.r, a.g - b.g, a.b - b.b)
-                });
-                self.cur_expr.ty = Type::ColorType;
-            }
-            (Value::String(a), Value::String(b)) if is_plus => {
-                // String concatenation with +? No, that's &. This should error.
-                return Err(InterpreterError::new(
-                    ErrorKind::TypeError,
-                    format!("Cannot add strings (use & for concatenation): \"{a}\" + \"{b}\""),
-                ));
-            }
-            _ => {
-                return Err(InterpreterError::new(
-                    ErrorKind::TypeError,
-                    format!(
-                        "Incompatible types for {}: {} and {}",
-                        if is_plus { "+" } else { "-" },
-                        left.ty(),
-                        right.ty()
-                    ),
-                ));
-            }
-        }
+        let (value, ty) = plus_minus_value(op, left, right)?;
+        self.cur_expr.exp = value;
+        self.cur_expr.ty = ty;
         Ok(())
     }
 
@@ -601,26 +562,9 @@ impl Interpreter {
         left: &Value,
         right: &Value,
     ) -> InterpResult<()> {
-        match op {
-            TertiaryBinaryOp::PythagAdd => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(right)?;
-                self.cur_expr.exp = Value::Numeric(math::pyth_add(a, b));
-                self.cur_expr.ty = Type::Known;
-            }
-            TertiaryBinaryOp::PythagSub => {
-                let a = value_to_scalar(left)?;
-                let b = value_to_scalar(right)?;
-                self.cur_expr.exp = Value::Numeric(math::pyth_sub(a, b));
-                self.cur_expr.ty = Type::Known;
-            }
-            TertiaryBinaryOp::Or => {
-                let a = value_to_bool(left)?;
-                let b = value_to_bool(right)?;
-                self.cur_expr.exp = Value::Boolean(a || b);
-                self.cur_expr.ty = Type::Boolean;
-            }
-        }
+        let (value, ty) = tertiary_binary_value(op, left, right)?;
+        self.cur_expr.exp = value;
+        self.cur_expr.ty = ty;
         Ok(())
     }
 
@@ -785,6 +729,70 @@ impl Interpreter {
                 ErrorKind::TypeError,
                 format!("{} has no color parts", self.cur_expr.exp.ty()),
             ))
+        }
+    }
+}
+
+fn plus_minus_value(op: PlusMinusOp, left: &Value, right: &Value) -> InterpResult<(Value, Type)> {
+    let is_plus = op == PlusMinusOp::Plus;
+
+    match (left, right) {
+        (Value::Numeric(a), Value::Numeric(b)) => Ok((
+            Value::Numeric(if is_plus { a + b } else { a - b }),
+            Type::Known,
+        )),
+        (Value::Pair(ax, ay), Value::Pair(bx, by)) => Ok((
+            if is_plus {
+                Value::Pair(ax + bx, ay + by)
+            } else {
+                Value::Pair(ax - bx, ay - by)
+            },
+            Type::PairType,
+        )),
+        (Value::Color(a), Value::Color(b)) => Ok((
+            Value::Color(if is_plus {
+                Color::new(a.r + b.r, a.g + b.g, a.b + b.b)
+            } else {
+                Color::new(a.r - b.r, a.g - b.g, a.b - b.b)
+            }),
+            Type::ColorType,
+        )),
+        (Value::String(a), Value::String(b)) if is_plus => Err(InterpreterError::new(
+            ErrorKind::TypeError,
+            format!("Cannot add strings (use & for concatenation): \"{a}\" + \"{b}\""),
+        )),
+        _ => Err(InterpreterError::new(
+            ErrorKind::TypeError,
+            format!(
+                "Incompatible types for {}: {} and {}",
+                if is_plus { "+" } else { "-" },
+                left.ty(),
+                right.ty()
+            ),
+        )),
+    }
+}
+
+fn tertiary_binary_value(
+    op: TertiaryBinaryOp,
+    left: &Value,
+    right: &Value,
+) -> InterpResult<(Value, Type)> {
+    match op {
+        TertiaryBinaryOp::PythagAdd => {
+            let a = value_to_scalar(left)?;
+            let b = value_to_scalar(right)?;
+            Ok((Value::Numeric(math::pyth_add(a, b)), Type::Known))
+        }
+        TertiaryBinaryOp::PythagSub => {
+            let a = value_to_scalar(left)?;
+            let b = value_to_scalar(right)?;
+            Ok((Value::Numeric(math::pyth_sub(a, b)), Type::Known))
+        }
+        TertiaryBinaryOp::Or => {
+            let a = value_to_bool(left)?;
+            let b = value_to_bool(right)?;
+            Ok((Value::Boolean(a || b), Type::Boolean))
         }
     }
 }
