@@ -96,7 +96,7 @@ impl Interpreter {
                     while self.cur.command == Command::Equals {
                         let lhs_dep = self.cur_expr.dep.clone();
                         let lhs_pair_dep = self.cur_expr.pair_dep.clone();
-                        let lhs = self.take_cur_exp();
+                        let lhs = self.take_cur_result().exp;
                         let lhs_binding = self.lhs_tracking.last_lhs_binding.clone();
                         pending_lhs.push((lhs, lhs_binding, lhs_dep, lhs_pair_dep));
                         self.get_x_next();
@@ -341,7 +341,7 @@ impl Interpreter {
         match thing {
             Some(ThingToAddOp::Contour) => {
                 self.scan_expression()?;
-                let path_val = self.take_cur_exp();
+                let path_val = self.take_cur_result().exp;
                 let path = value_to_path_owned(path_val)?;
                 let (ds, pen_specified) = self.scan_with_options()?;
 
@@ -359,7 +359,7 @@ impl Interpreter {
             }
             Some(ThingToAddOp::DoublePath) => {
                 self.scan_expression()?;
-                let path_val = self.take_cur_exp();
+                let path_val = self.take_cur_result().exp;
                 let (ds, _) = self.scan_with_options()?;
 
                 let target = self.get_target_picture(&pic_name);
@@ -400,7 +400,7 @@ impl Interpreter {
             }
             Some(ThingToAddOp::Also) => {
                 self.scan_expression()?;
-                let pic_val = self.take_cur_exp();
+                let pic_val = self.take_cur_result().exp;
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
                     target.merge_from(p);
@@ -436,7 +436,7 @@ impl Interpreter {
             let opt = WithOptionOp::from_modifier(self.cur.modifier);
             self.get_x_next();
             self.scan_expression()?;
-            let val = self.take_cur_exp();
+            let val = self.take_cur_result().exp;
 
             match opt {
                 Some(WithOptionOp::WithPen) => {
@@ -485,7 +485,7 @@ impl Interpreter {
         }
 
         self.scan_expression()?;
-        let val = self.take_cur_exp();
+        let val = self.take_cur_result().exp;
         let clip_path = value_to_path_owned(val)?;
 
         let target = self.get_target_picture(&pic_name);
@@ -532,7 +532,7 @@ impl Interpreter {
     fn do_shipout(&mut self) -> InterpResult<()> {
         self.get_x_next();
         self.scan_expression()?;
-        let val = self.take_cur_exp();
+        let val = self.take_cur_result().exp;
 
         let pic = match val {
             Value::Picture(p) => p,
