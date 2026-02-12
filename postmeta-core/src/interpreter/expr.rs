@@ -711,18 +711,24 @@ impl Interpreter {
 
     fn scan_infix_bp(&mut self, bp: u8, equals_is_equation: bool) -> InterpResult<()> {
         self.scan_rhs_tighter_than_bp(bp)?;
-        if bp == Command::BP_SECONDARY {
-            self.scan_secondary_infix_loop()
-        } else if bp == Command::BP_TERTIARY {
-            self.scan_tertiary_infix_loop()
-        } else if bp == Command::BP_EXPRESSION {
-            self.scan_expression_infix_loop(equals_is_equation)
-        } else {
-            Err(InterpreterError::new(
-                ErrorKind::UnexpectedToken,
-                "Unsupported infix binding power",
-            ))
+        while self.cur.command.infix_binding_power() == Some(bp) {
+            let should_break = if bp == Command::BP_SECONDARY {
+                self.scan_secondary_infix_op()?
+            } else if bp == Command::BP_TERTIARY {
+                self.scan_tertiary_infix_op()?
+            } else if bp == Command::BP_EXPRESSION {
+                self.scan_expression_infix_op(equals_is_equation)?
+            } else {
+                return Err(InterpreterError::new(
+                    ErrorKind::UnexpectedToken,
+                    "Unsupported infix binding power",
+                ));
+            };
+            if should_break {
+                break;
+            }
         }
+        Ok(())
     }
 
     /// Parse and evaluate a secondary expression.
@@ -745,16 +751,15 @@ impl Interpreter {
         self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)
     }
 
-    fn scan_secondary_infix_loop(&mut self) -> InterpResult<()> {
-        while self.cur.command.infix_binding_power() == Some(Command::BP_SECONDARY) {
-            let cmd = self.cur.command;
+    fn scan_secondary_infix_op(&mut self) -> InterpResult<bool> {
+        let cmd = self.cur.command;
 
-            if cmd == Command::SecondaryPrimaryMacro {
-                // User-defined primarydef operator
-                let left = self.take_cur_result().exp;
-                self.expand_binary_macro(&left)?;
-                break;
-            }
+        if cmd == Command::SecondaryPrimaryMacro {
+            // User-defined primarydef operator
+            let left = self.take_cur_result().exp;
+            self.expand_binary_macro(&left)?;
+            return Ok(true);
+        }
 
             let op = self.cur.modifier;
             let left_result = self.take_cur_result();
@@ -769,7 +774,7 @@ impl Interpreter {
             let right_pair_dep = right_result.pair_dep.clone();
             let right_binding = self.lhs_tracking.last_lhs_binding.clone();
 
-            match cmd {
+        match cmd {
                 Command::SecondaryBinary => {
                     let Some(op) = SecondaryBinaryOp::from_modifier(op) else {
                         return Err(InterpreterError::new(
@@ -821,8 +826,9 @@ impl Interpreter {
                                         if left_linear && right_linear {
                                             None
                                         } else if left_linear {
-                                            let mut dx = left_dep.clone().unwrap_or_else(|| const_dep(0.0));
-                                            let mut dy = left_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            let dep = left_dep.unwrap_or_else(|| const_dep(0.0));
+                                            let mut dx = dep.clone();
+                                            let mut dy = dep;
                                             dep_scale(&mut dx, *rx);
                                             dep_scale(&mut dy, *ry);
                                             Some((dx, dy))
@@ -830,7 +836,6 @@ impl Interpreter {
                                             let scalar = left_const
                                                 .unwrap_or_else(|| value_to_scalar(&left).unwrap_or(0.0));
                                             let (mut dx, mut dy) = right_pair_dep
-                                                .clone()
                                                 .unwrap_or_else(|| (const_dep(*rx), const_dep(*ry)));
                                             dep_scale(&mut dx, scalar);
                                             dep_scale(&mut dy, scalar);
@@ -851,10 +856,9 @@ impl Interpreter {
                                         if left_linear && right_linear {
                                             None
                                         } else if right_linear {
-                                            let mut dx =
-                                                right_dep.clone().unwrap_or_else(|| const_dep(0.0));
-                                            let mut dy =
-                                                right_dep.clone().unwrap_or_else(|| const_dep(0.0));
+                                            let dep = right_dep.unwrap_or_else(|| const_dep(0.0));
+                                            let mut dx = dep.clone();
+                                            let mut dy = dep;
                                             dep_scale(&mut dx, *lx);
                                             dep_scale(&mut dy, *ly);
                                             Some((dx, dy))
@@ -862,7 +866,6 @@ impl Interpreter {
                                             let scalar = right_const
                                                 .unwrap_or_else(|| value_to_scalar(&right_val).unwrap_or(0.0));
                                             let (mut dx, mut dy) = left_pair_dep
-                                                .clone()
                                                 .unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
                                             dep_scale(&mut dx, scalar);
                                             dep_scale(&mut dy, scalar);
@@ -1063,22 +1066,20 @@ impl Interpreter {
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
-                _ => {}
-            }
+            _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 
-    fn scan_tertiary_infix_loop(&mut self) -> InterpResult<()> {
-        while self.cur.command.infix_binding_power() == Some(Command::BP_TERTIARY) {
-            let cmd = self.cur.command;
+    fn scan_tertiary_infix_op(&mut self) -> InterpResult<bool> {
+        let cmd = self.cur.command;
 
-            if cmd == Command::TertiarySecondaryMacro {
-                // User-defined tertiarydef operator
-                let left = self.take_cur_result().exp;
-                self.expand_binary_macro(&left)?;
-                break;
-            }
+        if cmd == Command::TertiarySecondaryMacro {
+            // User-defined tertiarydef operator
+            let left = self.take_cur_result().exp;
+            self.expand_binary_macro(&left)?;
+            return Ok(true);
+        }
 
             let op = self.cur.modifier;
             let left_result = self.take_cur_result();
@@ -1091,7 +1092,7 @@ impl Interpreter {
             let right_dep = right_result.dep.clone();
             let right_pair_dep = right_result.pair_dep.clone();
 
-            match cmd {
+        match cmd {
                 Command::PlusOrMinus => {
                     let Some(op) = PlusMinusOp::from_modifier(op) else {
                         return Err(InterpreterError::new(
@@ -1151,24 +1152,22 @@ impl Interpreter {
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
-                _ => {}
-            }
+            _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 
-    fn scan_expression_infix_loop(&mut self, equals_is_equation: bool) -> InterpResult<()> {
-        while self.cur.command.infix_binding_power() == Some(Command::BP_EXPRESSION) {
-            let cmd = self.cur.command;
-            let op = self.cur.modifier;
+    fn scan_expression_infix_op(&mut self, equals_is_equation: bool) -> InterpResult<bool> {
+        let cmd = self.cur.command;
+        let op = self.cur.modifier;
 
             match cmd {
-                Command::Equals if equals_is_equation => {
+            Command::Equals if equals_is_equation => {
                     // In statement context, `=` is an equation/assignment
                     // delimiter — don't consume it.
-                    break;
-                }
-                Command::Equals => {
+                return Ok(true);
+            }
+            Command::Equals => {
                     // In expression context (e.g. exitif, if), `=` is an
                     // equality comparison producing a boolean.
                     let left = self.take_cur_result().exp;
@@ -1178,15 +1177,15 @@ impl Interpreter {
                     self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-                }
-                Command::PathJoin => {
+            }
+            Command::PathJoin => {
                     // Path construction
                     self.scan_path_construction()?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-                    break;
-                }
-                Command::Ampersand => {
+                return Ok(true);
+            }
+            Command::Ampersand => {
                     // & is path join for pairs/paths, string concat otherwise
                     if matches!(self.cur_expr.ty, Type::PairType | Type::Path) {
                         self.scan_path_construction()?;
@@ -1200,17 +1199,17 @@ impl Interpreter {
                         self.cur_expr.dep = None;
                         self.cur_expr.pair_dep = None;
                     }
-                    break;
-                }
-                Command::ExpressionTertiaryMacro => {
+                return Ok(true);
+            }
+            Command::ExpressionTertiaryMacro => {
                     // User-defined secondarydef operator
                     let left = self.take_cur_result().exp;
                     self.expand_binary_macro(&left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-                    break;
-                }
-                Command::ExpressionBinary => {
+                return Ok(true);
+            }
+            Command::ExpressionBinary => {
                     let Some(op) = ExpressionBinaryOp::from_modifier(op) else {
                         return Err(InterpreterError::new(
                             ErrorKind::UnexpectedToken,
@@ -1224,17 +1223,16 @@ impl Interpreter {
                     self.do_expression_binary(op, &left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-                }
-                Command::LeftBrace => {
+            }
+            Command::LeftBrace => {
                     // Direction specification — start of path construction
                     self.scan_path_construction()?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
-                    break;
-                }
-                _ => break,
+                return Ok(true);
             }
+            _ => return Ok(true),
         }
-        Ok(())
+        Ok(false)
     }
 }
