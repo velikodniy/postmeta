@@ -273,9 +273,8 @@ impl Interpreter {
         &mut self,
         op: PrimaryBinaryOp,
         first: &Value,
+        second: &Value,
     ) -> InterpResult<()> {
-        let second = &self.cur_expr.exp;
-
         match op {
             PrimaryBinaryOp::PointOf => {
                 let t = value_to_scalar(first)?;

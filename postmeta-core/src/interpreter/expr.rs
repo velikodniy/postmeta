@@ -285,7 +285,8 @@ impl Interpreter {
                         "Invalid primary binary operator modifier",
                     ));
                 };
-                self.do_primary_binary(op, &first)
+                let second = self.take_cur_result().exp;
+                self.do_primary_binary(op, &first, &second)
             }
 
             Command::Cycle => {
