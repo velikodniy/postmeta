@@ -468,7 +468,7 @@ impl Interpreter {
     }
 
     /// Negate the current expression (unary minus).
-    fn negate_cur_exp(&mut self) {
+    fn negate_value(&mut self, mut result: ExprResultValue) -> ExprResultValue {
         fn negate_binding(binding: &LhsBinding) -> Option<LhsBinding> {
             match binding {
                 LhsBinding::Variable { id, negated } => Some(LhsBinding::Variable {
@@ -488,14 +488,14 @@ impl Interpreter {
             }
         }
 
-        match &self.cur_expr.exp {
+        match &result.exp {
             Value::Numeric(v) => {
-                self.cur_expr.exp = Value::Numeric(-v);
-                if let Some(mut dep) = self.cur_expr.dep.take() {
+                result.exp = Value::Numeric(-v);
+                if let Some(mut dep) = result.dep.take() {
                     crate::equation::dep_scale(&mut dep, -1.0);
-                    self.cur_expr.dep = Some(dep);
+                    result.dep = Some(dep);
                 }
-                self.cur_expr.pair_dep = None;
+                result.pair_dep = None;
                 self.lhs_tracking.last_lhs_binding = self
                     .lhs_tracking
                     .last_lhs_binding
@@ -503,12 +503,12 @@ impl Interpreter {
                     .and_then(negate_binding);
             }
             Value::Pair(x, y) => {
-                self.cur_expr.exp = Value::Pair(-x, -y);
-                self.cur_expr.dep = None;
-                if let Some((mut dx, mut dy)) = self.cur_expr.pair_dep.take() {
+                result.exp = Value::Pair(-x, -y);
+                result.dep = None;
+                if let Some((mut dx, mut dy)) = result.pair_dep.take() {
                     crate::equation::dep_scale(&mut dx, -1.0);
                     crate::equation::dep_scale(&mut dy, -1.0);
-                    self.cur_expr.pair_dep = Some((dx, dy));
+                    result.pair_dep = Some((dx, dy));
                 }
                 self.lhs_tracking.last_lhs_binding = self
                     .lhs_tracking
@@ -517,9 +517,9 @@ impl Interpreter {
                     .and_then(negate_binding);
             }
             Value::Color(c) => {
-                self.cur_expr.exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
-                self.cur_expr.dep = None;
-                self.cur_expr.pair_dep = None;
+                result.exp = Value::Color(Color::new(-c.r, -c.g, -c.b));
+                result.dep = None;
+                result.pair_dep = None;
                 self.lhs_tracking.last_lhs_binding = self
                     .lhs_tracking
                     .last_lhs_binding
@@ -531,6 +531,7 @@ impl Interpreter {
                 self.report_error(ErrorKind::TypeError, "Cannot negate this type");
             }
         }
+        result
     }
 
     fn initialize_declared_variable(

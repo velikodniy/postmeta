@@ -141,11 +141,11 @@ impl Interpreter {
                 let is_minus = PlusMinusOp::from_modifier(self.cur.modifier)
                     == Some(PlusMinusOp::Minus);
                 self.get_x_next();
-                let result = self.scan_primary()?;
-                self.set_cur_result(result);
+                let mut result = self.scan_primary()?;
                 if is_minus {
-                    self.negate_cur_exp();
+                    result = self.negate_value(result);
                 }
+                self.set_cur_result(result);
                 Ok(())
             }
 
