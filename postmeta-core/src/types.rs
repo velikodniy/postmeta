@@ -68,10 +68,8 @@ pub enum Type {
     Known = 16,
     /// Linear combination with fraction coefficients.
     Dependent = 17,
-    /// Linear combination with scaled coefficients.
-    ProtoDependent = 18,
     /// A free variable with serial number.
-    Independent = 19,
+    Independent = 18,
 }
 
 impl Type {
@@ -142,10 +140,15 @@ impl std::fmt::Display for Type {
             Self::PairType => write!(f, "pair"),
             Self::Numeric => write!(f, "numeric"),
             Self::Known => write!(f, "known numeric"),
-            Self::Dependent | Self::ProtoDependent => write!(f, "dependent"),
+            Self::Dependent => write!(f, "dependent"),
             Self::Independent => write!(f, "independent"),
         }
     }
+}
+
+#[inline]
+fn scalar_approx_eq(a: Scalar, b: Scalar) -> bool {
+    (a - b).abs() < NUMERIC_TOLERANCE
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +257,36 @@ impl Value {
             None
         }
     }
+
+    /// Try to extract a pen value.
+    #[must_use]
+    pub const fn as_pen(&self) -> Option<&Pen> {
+        if let Self::Pen(p) = self {
+            Some(p)
+        } else {
+            None
+        }
+    }
+
+    /// Try to extract a color value.
+    #[must_use]
+    pub const fn as_color(&self) -> Option<&Color> {
+        if let Self::Color(c) = self {
+            Some(c)
+        } else {
+            None
+        }
+    }
+
+    /// Try to extract a transform value.
+    #[must_use]
+    pub const fn as_transform(&self) -> Option<Transform> {
+        if let Self::Transform(t) = self {
+            Some(*t)
+        } else {
+            None
+        }
+    }
 }
 
 impl PartialEq for Value {
@@ -261,22 +294,22 @@ impl PartialEq for Value {
         match (self, other) {
             (Self::Vacuous, Self::Vacuous) => true,
             (Self::Boolean(a), Self::Boolean(b)) => a == b,
-            (Self::Numeric(a), Self::Numeric(b)) => (a - b).abs() < NUMERIC_TOLERANCE,
+            (Self::Numeric(a), Self::Numeric(b)) => scalar_approx_eq(*a, *b),
             (Self::Pair(ax, ay), Self::Pair(bx, by)) => {
-                (ax - bx).abs() < NUMERIC_TOLERANCE && (ay - by).abs() < NUMERIC_TOLERANCE
+                scalar_approx_eq(*ax, *bx) && scalar_approx_eq(*ay, *by)
             }
             (Self::Color(a), Self::Color(b)) => {
-                (a.r - b.r).abs() < NUMERIC_TOLERANCE
-                    && (a.g - b.g).abs() < NUMERIC_TOLERANCE
-                    && (a.b - b.b).abs() < NUMERIC_TOLERANCE
+                scalar_approx_eq(a.r, b.r)
+                    && scalar_approx_eq(a.g, b.g)
+                    && scalar_approx_eq(a.b, b.b)
             }
             (Self::Transform(a), Self::Transform(b)) => {
-                (a.tx - b.tx).abs() < NUMERIC_TOLERANCE
-                    && (a.ty - b.ty).abs() < NUMERIC_TOLERANCE
-                    && (a.txx - b.txx).abs() < NUMERIC_TOLERANCE
-                    && (a.txy - b.txy).abs() < NUMERIC_TOLERANCE
-                    && (a.tyx - b.tyx).abs() < NUMERIC_TOLERANCE
-                    && (a.tyy - b.tyy).abs() < NUMERIC_TOLERANCE
+                scalar_approx_eq(a.tx, b.tx)
+                    && scalar_approx_eq(a.ty, b.ty)
+                    && scalar_approx_eq(a.txx, b.txx)
+                    && scalar_approx_eq(a.txy, b.txy)
+                    && scalar_approx_eq(a.tyx, b.tyx)
+                    && scalar_approx_eq(a.tyy, b.tyy)
             }
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path(a), Self::Path(b)) => a == b,
@@ -389,6 +422,11 @@ mod tests {
         assert_eq!(Value::Numeric(5.0).as_numeric(), Some(5.0));
         assert_eq!(Value::Boolean(true).as_boolean(), Some(true));
         assert_eq!(Value::Pair(1.0, 2.0).as_pair(), Some((1.0, 2.0)));
+        assert!(Value::Pen(Pen::null()).as_pen().is_some());
+        assert!(Value::Color(Color::new(1.0, 0.0, 0.0)).as_color().is_some());
+        assert!(Value::Transform(Transform::IDENTITY)
+            .as_transform()
+            .is_some());
         assert!(Value::Numeric(5.0).as_boolean().is_none());
     }
 

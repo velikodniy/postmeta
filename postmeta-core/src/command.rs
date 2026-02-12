@@ -211,12 +211,6 @@ impl Command {
     /// Minimum command code that survives macro expansion.
     pub const MIN_COMMAND: Self = Self::Save;
 
-    /// Can this command start a primary expression?
-    #[must_use]
-    pub const fn can_start_primary(self) -> bool {
-        (self as u8) >= (Self::TypeName as u8) && (self as u8) <= (Self::PlusOrMinus as u8)
-    }
-
     /// Is this a secondary-level binary operator?
     #[must_use]
     pub const fn is_secondary_op(self) -> bool {
@@ -271,17 +265,6 @@ impl Command {
     pub const fn can_start_implicit_mul(self) -> bool {
         let code = self as u8;
         code >= (Self::TypeName as u8) && code < (Self::NumericToken as u8)
-    }
-
-    /// Can this command appear as a suffix token in variable names?
-    ///
-    /// In `mp.web`: `min_suffix_token` (42, `internal_quantity`) through
-    /// `max_suffix_token` (44, `numeric_token`).  This range covers
-    /// `InternalQuantity`, `TagToken`, and `NumericToken`.
-    #[must_use]
-    pub const fn is_suffix_token(self) -> bool {
-        let code = self as u8;
-        code >= (Self::InternalQuantity as u8) && code <= (Self::NumericToken as u8)
     }
 }
 
@@ -1607,16 +1590,6 @@ mod tests {
         assert!(Command::IfTest.is_expandable());
         assert!(Command::DefinedMacro.is_expandable());
         assert!(!Command::Save.is_expandable());
-    }
-
-    #[test]
-    fn primary_range() {
-        assert!(Command::TypeName.can_start_primary());
-        assert!(Command::Nullary.can_start_primary());
-        assert!(Command::NumericToken.can_start_primary());
-        assert!(Command::PlusOrMinus.can_start_primary());
-        assert!(!Command::SecondaryBinary.can_start_primary());
-        assert!(!Command::Semicolon.can_start_primary());
     }
 
     #[test]

@@ -36,46 +36,6 @@ impl SymbolId {
 }
 
 // ---------------------------------------------------------------------------
-// Frozen symbol constants
-// ---------------------------------------------------------------------------
-
-/// Reserved symbol ids for tokens that can never be redefined.
-/// These correspond to `mp.web`'s `frozen_*` constants.
-pub mod frozen {
-    use super::SymbolId;
-
-    /// Start of frozen id range. We reserve these at the high end.
-    const BASE: u32 = u32::MAX - 100;
-
-    /// Internal inaccessible symbol.
-    pub const INACCESSIBLE: SymbolId = SymbolId(BASE);
-    /// Internal repeat-loop token.
-    pub const REPEAT_LOOP: SymbolId = SymbolId(BASE + 1);
-    /// Frozen right delimiter for error recovery.
-    pub const RIGHT_DELIMITER: SymbolId = SymbolId(BASE + 2);
-    /// Frozen `[` for error recovery.
-    pub const LEFT_BRACKET: SymbolId = SymbolId(BASE + 3);
-    /// Frozen `/` for fraction handling.
-    pub const SLASH: SymbolId = SymbolId(BASE + 4);
-    /// Frozen `:` for label handling.
-    pub const COLON: SymbolId = SymbolId(BASE + 5);
-    /// Frozen `;` for error recovery.
-    pub const SEMICOLON: SymbolId = SymbolId(BASE + 6);
-    /// Frozen `endfor`.
-    pub const END_FOR: SymbolId = SymbolId(BASE + 7);
-    /// Frozen `enddef`.
-    pub const END_DEF: SymbolId = SymbolId(BASE + 8);
-    /// Frozen `fi`.
-    pub const FI: SymbolId = SymbolId(BASE + 9);
-    /// Frozen `endgroup`.
-    pub const END_GROUP: SymbolId = SymbolId(BASE + 10);
-    /// Frozen `etex`.
-    pub const ETEX: SymbolId = SymbolId(BASE + 11);
-    /// Frozen undefined symbol.
-    pub const UNDEFINED: SymbolId = SymbolId(BASE + 14);
-}
-
-// ---------------------------------------------------------------------------
 // Symbol entry (the "eqtb" equivalent)
 // ---------------------------------------------------------------------------
 

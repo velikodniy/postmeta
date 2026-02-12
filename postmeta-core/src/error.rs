@@ -128,8 +128,6 @@ pub enum ErrorKind {
     // -- Control flow --
     /// `exitif` outside of a loop.
     BadExitIf,
-    /// `endfor` without `for`.
-    BadEndFor,
 
     // -- Internal --
     /// Internal error (should not happen).
@@ -156,7 +154,6 @@ impl fmt::Display for ErrorKind {
             Self::Overflow => write!(f, "overflow"),
             Self::IoError => write!(f, "I/O error"),
             Self::BadExitIf => write!(f, "exitif outside loop"),
-            Self::BadEndFor => write!(f, "endfor without for"),
             Self::Internal => write!(f, "internal error"),
         }
     }
