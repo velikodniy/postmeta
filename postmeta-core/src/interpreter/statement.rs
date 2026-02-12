@@ -94,19 +94,23 @@ impl Interpreter {
 
                     let mut pending_lhs: Vec<PendingEquationLhs> = Vec::new();
                     while self.cur.command == Command::Equals {
-                        let lhs_dep = self.cur_expr.dep.clone();
-                        let lhs_pair_dep = self.cur_expr.pair_dep.clone();
-                        let lhs = self.take_cur_result().exp;
+                        let lhs_result = self.take_cur_result();
                         let lhs_binding = self.lhs_tracking.last_lhs_binding.clone();
-                        pending_lhs.push((lhs, lhs_binding, lhs_dep, lhs_pair_dep));
+                        pending_lhs.push((
+                            lhs_result.exp,
+                            lhs_binding,
+                            lhs_result.dep,
+                            lhs_result.pair_dep,
+                        ));
                         self.get_x_next();
                         self.lhs_tracking.equals_means_equation = true;
                         self.scan_expression()?;
                     }
 
-                    let rhs_clone = self.cur_expr.exp.clone();
-                    let rhs_dep = self.cur_expr.dep.clone();
-                    let rhs_pair_dep = self.cur_expr.pair_dep.clone();
+                    let rhs_result = self.take_cur_result();
+                    let rhs_clone = rhs_result.exp;
+                    let rhs_dep = rhs_result.dep;
+                    let rhs_pair_dep = rhs_result.pair_dep;
                     for (lhs, lhs_binding, lhs_dep, lhs_pair_dep) in &pending_lhs {
                         self.do_equation(
                             lhs,
@@ -127,7 +131,7 @@ impl Interpreter {
                         self.scan_expression()?;
                     }
 
-                    let rhs = self.cur_expr.exp.clone();
+                    let rhs = self.take_cur_result().exp;
                     for lhs_binding in pending_lhs {
                         self.assign_binding(lhs_binding, &rhs)?;
                     }
@@ -607,7 +611,7 @@ impl Interpreter {
             if self.cur.command == Command::Assignment {
                 self.get_x_next();
                 self.scan_expression()?;
-                let val = value_to_scalar(&self.cur_expr.exp)?;
+                let val = value_to_scalar(&self.take_cur_result().exp)?;
                 self.state.internals.set(idx, val);
             }
         }
@@ -733,7 +737,7 @@ impl Interpreter {
         self.get_x_next();
         self.scan_expression()?;
         // Print the value
-        let val = &self.cur_expr.exp;
+        let val = self.take_cur_result().exp;
         self.report_error(
             ErrorKind::Internal, // Not really an error, but using error channel for output
             format!(">> {val}"),
@@ -750,7 +754,8 @@ impl Interpreter {
         let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
         self.scan_expression()?;
-        let msg = match &self.cur_expr.exp {
+        let val = self.take_cur_result().exp;
+        let msg = match &val {
             Value::String(s) => s.to_string(),
             other => format!("{other}"),
         };
