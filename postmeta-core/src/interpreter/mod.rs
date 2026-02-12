@@ -82,15 +82,6 @@ impl CurExpr {
         }
     }
 
-    /// Take the expression value, resetting all fields.
-    fn take_exp(&mut self) -> Value {
-        let val = std::mem::replace(&mut self.exp, Value::Vacuous);
-        self.ty = Type::Vacuous;
-        self.dep = None;
-        self.pair_dep = None;
-        val
-    }
-
     fn snapshot(&self) -> ExprResultValue {
         ExprResultValue {
             exp: self.exp.clone(),
@@ -386,11 +377,6 @@ impl Interpreter {
     // =======================================================================
     // Value helpers
     // =======================================================================
-
-    /// Take `cur_exp`, replacing it with `Vacuous`.
-    fn take_cur_exp(&mut self) -> Value {
-        self.cur_expr.take_exp()
-    }
 
     const fn take_cur_result(&mut self) -> ExprResultValue {
         self.cur_expr.take_result()

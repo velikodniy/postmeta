@@ -463,20 +463,20 @@ impl Interpreter {
                 break;
             }
             if self.scan_expression().is_ok() {
-                let first_val = self.take_cur_exp();
+                let first_val = self.take_cur_result().exp;
 
                 // Check for `step <step> until <end>` after the first value
                 if self.cur.command == Command::StepToken {
                     if let Ok(start) = super::helpers::value_to_scalar(&first_val) {
                         self.get_x_next();
                         if self.scan_expression().is_ok() {
-                            let step_val = self.take_cur_exp();
+                            let step_val = self.take_cur_result().exp;
                             if let Ok(step) = super::helpers::value_to_scalar(&step_val) {
                                 // Expect `until`
                                 if self.cur.command == Command::UntilToken {
                                     self.get_x_next();
                                     if self.scan_expression().is_ok() {
-                                        let end_val = self.take_cur_exp();
+                                        let end_val = self.take_cur_result().exp;
                                         if let Ok(end) = super::helpers::value_to_scalar(&end_val) {
                                             // Generate the range
                                             Self::generate_step_range(
@@ -1195,7 +1195,7 @@ impl Interpreter {
             _ => self.scan_tertiary()?,
         }
 
-        let right = self.take_cur_exp();
+        let right = self.take_cur_result().exp;
 
         // Build param token lists — decompose compound values into tokens
         let args = vec![
@@ -1332,7 +1332,7 @@ impl Interpreter {
                         match param_type {
                             ParamType::Expr => {
                                 if self.scan_expression().is_ok() {
-                                    let val = self.take_cur_exp();
+                                    let val = self.take_cur_result().exp;
                                     args.push(value_to_stored_tokens(&val, &mut self.symbols));
                                 } else {
                                     args.push(Vec::new());
@@ -1475,12 +1475,12 @@ impl Interpreter {
     ) -> TokenList {
         match scanner(self) {
             Ok(()) => {
-                let val = self.take_cur_exp();
+                let val = self.take_cur_result().exp;
                 value_to_stored_tokens(&val, &mut self.symbols)
             }
             Err(err) => {
                 self.errors.push(err);
-                let _ = self.take_cur_exp();
+                let _ = self.take_cur_result().exp;
                 Vec::new()
             }
         }
