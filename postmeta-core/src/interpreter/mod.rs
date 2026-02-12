@@ -2185,10 +2185,41 @@ mod tests {
     fn multiple_delimited_param_groups() {
         let mut interp = Interpreter::new();
         interp
-            .run("vardef foo(expr u)(text t) = u enddef; show 1;")
+            .run("vardef foo(expr u)(expr v) = show u; show v enddef; foo(1)(2);")
             .unwrap();
-        let msg = &interp.errors[0].message;
-        assert!(msg.contains("1"), "expected 1 in: {msg}");
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
+        assert!(infos.iter().any(|m| m.contains('1')), "expected u=1 in: {infos:?}");
+        assert!(infos.iter().any(|m| m.contains('2')), "expected v=2 in: {infos:?}");
+    }
+
+    #[test]
+    fn multiple_delimited_groups_allow_boundary_comma() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("vardef foo(expr u)(expr v)=show u; show v enddef; foo(4,5);")
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(infos.iter().any(|m| m.contains('4')), "expected u=4 in: {infos:?}");
+        assert!(infos.iter().any(|m| m.contains('5')), "expected v=5 in: {infos:?}");
     }
 
     #[test]

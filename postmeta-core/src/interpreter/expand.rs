@@ -105,6 +105,9 @@ impl ParamType {
 pub(super) struct MacroInfo {
     /// Parameter types in order.
     pub(super) params: Vec<ParamType>,
+    /// Delimited parameter group for each parameter.
+    /// `u16::MAX` means the parameter is undelimited.
+    pub(super) param_groups: Vec<u16>,
     /// The macro body as a token list.
     pub(super) body: TokenList,
     /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
@@ -766,13 +769,16 @@ impl Interpreter {
         let body = self.scan_macro_body(&param_names);
 
         let mut param_types: Vec<ParamType> = params.iter().map(|(_, ty, _)| *ty).collect();
+        let mut param_groups: Vec<u16> = params.iter().map(|(_, _, g)| *g).collect();
         if has_at_suffix {
             param_types.push(ParamType::UndelimitedSuffix);
+            param_groups.push(u16::MAX);
         }
 
         // Store the macro
         let info = MacroInfo {
             params: param_types,
+            param_groups,
             body,
             is_vardef,
             has_at_suffix,
@@ -858,6 +864,7 @@ impl Interpreter {
 
         let info = MacroInfo {
             params: vec![ParamType::Expr, ParamType::Expr],
+            param_groups: vec![u16::MAX, u16::MAX],
             body,
             is_vardef: false,
             has_at_suffix: false,
@@ -1254,12 +1261,25 @@ impl Interpreter {
 
             for i in 0..regular_param_count {
                 let param_type = &macro_info.params[i];
+                let current_group = macro_info.param_groups.get(i).copied().unwrap_or(u16::MAX);
+                let next_group = macro_info
+                    .param_groups
+                    .get(i + 1)
+                    .copied()
+                    .unwrap_or(u16::MAX);
                 match param_type {
                     // --- Delimited parameters (inside parentheses) ---
                     ParamType::Expr | ParamType::Suffix | ParamType::Text => {
-                        if !in_delimiters && self.cur.command == Command::LeftDelimiter {
-                            self.get_x_next(); // skip `(`
-                            in_delimiters = true;
+                        if !in_delimiters {
+                            if self.cur.command == Command::LeftDelimiter {
+                                self.get_x_next(); // skip `(`
+                                in_delimiters = true;
+                            } else {
+                                self.report_error(
+                                    ErrorKind::MissingToken,
+                                    "Expected `(` for delimited macro argument",
+                                );
+                            }
                         }
                         match param_type {
                             ParamType::Expr => {
@@ -1294,16 +1314,19 @@ impl Interpreter {
                             self.get_x_next();
                         }
                         // Close delimiters when we see `)` and either the next
-                        // param is undelimited or this is the last delimited one.
+                        // param is undelimited, in a different delimited group,
+                        // or this is the last regular parameter.
                         if self.cur.command == Command::RightDelimiter
-                            && (next_regular_is_undelimited || i + 1 >= regular_param_count)
+                            && (next_regular_is_undelimited
+                                || i + 1 >= regular_param_count
+                                || (next_group != current_group && next_group != u16::MAX))
                         {
                             // Only advance past `)` if there are more params to
                             // scan.  When this is the LAST parameter, leave
                             // `self.cur` at `)` so the token that follows the
                             // macro call (typically `;`) is not consumed before
                             // the body expansion is pushed.
-                            if next_regular_is_undelimited {
+                            if i + 1 < regular_param_count {
                                 self.get_x_next();
                             }
                             in_delimiters = false;
