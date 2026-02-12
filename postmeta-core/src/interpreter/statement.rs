@@ -80,7 +80,7 @@ impl Interpreter {
                 // Expression or equation — `=` should be treated as an
                 // equation delimiter, not as comparison (mp.web: var_flag = assignment).
                 self.lhs_tracking.equals_means_equation = true;
-                self.scan_expression()?;
+                let mut cur_result = self.scan_expression()?;
 
                 if self.cur.command == Command::Equals {
                     // Equation chain: lhs = mid = ... = rhs.
@@ -94,23 +94,21 @@ impl Interpreter {
 
                     let mut pending_lhs: Vec<PendingEquationLhs> = Vec::new();
                     while self.cur.command == Command::Equals {
-                        let lhs_result = self.take_cur_result();
                         let lhs_binding = self.lhs_tracking.last_lhs_binding.clone();
                         pending_lhs.push((
-                            lhs_result.exp,
+                            cur_result.exp,
                             lhs_binding,
-                            lhs_result.dep,
-                            lhs_result.pair_dep,
+                            cur_result.dep,
+                            cur_result.pair_dep,
                         ));
                         self.get_x_next();
                         self.lhs_tracking.equals_means_equation = true;
-                        self.scan_expression()?;
+                        cur_result = self.scan_expression()?;
                     }
 
-                    let rhs_result = self.take_cur_result();
-                    let rhs_clone = rhs_result.exp;
-                    let rhs_dep = rhs_result.dep;
-                    let rhs_pair_dep = rhs_result.pair_dep;
+                    let rhs_clone = cur_result.exp;
+                    let rhs_dep = cur_result.dep;
+                    let rhs_pair_dep = cur_result.pair_dep;
                     for (lhs, lhs_binding, lhs_dep, lhs_pair_dep) in &pending_lhs {
                         self.do_equation(
                             lhs,
@@ -128,13 +126,19 @@ impl Interpreter {
                         pending_lhs.push(self.lhs_tracking.last_lhs_binding.clone());
                         self.get_x_next();
                         self.lhs_tracking.equals_means_equation = true;
-                        self.scan_expression()?;
+                        cur_result = self.scan_expression()?;
                     }
 
-                    let rhs = self.take_cur_result().exp;
+                    let rhs = cur_result.exp;
                     for lhs_binding in pending_lhs {
                         self.assign_binding(lhs_binding, &rhs)?;
                     }
+                } else {
+                    // Bare expression-statement (no `=` or `:=`).
+                    // Preserve the result in cur_expr so that
+                    // begingroup/endgroup can return the last expression
+                    // as the group's value (mp.web's "stash_cur_exp").
+                    self.set_cur_result(cur_result);
                 }
 
                 // Expect statement terminator
@@ -344,8 +348,7 @@ impl Interpreter {
         // Parse expressions and options first, then apply to the target picture.
         match thing {
             Some(ThingToAddOp::Contour) => {
-                self.scan_expression()?;
-                let path_val = self.take_cur_result().exp;
+                let path_val = self.scan_expression()?.exp;
                 let path = value_to_path_owned(path_val)?;
                 let (ds, pen_specified) = self.scan_with_options()?;
 
@@ -362,8 +365,7 @@ impl Interpreter {
                 );
             }
             Some(ThingToAddOp::DoublePath) => {
-                self.scan_expression()?;
-                let path_val = self.take_cur_result().exp;
+                let path_val = self.scan_expression()?.exp;
                 let (ds, _) = self.scan_with_options()?;
 
                 let target = self.get_target_picture(&pic_name);
@@ -403,8 +405,7 @@ impl Interpreter {
                 }
             }
             Some(ThingToAddOp::Also) => {
-                self.scan_expression()?;
-                let pic_val = self.take_cur_result().exp;
+                let pic_val = self.scan_expression()?.exp;
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
                     target.merge_from(p);
@@ -439,8 +440,7 @@ impl Interpreter {
         while self.cur.command == Command::WithOption {
             let opt = WithOptionOp::from_modifier(self.cur.modifier);
             self.get_x_next();
-            self.scan_expression()?;
-            let val = self.take_cur_result().exp;
+            let val = self.scan_expression()?.exp;
 
             match opt {
                 Some(WithOptionOp::WithPen) => {
@@ -488,8 +488,7 @@ impl Interpreter {
             self.report_error(ErrorKind::MissingToken, "Expected `to` in clip/setbounds");
         }
 
-        self.scan_expression()?;
-        let val = self.take_cur_result().exp;
+        let val = self.scan_expression()?.exp;
         let clip_path = value_to_path_owned(val)?;
 
         let target = self.get_target_picture(&pic_name);
@@ -535,8 +534,7 @@ impl Interpreter {
     /// Execute `shipout` statement.
     fn do_shipout(&mut self) -> InterpResult<()> {
         self.get_x_next();
-        self.scan_expression()?;
-        let val = self.take_cur_result().exp;
+        let val = self.scan_expression()?.exp;
 
         let pic = match val {
             Value::Picture(p) => p,
@@ -610,8 +608,7 @@ impl Interpreter {
             self.get_x_next();
             if self.cur.command == Command::Assignment {
                 self.get_x_next();
-                self.scan_expression()?;
-                let val = value_to_scalar(&self.take_cur_result().exp)?;
+                let val = value_to_scalar(&self.scan_expression()?.exp)?;
                 self.state.internals.set(idx, val);
             }
         }
@@ -735,9 +732,8 @@ impl Interpreter {
         // show_type distinguishes show/showtoken/showdependencies — used later
         let _ = self.cur.modifier;
         self.get_x_next();
-        self.scan_expression()?;
         // Print the value
-        let val = self.take_cur_result().exp;
+        let val = self.scan_expression()?.exp;
         self.report_error(
             ErrorKind::Internal, // Not really an error, but using error channel for output
             format!(">> {val}"),
@@ -753,8 +749,7 @@ impl Interpreter {
     fn do_message(&mut self) -> InterpResult<()> {
         let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
-        self.scan_expression()?;
-        let val = self.take_cur_result().exp;
+        let val = self.scan_expression()?.exp;
         let msg = match &val {
             Value::String(s) => s.to_string(),
             other => format!("{other}"),

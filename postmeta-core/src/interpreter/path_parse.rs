@@ -126,8 +126,7 @@ impl Interpreter {
             }
 
             // Parse the next point
-            self.scan_tertiary()?;
-            let point_val = self.take_cur_result().exp;
+            let point_val = self.scan_tertiary()?.exp;
 
             // `&` can concatenate paths.
             if join_type == u16::MAX {
@@ -209,8 +208,7 @@ impl Interpreter {
                 if at_least {
                     self.get_x_next();
                 }
-                self.scan_tertiary()?;
-                let t1 = value_to_scalar(&self.take_cur_result().exp)?;
+                let t1 = value_to_scalar(&self.scan_tertiary()?.exp)?;
                 let t1 = if at_least { -t1.abs() } else { t1 };
 
                 let t2 = if self.cur.command == Command::And {
@@ -219,8 +217,7 @@ impl Interpreter {
                     if at_least2 {
                         self.get_x_next();
                     }
-                    self.scan_tertiary()?;
-                    let t_val = value_to_scalar(&self.take_cur_result().exp)?;
+                    let t_val = value_to_scalar(&self.scan_tertiary()?.exp)?;
                     if at_least2 {
                         -t_val.abs()
                     } else {
@@ -247,14 +244,12 @@ impl Interpreter {
             }
             Command::Controls => {
                 self.get_x_next();
-                self.scan_primary()?;
-                let cp1 = self.take_cur_result().exp;
+                let cp1 = self.scan_primary()?.exp;
                 let (x1, y1) = value_to_pair(&cp1)?;
 
                 let (x2, y2) = if self.cur.command == Command::And {
                     self.get_x_next();
-                    self.scan_primary()?;
-                    let cp2 = self.take_cur_result().exp;
+                    let cp2 = self.scan_primary()?.exp;
                     value_to_pair(&cp2)?
                 } else {
                     (x1, y1)
@@ -306,8 +301,7 @@ impl Interpreter {
         if self.cur.command == Command::CurlCommand {
             // {curl <numeric>}
             self.get_x_next();
-            self.scan_tertiary()?;
-            let curl_val = value_to_scalar(&self.take_cur_result().exp)?;
+            let curl_val = value_to_scalar(&self.scan_tertiary()?.exp)?;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {
@@ -317,8 +311,7 @@ impl Interpreter {
         } else {
             // {<expression>} — direction as pair, or numeric angle in degrees
             // (converted to internal radians).
-            self.scan_expression()?;
-            let dir = self.take_cur_result().exp;
+            let dir = self.scan_expression()?.exp;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {

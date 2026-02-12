@@ -1284,9 +1284,9 @@ fn back_expr_capsule_roundtrip() {
     // Now get_x_next reads from the capsule token list (top of stack)
     interp.get_x_next();
     assert_eq!(interp.cur.command, Command::CapsuleToken);
-    interp.scan_primary().unwrap();
-    assert_eq!(interp.cur_expr.ty, Type::PairType);
-    assert_eq!(interp.cur_expr.exp.as_pair(), Some((5.0, 10.0)));
+    let result = interp.scan_primary().unwrap();
+    assert_eq!(result.ty, Type::PairType);
+    assert_eq!(result.exp.as_pair(), Some((5.0, 10.0)));
 }
 
 #[test]
@@ -1300,9 +1300,9 @@ fn back_expr_numeric_in_expression() {
     interp.cur_expr.ty = Type::Known;
     interp.back_expr();
     interp.get_x_next();
-    interp.scan_expression().unwrap();
+    let result = interp.scan_expression().unwrap();
     // Should evaluate to 7 + 3 = 10
-    assert_eq!(interp.cur_expr.exp, Value::Numeric(10.0));
+    assert_eq!(result.exp, Value::Numeric(10.0));
 }
 
 // -----------------------------------------------------------------------
@@ -3028,8 +3028,8 @@ fn scan_expression_internal_usage() {
     let mut interp = Interpreter::new();
     interp.input.push_source("3 + 4;");
     interp.get_x_next();
-    interp.scan_expression().unwrap();
-    assert_eq!(interp.cur_expr.exp, Value::Numeric(7.0));
+    let result = interp.scan_expression().unwrap();
+    assert_eq!(result.exp, Value::Numeric(7.0));
 }
 
 // -----------------------------------------------------------------------

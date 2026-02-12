@@ -19,11 +19,11 @@ use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
 use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
-use super::{Interpreter, LhsBinding};
+use super::{ExprResultValue, Interpreter, LhsBinding};
 
 impl Interpreter {
-    /// Parse and evaluate a primary expression.
-    pub(super) fn scan_primary(&mut self) -> InterpResult<()> {
+    /// Parse and evaluate a primary expression, returning the result.
+    pub(super) fn scan_primary(&mut self) -> InterpResult<ExprResultValue> {
         self.cur_expr.pair_dep = None;
         match self.cur.command {
             Command::NumericToken => {
@@ -55,7 +55,7 @@ impl Interpreter {
                         self.cur.command = Command::Slash;
                         self.cur.modifier =
                             crate::command::SecondaryBinaryOp::Over as u16;
-                        return Ok(());
+                        return Ok(self.take_cur_result());
                     }
                 }
                 // Implicit multiplication: `3x`, `2bp`, `.5(1,2)`, etc.
@@ -66,9 +66,8 @@ impl Interpreter {
                     let factor_result = self.take_cur_result();
                     let factor_dep = factor_result.dep;
                     let factor = factor_result.exp;
-                    self.scan_primary()?;
+                    let right_result = self.scan_primary()?;
                     self.lhs_tracking.last_lhs_binding = None;
-                    let right_result = self.take_cur_result();
                     let (val, ty) = Self::do_implicit_mul(&factor, &right_result.exp)?;
                     self.cur_expr.exp = val;
                     self.cur_expr.ty = ty;
@@ -128,10 +127,9 @@ impl Interpreter {
                     ));
                 };
                 self.get_x_next();
-                self.scan_primary()?;
                 // Take the operand, but preserve pair_dep for part-extraction
                 // ops that propagate it into the equation solver.
-                let operand_result = self.take_cur_result();
+                let operand_result = self.scan_primary()?;
                 self.cur_expr.pair_dep = operand_result.pair_dep;
                 self.do_unary(op, operand_result.exp)?;
                 // Part-extraction ops (xpart, ypart, etc.) set up cur_dep
@@ -149,7 +147,8 @@ impl Interpreter {
                 let is_minus = PlusMinusOp::from_modifier(self.cur.modifier)
                     == Some(PlusMinusOp::Minus);
                 self.get_x_next();
-                self.scan_primary()?;
+                let result = self.scan_primary()?;
+                self.set_cur_result(result);
                 if is_minus {
                     self.negate_cur_exp();
                 }
@@ -160,24 +159,22 @@ impl Interpreter {
                 // ( expr ) or ( expr , expr ) for pair/color
                 let expected_delimiter = self.cur.modifier;
                 self.get_x_next();
-                self.scan_expression()?;
+                let first_result = self.scan_expression()?;
 
                 if self.cur.command == Command::Comma {
                     // Pair or color
-                    let first_result = self.take_cur_result();
                     let first = first_result.exp;
                     let first_binding = self.lhs_tracking.last_lhs_binding.clone();
                     self.get_x_next();
-                    self.scan_expression()?;
-                    let second_result = self.take_cur_result();
+                    let second_result = self.scan_expression()?;
                     let second = second_result.exp;
                     let second_binding = self.lhs_tracking.last_lhs_binding.clone();
 
-                    if self.cur.command == Command::Comma {
+                if self.cur.command == Command::Comma {
+                    // `first_result` consumed in pair/color branch below.
                         // Color: (r, g, b)
                         self.get_x_next();
-                        self.scan_expression()?;
-                        let third_result = self.take_cur_result();
+                        let third_result = self.scan_expression()?;
                         let third = third_result.exp;
                         let third_binding = self.lhs_tracking.last_lhs_binding.clone();
 
@@ -220,6 +217,9 @@ impl Interpreter {
                             };
                     }
                     self.cur_expr.dep = None;
+                } else {
+                    // Single expression in parens — restore result
+                    self.set_cur_result(first_result);
                 }
 
                 // Expect closing delimiter
@@ -256,7 +256,11 @@ impl Interpreter {
                 Ok(())
             }
 
-            Command::TagToken => self.scan_tag_token(),
+            Command::TagToken => {
+                let result = self.scan_tag_token()?;
+                self.set_cur_result(result);
+                Ok(())
+            }
 
             Command::InternalQuantity => {
                 let idx = self.cur.modifier;
@@ -273,7 +277,7 @@ impl Interpreter {
                 // "expr X of Y" pattern
                 let op = self.cur.modifier;
                 self.get_x_next();
-                self.scan_expression()?;
+                let first_result = self.scan_expression()?;
                 // Expect "of"
                 if self.cur.command != Command::OfToken {
                     return Err(InterpreterError::new(
@@ -281,18 +285,17 @@ impl Interpreter {
                         "Missing `of`",
                     ));
                 }
-                let first = self.take_cur_result().exp;
+                let first = first_result.exp;
                 self.get_x_next();
-                self.scan_primary()?;
+                let second_result = self.scan_primary()?;
                 self.lhs_tracking.last_lhs_binding = None;
-                self.cur_expr.dep = None;
                 let Some(op) = PrimaryBinaryOp::from_modifier(op) else {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
                         "Invalid primary binary operator modifier",
                     ));
                 };
-                let second = self.take_cur_result().exp;
+                let second = second_result.exp;
                 let (val, ty) = Self::do_primary_binary(op, &first, &second)?;
                 self.cur_expr.exp = val;
                 self.cur_expr.ty = ty;
@@ -363,8 +366,8 @@ impl Interpreter {
                 // See mp.web §740: each type_name acts as a type_range test.
                 let op = TypeNameOp::from_modifier(self.cur.modifier);
                 self.get_x_next();
-                self.scan_primary()?;
-                let ty = self.cur_expr.ty;
+                let primary_result = self.scan_primary()?;
+                let ty = primary_result.ty;
                 let result = match op {
                     Some(TypeNameOp::Numeric) => {
                         // numeric: type_range(known)(independent)
@@ -418,9 +421,8 @@ impl Interpreter {
             if let Value::Numeric(a) = self.cur_expr.exp {
                 let a_dep = self.cur_expr.dep.clone().unwrap_or_else(|| const_dep(a));
                 self.get_x_next();
-                self.scan_expression()?;
+                let b_result = self.scan_expression()?;
                 let b_binding = self.lhs_tracking.last_lhs_binding.clone();
-                let b_result = self.take_cur_result();
                 let b_dep = b_result.dep.or_else(|| {
                     if let Some(LhsBinding::Variable { id, .. }) = b_binding {
                         Some(self.numeric_dep_for_var(id))
@@ -438,9 +440,8 @@ impl Interpreter {
                         "Expected `,` in mediation a[b,c]",
                     ));
                 }
-                self.scan_expression()?;
+                let c_result = self.scan_expression()?;
                 let c_binding = self.lhs_tracking.last_lhs_binding.clone();
-                let c_result = self.take_cur_result();
                 let c_dep = c_result.dep.or_else(|| {
                     if let Some(LhsBinding::Variable { id, .. }) = c_binding {
                         Some(self.numeric_dep_for_var(id))
@@ -552,10 +553,10 @@ impl Interpreter {
             }
         }
 
-        Ok(())
+        Ok(self.take_cur_result())
     }
 
-    fn scan_tag_token(&mut self) -> InterpResult<()> {
+    fn scan_tag_token(&mut self) -> InterpResult<ExprResultValue> {
         // Variable reference — scan suffix parts to form compound name.
         //
         // MetaPost variable names are structured: `laboff.lft`, `z.r`,
@@ -620,10 +621,10 @@ impl Interpreter {
                 // Otherwise (e.g. `,` in `lambda[A,B]`), back up and let
                 // the mediation handler deal with it (mp.web §1489-1506).
                 self.get_x_next(); // skip `[`
-                self.scan_expression()?;
+                let subscript_result = self.scan_expression()?;
                 if self.cur.command == Command::RightBracket {
                     // Subscript: var[expr]
-                    let subscript = match &self.cur_expr.exp {
+                    let subscript = match &subscript_result.exp {
                         Value::Numeric(v) => *v as i64,
                         _ => 0,
                     };
@@ -641,7 +642,7 @@ impl Interpreter {
                     // Build a token list [capsule(expr), cur_tok]
                     // so they are re-read in the right order.
                     use crate::input::StoredToken;
-                    let result = self.take_cur_result();
+                    let result = subscript_result;
                     let mut tl = vec![StoredToken::Capsule(
                         result.exp,
                         result.ty,
@@ -686,7 +687,8 @@ impl Interpreter {
             return self.scan_primary();
         }
 
-        self.resolve_variable(root_sym, &name, &suffix_segs)
+        self.resolve_variable(root_sym, &name, &suffix_segs)?;
+        Ok(self.take_cur_result())
     }
 
     fn scan_rhs_for_infix_command(&mut self, cmd: Command) -> InterpResult<()> {
@@ -722,7 +724,8 @@ impl Interpreter {
     }
 
     fn scan_infix_bp(&mut self, min_bp: u8, equals_is_equation: bool) -> InterpResult<()> {
-        self.scan_primary()?;
+        let result = self.scan_primary()?;
+        self.set_cur_result(result);
         while let Some(bp) = self.cur.command.infix_binding_power() {
             if bp < min_bp {
                 break;
@@ -736,24 +739,27 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Parse and evaluate a secondary expression.
-    pub(super) fn scan_secondary(&mut self) -> InterpResult<()> {
-        self.scan_infix_bp(Command::BP_SECONDARY, false)
+    /// Parse and evaluate a secondary expression, returning the result.
+    pub(super) fn scan_secondary(&mut self) -> InterpResult<ExprResultValue> {
+        self.scan_infix_bp(Command::BP_SECONDARY, false)?;
+        Ok(self.take_cur_result())
     }
 
-    /// Parse and evaluate a tertiary expression.
-    pub(super) fn scan_tertiary(&mut self) -> InterpResult<()> {
-        self.scan_infix_bp(Command::BP_TERTIARY, false)
+    /// Parse and evaluate a tertiary expression, returning the result.
+    pub(super) fn scan_tertiary(&mut self) -> InterpResult<ExprResultValue> {
+        self.scan_infix_bp(Command::BP_TERTIARY, false)?;
+        Ok(self.take_cur_result())
     }
 
-    /// Parse and evaluate an expression.
+    /// Parse and evaluate an expression, returning the result.
     ///
     /// Handles expression-level binary operators and path construction.
-    pub(crate) fn scan_expression(&mut self) -> InterpResult<()> {
+    pub(crate) fn scan_expression(&mut self) -> InterpResult<ExprResultValue> {
         // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
         let equals_is_equation = self.lhs_tracking.equals_means_equation;
         self.lhs_tracking.equals_means_equation = false;
-        self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)
+        self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)?;
+        Ok(self.take_cur_result())
     }
 
     fn scan_secondary_infix_op(&mut self) -> InterpResult<bool> {

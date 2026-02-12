@@ -149,8 +149,8 @@ impl Interpreter {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
         self.lhs_tracking.equals_means_equation = false;
-        let condition = if self.scan_expression().is_ok() {
-            match self.take_cur_result().exp {
+        let condition = if let Ok(result) = self.scan_expression() {
+            match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,
                 _ => {
@@ -462,21 +462,21 @@ impl Interpreter {
             if self.cur.command == Command::Colon || self.cur.command == Command::Stop {
                 break;
             }
-            if self.scan_expression().is_ok() {
-                let first_val = self.take_cur_result().exp;
+            if let Ok(first_result) = self.scan_expression() {
+                let first_val = first_result.exp;
 
                 // Check for `step <step> until <end>` after the first value
                 if self.cur.command == Command::StepToken {
                     if let Ok(start) = super::helpers::value_to_scalar(&first_val) {
                         self.get_x_next();
-                        if self.scan_expression().is_ok() {
-                            let step_val = self.take_cur_result().exp;
+                        if let Ok(step_result) = self.scan_expression() {
+                            let step_val = step_result.exp;
                             if let Ok(step) = super::helpers::value_to_scalar(&step_val) {
                                 // Expect `until`
                                 if self.cur.command == Command::UntilToken {
                                     self.get_x_next();
-                                    if self.scan_expression().is_ok() {
-                                        let end_val = self.take_cur_result().exp;
+                                    if let Ok(end_result) = self.scan_expression() {
+                                        let end_val = end_result.exp;
                                         if let Ok(end) = super::helpers::value_to_scalar(&end_val) {
                                             // Generate the range
                                             Self::generate_step_range(
@@ -692,8 +692,8 @@ impl Interpreter {
     fn expand_exitif(&mut self) {
         self.get_x_next(); // skip `exitif`
         self.lhs_tracking.equals_means_equation = false;
-        let should_exit = if self.scan_expression().is_ok() {
-            match self.take_cur_result().exp {
+        let should_exit = if let Ok(result) = self.scan_expression() {
+            match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,
                 _ => {
@@ -1189,13 +1189,13 @@ impl Interpreter {
         // Determine which precedence to scan the RHS at
         let cmd = self.cur.command;
         self.get_x_next();
-        match cmd {
+        let rhs_result = match cmd {
             Command::SecondaryPrimaryMacro => self.scan_primary()?,
             Command::TertiarySecondaryMacro => self.scan_secondary()?,
             _ => self.scan_tertiary()?,
-        }
+        };
 
-        let right = self.take_cur_result().exp;
+        let right = rhs_result.exp;
 
         // Build param token lists — decompose compound values into tokens
         let args = vec![
@@ -1224,7 +1224,8 @@ impl Interpreter {
 
         // Get next token from expansion and evaluate the body
         self.get_x_next();
-        self.scan_expression()?;
+        let result = self.scan_expression()?;
+        self.set_cur_result(result);
 
         Ok(())
     }
@@ -1331,9 +1332,11 @@ impl Interpreter {
                         }
                         match param_type {
                             ParamType::Expr => {
-                                if self.scan_expression().is_ok() {
-                                    let val = self.take_cur_result().exp;
-                                    args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                                if let Ok(result) = self.scan_expression() {
+                                    args.push(value_to_stored_tokens(
+                                        &result.exp,
+                                        &mut self.symbols,
+                                    ));
                                 } else {
                                     args.push(Vec::new());
                                 }
@@ -1471,16 +1474,12 @@ impl Interpreter {
 
     fn scan_undelimited_value_arg(
         &mut self,
-        scanner: fn(&mut Self) -> InterpResult<()>,
+        scanner: fn(&mut Self) -> InterpResult<super::ExprResultValue>,
     ) -> TokenList {
         match scanner(self) {
-            Ok(()) => {
-                let val = self.take_cur_result().exp;
-                value_to_stored_tokens(&val, &mut self.symbols)
-            }
+            Ok(result) => value_to_stored_tokens(&result.exp, &mut self.symbols),
             Err(err) => {
                 self.errors.push(err);
-                let _ = self.take_cur_result().exp;
                 Vec::new()
             }
         }
@@ -1588,8 +1587,8 @@ impl Interpreter {
         self.get_x_next(); // skip `scantokens`, expand
 
         // Scan the string expression
-        if self.scan_primary().is_ok() {
-            if let Value::String(ref s) = self.take_cur_result().exp {
+        if let Ok(result) = self.scan_primary() {
+            if let Value::String(ref s) = result.exp {
                 let source = s.to_string();
 
                 // Save the token that terminated scan_primary (mp.web's
