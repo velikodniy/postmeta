@@ -44,43 +44,24 @@ impl Interpreter {
         }
     }
 
-    /// Execute a nullary operator.
-    pub(super) fn do_nullary(&mut self, op: NullaryOp) -> InterpResult<()> {
+    /// Evaluate a nullary operator, returning `(value, type)`.
+    pub(super) fn eval_nullary(&mut self, op: NullaryOp) -> (Value, Type) {
         match op {
-            NullaryOp::True => {
-                self.cur_expr.exp = Value::Boolean(true);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            NullaryOp::False => {
-                self.cur_expr.exp = Value::Boolean(false);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            NullaryOp::NullPicture => {
-                self.cur_expr.exp = Value::Picture(Picture::new());
-                self.cur_expr.ty = Type::Picture;
-            }
-            NullaryOp::NullPen => {
-                self.cur_expr.exp = Value::Pen(Pen::null());
-                self.cur_expr.ty = Type::Pen;
-            }
-            NullaryOp::PenCircle => {
-                self.cur_expr.exp = Value::Pen(Pen::circle(1.0));
-                self.cur_expr.ty = Type::Pen;
-            }
-            NullaryOp::NormalDeviate => {
-                self.cur_expr.exp = Value::Numeric(math::normal_deviate(&mut self.random_seed));
-                self.cur_expr.ty = Type::Known;
-            }
-            NullaryOp::JobName => {
-                self.cur_expr.exp = Value::String(Arc::from(self.job_name.as_str()));
-                self.cur_expr.ty = Type::String;
-            }
-            NullaryOp::ReadString => {
-                self.cur_expr.exp = Value::Vacuous;
-                self.cur_expr.ty = Type::Vacuous;
-            }
+            NullaryOp::True => (Value::Boolean(true), Type::Boolean),
+            NullaryOp::False => (Value::Boolean(false), Type::Boolean),
+            NullaryOp::NullPicture => (Value::Picture(Picture::new()), Type::Picture),
+            NullaryOp::NullPen => (Value::Pen(Pen::null()), Type::Pen),
+            NullaryOp::PenCircle => (Value::Pen(Pen::circle(1.0)), Type::Pen),
+            NullaryOp::NormalDeviate => (
+                Value::Numeric(math::normal_deviate(&mut self.random_seed)),
+                Type::Known,
+            ),
+            NullaryOp::JobName => (
+                Value::String(Arc::from(self.job_name.as_str())),
+                Type::String,
+            ),
+            NullaryOp::ReadString => (Value::Vacuous, Type::Vacuous),
         }
-        Ok(())
     }
 
     /// Execute a unary operator on `cur_exp`.

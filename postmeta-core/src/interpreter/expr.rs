@@ -106,12 +106,14 @@ impl Interpreter {
                 };
                 self.get_x_next();
                 self.lhs_tracking.last_lhs_binding = None;
-                self.do_nullary(op)?;
-                self.cur_expr.dep = if let Value::Numeric(v) = self.cur_expr.exp {
-                    Some(const_dep(v))
+                let (val, ty) = self.eval_nullary(op);
+                self.cur_expr.dep = if let Value::Numeric(v) = &val {
+                    Some(const_dep(*v))
                 } else {
                     None
                 };
+                self.cur_expr.exp = val;
+                self.cur_expr.ty = ty;
                 Ok(())
             }
 
