@@ -286,7 +286,10 @@ impl Interpreter {
                     ));
                 };
                 let second = self.take_cur_result().exp;
-                self.do_primary_binary(op, &first, &second)
+                let (val, ty) = Self::do_primary_binary(op, &first, &second)?;
+                self.cur_expr.exp = val;
+                self.cur_expr.ty = ty;
+                Ok(())
             }
 
             Command::Cycle => {
@@ -778,7 +781,9 @@ impl Interpreter {
                         ));
                     };
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_secondary_binary(op, &left, &right_val)?;
+                    let (val, ty) = Self::do_secondary_binary(op, &left, &right_val)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     if op == SecondaryBinaryOp::Times {
                         let left_const = left_dep.as_ref().and_then(constant_value);
                         let right_const = right_dep.as_ref().and_then(constant_value);

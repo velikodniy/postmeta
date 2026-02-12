@@ -270,52 +270,45 @@ impl Interpreter {
 
     /// Execute an "X of Y" binary operator.
     pub(super) fn do_primary_binary(
-        &mut self,
         op: PrimaryBinaryOp,
         first: &Value,
         second: &Value,
-    ) -> InterpResult<()> {
+    ) -> InterpResult<(Value, Type)> {
         match op {
             PrimaryBinaryOp::PointOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::point_of(p, t);
-                self.cur_expr.exp = Value::Pair(pt.x, pt.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::DirectionOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let dir = path::direction_of(p, t);
-                self.cur_expr.exp = Value::Pair(dir.x, dir.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(dir.x, dir.y), Type::PairType))
             }
             PrimaryBinaryOp::PrecontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::precontrol_of(p, t);
-                self.cur_expr.exp = Value::Pair(pt.x, pt.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::PostcontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::postcontrol_of(p, t);
-                self.cur_expr.exp = Value::Pair(pt.x, pt.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::SubpathOf => {
                 let (t1, t2) = value_to_pair(first)?;
                 let p = value_to_path(second)?;
-                self.cur_expr.exp = Value::Path(path::subpath(p, t1, t2));
-                self.cur_expr.ty = Type::Path;
+                Ok((Value::Path(path::subpath(p, t1, t2)), Type::Path))
             }
             PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
                 let p = value_to_pen(second)?;
                 let pt = pen::penoffset(p, Vec2::new(dx, dy));
-                self.cur_expr.exp = Value::Pair(pt.x, pt.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::SubstringOf => {
                 let (start, end) = value_to_pair(first)?;
@@ -350,100 +343,75 @@ impl Interpreter {
                     String::new()
                 };
 
-                self.cur_expr.exp = Value::String(Arc::from(substr));
-                self.cur_expr.ty = Type::String;
+                Ok((Value::String(Arc::from(substr)), Type::String))
             }
-            PrimaryBinaryOp::DirectionTimeOf | PrimaryBinaryOp::ArcTimeOf => {
-                self.report_error(ErrorKind::InvalidExpression, "Unimplemented primary binary");
-            }
+            PrimaryBinaryOp::DirectionTimeOf | PrimaryBinaryOp::ArcTimeOf => Err(
+                InterpreterError::new(ErrorKind::InvalidExpression, "Unimplemented primary binary"),
+            ),
         }
-        Ok(())
     }
 
     /// Execute a secondary binary operator.
     pub(super) fn do_secondary_binary(
-        &mut self,
         op: SecondaryBinaryOp,
         left: &Value,
         right: &Value,
-    ) -> InterpResult<()> {
+    ) -> InterpResult<(Value, Type)> {
         match op {
             SecondaryBinaryOp::Times => {
                 // Scalar * scalar, or scalar * pair, or pair * scalar
                 match (left, right) {
                     (Value::Numeric(a), Value::Numeric(b)) => {
-                        self.cur_expr.exp = Value::Numeric(a * b);
-                        self.cur_expr.ty = Type::Known;
+                        Ok((Value::Numeric(a * b), Type::Known))
                     }
                     (Value::Numeric(a), Value::Pair(bx, by)) => {
-                        self.cur_expr.exp = Value::Pair(a * bx, a * by);
-                        self.cur_expr.ty = Type::PairType;
+                        Ok((Value::Pair(a * bx, a * by), Type::PairType))
                     }
                     (Value::Pair(ax, ay), Value::Numeric(b)) => {
-                        self.cur_expr.exp = Value::Pair(ax * b, ay * b);
-                        self.cur_expr.ty = Type::PairType;
+                        Ok((Value::Pair(ax * b, ay * b), Type::PairType))
                     }
-                    _ => {
-                        return Err(InterpreterError::new(
-                            ErrorKind::TypeError,
-                            "Invalid types for *",
-                        ));
-                    }
+                    _ => Err(InterpreterError::new(
+                        ErrorKind::TypeError,
+                        "Invalid types for *",
+                    )),
                 }
             }
             SecondaryBinaryOp::Scaled => {
                 let factor = value_to_scalar(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::scaled(factor))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::scaled(factor))
             }
             SecondaryBinaryOp::Shifted => {
                 let (dx, dy) = value_to_pair(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::shifted(dx, dy))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::shifted(dx, dy))
             }
             SecondaryBinaryOp::Rotated => {
                 let angle = value_to_scalar(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::rotated(angle))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::rotated(angle))
             }
             SecondaryBinaryOp::XScaled => {
                 let factor = value_to_scalar(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::xscaled(factor))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::xscaled(factor))
             }
             SecondaryBinaryOp::YScaled => {
                 let factor = value_to_scalar(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::yscaled(factor))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::yscaled(factor))
             }
             SecondaryBinaryOp::Slanted => {
                 let factor = value_to_scalar(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::slanted(factor))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::slanted(factor))
             }
             SecondaryBinaryOp::ZScaled => {
                 let (a, b) = value_to_pair(right)?;
-                let (v, ty) = Self::apply_transform(left, &transform::zscaled(a, b))?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &transform::zscaled(a, b))
             }
             SecondaryBinaryOp::Transformed => {
                 let t = value_to_transform(right)?;
-                let (v, ty) = Self::apply_transform(left, &t)?;
-                self.cur_expr.exp = v;
-                self.cur_expr.ty = ty;
+                Self::apply_transform(left, &t)
             }
             SecondaryBinaryOp::DotProd => {
                 let (ax, ay) = value_to_pair(left)?;
                 let (bx, by) = value_to_pair(right)?;
-                self.cur_expr.exp = Value::Numeric(ax.mul_add(bx, ay * by));
-                self.cur_expr.ty = Type::Known;
+                Ok((Value::Numeric(ax.mul_add(bx, ay * by)), Type::Known))
             }
             SecondaryBinaryOp::Infont => {
                 let text = value_to_string(left)?;
@@ -460,17 +428,13 @@ impl Interpreter {
                 };
                 let mut pic = Picture::new();
                 pic.objects.push(GraphicsObject::Text(text_obj));
-                self.cur_expr.exp = Value::Picture(pic);
-                self.cur_expr.ty = Type::Picture;
+                Ok((Value::Picture(pic), Type::Picture))
             }
-            SecondaryBinaryOp::Over => {
-                self.report_error(
-                    ErrorKind::InvalidExpression,
-                    "Unimplemented secondary binary",
-                );
-            }
+            SecondaryBinaryOp::Over => Err(InterpreterError::new(
+                ErrorKind::InvalidExpression,
+                "Unimplemented secondary binary: over",
+            )),
         }
-        Ok(())
     }
 
     /// Apply a transform to a value, returning the transformed `(Value, Type)`.
