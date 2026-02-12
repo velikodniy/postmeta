@@ -13,13 +13,22 @@ use crate::command::{
     Command, ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
     StrOpOp, TertiaryBinaryOp, TypeNameOp, UnaryOp,
 };
-use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale};
+use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale, DepList};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
 use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
 use super::{ExprResultValue, Interpreter, LhsBinding};
+
+/// Result from an infix (led) handler — either continue the Pratt loop
+/// or break out of it.
+enum InfixAction {
+    /// The operator was consumed; continue looking for more infix ops.
+    Continue(ExprResultValue),
+    /// The operator signals a mode switch or end of expression; stop the loop.
+    Break(ExprResultValue),
+}
 
 impl Interpreter {
     /// Parse and evaluate a primary expression, returning the result.
@@ -678,10 +687,12 @@ impl Interpreter {
         self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
-    fn scan_rhs_for_infix_command(
-        &mut self,
-        cmd: Command,
-    ) -> InterpResult<ExprResultValue> {
+    // =====================================================================
+    // Pratt parser loop
+    // =====================================================================
+
+    /// Parse the RHS of an infix operator at one binding power level higher.
+    fn scan_rhs(&mut self, cmd: Command) -> InterpResult<ExprResultValue> {
         let Some(bp) = cmd.infix_binding_power() else {
             return Err(InterpreterError::new(
                 ErrorKind::UnexpectedToken,
@@ -691,33 +702,8 @@ impl Interpreter {
         self.scan_infix_bp(bp + 1, false)
     }
 
-    /// Result from an infix op handler: new accumulator + whether to break.
-    fn scan_current_infix_op(
-        &mut self,
-        left: ExprResultValue,
-        equals_is_equation: bool,
-    ) -> InterpResult<(ExprResultValue, bool)> {
-        match self.cur.command {
-            Command::SecondaryPrimaryMacro
-            | Command::SecondaryBinary
-            | Command::Slash
-            | Command::And => self.scan_secondary_infix_op(left),
-            Command::TertiarySecondaryMacro | Command::PlusOrMinus | Command::TertiaryBinary => {
-                self.scan_tertiary_infix_op(left)
-            }
-            Command::Equals
-            | Command::PathJoin
-            | Command::Ampersand
-            | Command::ExpressionTertiaryMacro
-            | Command::ExpressionBinary
-            | Command::LeftBrace => self.scan_expression_infix_op(left, equals_is_equation),
-            _ => Err(InterpreterError::new(
-                ErrorKind::UnexpectedToken,
-                "Expected infix command",
-            )),
-        }
-    }
-
+    /// Core Pratt loop: parse primary, then consume infix operators while
+    /// their binding power meets the minimum.
     fn scan_infix_bp(
         &mut self,
         min_bp: u8,
@@ -728,12 +714,9 @@ impl Interpreter {
             if bp < min_bp {
                 break;
             }
-
-            let (new_accum, should_break) =
-                self.scan_current_infix_op(accum, equals_is_equation)?;
-            accum = new_accum;
-            if should_break {
-                break;
+            match self.scan_infix_led(accum, equals_is_equation)? {
+                InfixAction::Continue(result) => accum = result,
+                InfixAction::Break(result) => return Ok(result),
             }
         }
         Ok(accum)
@@ -753,568 +736,568 @@ impl Interpreter {
     ///
     /// Handles expression-level binary operators and path construction.
     pub(crate) fn scan_expression(&mut self) -> InterpResult<ExprResultValue> {
-        // Capture and reset the flag (mp.web: my_var_flag := var_flag; var_flag := 0).
         let equals_is_equation = self.lhs_tracking.equals_means_equation;
         self.lhs_tracking.equals_means_equation = false;
         self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)
     }
 
-    fn scan_secondary_infix_op(
+    // =====================================================================
+    // Unified infix (led) handler
+    // =====================================================================
+
+    /// Single led dispatch for all infix operators.
+    fn scan_infix_led(
         &mut self,
-        left_result: ExprResultValue,
-    ) -> InterpResult<(ExprResultValue, bool)> {
+        left: ExprResultValue,
+        equals_is_equation: bool,
+    ) -> InterpResult<InfixAction> {
         let cmd = self.cur.command;
+        let modifier = self.cur.modifier;
 
-        if cmd == Command::SecondaryPrimaryMacro {
-            // User-defined primarydef operator
-            let left = left_result.exp;
-            let result = self.expand_binary_macro(&left)?;
-            return Ok((result, true));
-        }
+        match cmd {
+            // ----- User-defined binary macros (break after expansion) -----
+            Command::SecondaryPrimaryMacro
+            | Command::TertiarySecondaryMacro
+            | Command::ExpressionTertiaryMacro => {
+                let left_val = left.exp;
+                let mut result = self.expand_binary_macro(&left_val)?;
+                if cmd == Command::ExpressionTertiaryMacro {
+                    result.dep = None;
+                    result.pair_dep = None;
+                }
+                Ok(InfixAction::Break(result))
+            }
 
-        let op = self.cur.modifier;
-        let left_dep = left_result.dep.clone();
-        let left_pair_dep = left_result.pair_dep.clone();
-        let left = left_result.exp;
-        self.get_x_next();
-        let right_result = self.scan_rhs_for_infix_command(cmd)?;
-        let right_val = right_result.exp.clone();
-        let right_dep = right_result.dep.clone();
-        let right_pair_dep = right_result.pair_dep.clone();
-        let right_binding = self.lhs_tracking.last_lhs_binding.clone();
-
-        let result = match cmd {
+            // ----- Secondary level: *, /, and, scaled, rotated, ... -----
             Command::SecondaryBinary => {
-                let Some(op) = SecondaryBinaryOp::from_modifier(op) else {
+                let Some(op) = SecondaryBinaryOp::from_modifier(modifier) else {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
                         "Invalid secondary binary operator modifier",
                     ));
                 };
+                let left_dep = left.dep.clone();
+                let left_pair_dep = left.pair_dep.clone();
+                let left_val = left.exp;
+                self.get_x_next();
+                let right = self.scan_rhs(cmd)?;
+                let right_binding = self.lhs_tracking.last_lhs_binding.clone();
                 self.lhs_tracking.last_lhs_binding = None;
-                let (val, ty) = Self::do_secondary_binary(op, &left, &right_val)?;
-                if op == SecondaryBinaryOp::Times {
-                    let left_const = left_dep.as_ref().and_then(constant_value);
-                    let right_const = right_dep.as_ref().and_then(constant_value);
-
-                    match val {
-                        Value::Numeric(_) => {
-                            let dep = left_const.map_or_else(
-                                || {
-                                    right_const.and_then(|factor| {
-                                        left_dep.map(|mut d| {
-                                            dep_scale(&mut d, factor);
-                                            d
-                                        })
-                                    })
-                                },
-                                |factor| {
-                                    right_dep.clone().map(|mut d| {
-                                        dep_scale(&mut d, factor);
-                                        d
-                                    })
-                                },
-                            );
-                            ExprResultValue {
-                                exp: val,
-                                ty,
-                                dep,
-                                pair_dep: None,
-                            }
-                        }
-                        Value::Pair(_, _) => {
-                            let pair_deps = match (&left, &right_val) {
-                                (Value::Numeric(_), Value::Pair(rx, ry)) => {
-                                    let left_linear = left_dep
-                                        .as_ref()
-                                        .is_some_and(|d| constant_value(d).is_none());
-                                    let right_linear = right_pair_dep.as_ref().is_some_and(
-                                        |(dx, dy)| {
-                                            constant_value(dx).is_none()
-                                                || constant_value(dy).is_none()
-                                        },
-                                    );
-
-                                    if left_linear && right_linear {
-                                        None
-                                    } else if left_linear {
-                                        let dep = left_dep.unwrap_or_else(|| const_dep(0.0));
-                                        let mut dx = dep.clone();
-                                        let mut dy = dep;
-                                        dep_scale(&mut dx, *rx);
-                                        dep_scale(&mut dy, *ry);
-                                        Some((dx, dy))
-                                    } else {
-                                        let scalar = left_const
-                                            .unwrap_or_else(|| value_to_scalar(&left).unwrap_or(0.0));
-                                        let (mut dx, mut dy) = right_pair_dep
-                                            .unwrap_or_else(|| (const_dep(*rx), const_dep(*ry)));
-                                        dep_scale(&mut dx, scalar);
-                                        dep_scale(&mut dy, scalar);
-                                        Some((dx, dy))
-                                    }
-                                }
-                                (Value::Pair(lx, ly), Value::Numeric(_)) => {
-                                    let left_linear = left_pair_dep.as_ref().is_some_and(
-                                        |(dx, dy)| {
-                                            constant_value(dx).is_none()
-                                                || constant_value(dy).is_none()
-                                        },
-                                    );
-                                    let right_linear = right_dep
-                                        .as_ref()
-                                        .is_some_and(|d| constant_value(d).is_none());
-
-                                    if left_linear && right_linear {
-                                        None
-                                    } else if right_linear {
-                                        let dep = right_dep.unwrap_or_else(|| const_dep(0.0));
-                                        let mut dx = dep.clone();
-                                        let mut dy = dep;
-                                        dep_scale(&mut dx, *lx);
-                                        dep_scale(&mut dy, *ly);
-                                        Some((dx, dy))
-                                    } else {
-                                        let scalar = right_const
-                                            .unwrap_or_else(|| value_to_scalar(&right_val).unwrap_or(0.0));
-                                        let (mut dx, mut dy) = left_pair_dep
-                                            .unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
-                                        dep_scale(&mut dx, scalar);
-                                        dep_scale(&mut dy, scalar);
-                                        Some((dx, dy))
-                                    }
-                                }
-                                _ => None,
-                            };
-
-                            ExprResultValue {
-                                exp: val,
-                                ty,
-                                dep: None,
-                                pair_dep: pair_deps,
-                            }
-                        }
-                        _ => ExprResultValue {
-                            exp: val,
-                            ty,
-                            dep: None,
-                            pair_dep: None,
-                        },
-                    }
+                let (val, ty) = Self::do_secondary_binary(op, &left_val, &right.exp)?;
+                let result = if op == SecondaryBinaryOp::Times {
+                    Self::mul_deps(val, ty, &left_val, left_dep, left_pair_dep, &right)
                 } else {
-                    let pair_dep = if matches!(val, Value::Pair(_, _)) {
-                        let base_dep = left_pair_dep.or_else(|| {
-                            if let Value::Pair(lx, ly) = left {
-                                Some((const_dep(lx), const_dep(ly)))
-                            } else {
-                                None
-                            }
-                        });
-
-                        base_dep.map(|(ldx, ldy)| {
-                            if op == SecondaryBinaryOp::Transformed
-                                && let Some(LhsBinding::Variable { id, .. }) = right_binding.clone()
-                                && let VarValue::Transform {
-                                    tx,
-                                    ty: ty_id,
-                                    txx,
-                                    txy,
-                                    tyx,
-                                    tyy,
-                                } = self.variables.get(id).clone()
-                            {
-                                let (lx, ly) = if let Value::Pair(lx, ly) = left {
-                                    (lx, ly)
-                                } else {
-                                    (0.0, 0.0)
-                                };
-
-                                let mut dep_x = self.numeric_dep_for_var(tx);
-                                dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txx), lx);
-                                dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txy), ly);
-
-                                let mut dep_y = self.numeric_dep_for_var(ty_id);
-                                dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyx), lx);
-                                dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyy), ly);
-
-                                return (dep_x, dep_y);
-                            }
-
-                            let t = match op {
-                                SecondaryBinaryOp::Scaled => {
-                                    let f = value_to_scalar(&right_val).unwrap_or(1.0);
-                                    postmeta_graphics::transform::scaled(f)
-                                }
-                                SecondaryBinaryOp::Shifted => {
-                                    let (dx, dy) =
-                                        value_to_pair(&right_val).unwrap_or((0.0, 0.0));
-                                    postmeta_graphics::transform::shifted(dx, dy)
-                                }
-                                SecondaryBinaryOp::Rotated => {
-                                    let a = value_to_scalar(&right_val).unwrap_or(0.0);
-                                    postmeta_graphics::transform::rotated(a)
-                                }
-                                SecondaryBinaryOp::XScaled => {
-                                    let f = value_to_scalar(&right_val).unwrap_or(1.0);
-                                    postmeta_graphics::transform::xscaled(f)
-                                }
-                                SecondaryBinaryOp::YScaled => {
-                                    let f = value_to_scalar(&right_val).unwrap_or(1.0);
-                                    postmeta_graphics::transform::yscaled(f)
-                                }
-                                SecondaryBinaryOp::Slanted => {
-                                    let f = value_to_scalar(&right_val).unwrap_or(0.0);
-                                    postmeta_graphics::transform::slanted(f)
-                                }
-                                SecondaryBinaryOp::ZScaled => {
-                                    let (a, b) =
-                                        value_to_pair(&right_val).unwrap_or((1.0, 0.0));
-                                    postmeta_graphics::transform::zscaled(a, b)
-                                }
-                                SecondaryBinaryOp::Transformed => {
-                                    value_to_transform(&right_val).unwrap_or(
-                                        postmeta_graphics::types::Transform::IDENTITY,
-                                    )
-                                }
-                                SecondaryBinaryOp::Times
-                                | SecondaryBinaryOp::Over
-                                | SecondaryBinaryOp::DotProd
-                                | SecondaryBinaryOp::Infont => {
-                                    postmeta_graphics::types::Transform::IDENTITY
-                                }
-                            };
-
-                            let mut new_x = ldx.clone();
-                            dep_scale(&mut new_x, t.txx);
-                            new_x = dep_add_scaled(&new_x, &ldy, t.txy);
-                            new_x = dep_add_scaled(&new_x, &const_dep(t.tx), 1.0);
-
-                            let mut new_y = ldx;
-                            dep_scale(&mut new_y, t.tyx);
-                            new_y = dep_add_scaled(&new_y, &ldy, t.tyy);
-                            new_y = dep_add_scaled(&new_y, &const_dep(t.ty), 1.0);
-
-                            (new_x, new_y)
-                        })
-                    } else {
-                        None
-                    };
-                    ExprResultValue {
-                        exp: val,
+                    self.transform_deps(
+                        val,
                         ty,
-                        dep: None,
-                        pair_dep,
-                    }
-                }
+                        op,
+                        &left_val,
+                        left_pair_dep,
+                        &right,
+                        right_binding,
+                    )
+                };
+                Ok(InfixAction::Continue(result))
             }
+
             Command::Slash => {
-                // Division
-                let right = right_result.exp;
-                let b = value_to_scalar(&right)?;
+                let left_dep = left.dep.clone();
+                let left_pair_dep = left.pair_dep.clone();
+                let left_val = left.exp;
+                self.get_x_next();
+                let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                if b.abs() < f64::EPSILON {
-                    self.report_error(ErrorKind::ArithmeticError, "Division by zero");
-                    match left {
-                        Value::Numeric(_) => ExprResultValue {
-                            exp: Value::Numeric(0.0),
-                            ty: Type::Known,
-                            dep: Some(const_dep(0.0)),
-                            pair_dep: None,
-                        },
-                        Value::Pair(_, _) => ExprResultValue {
-                            exp: Value::Pair(0.0, 0.0),
-                            ty: Type::PairType,
-                            dep: None,
-                            pair_dep: Some((const_dep(0.0), const_dep(0.0))),
-                        },
-                        _ => ExprResultValue {
-                            exp: Value::Numeric(0.0),
-                            ty: Type::Known,
-                            dep: Some(const_dep(0.0)),
-                            pair_dep: None,
-                        },
-                    }
-                } else {
-                    match left {
-                        Value::Numeric(a) => {
-                            let divisor = right_dep
-                                .as_ref()
-                                .and_then(constant_value)
-                                .or_else(|| value_to_scalar(&right).ok());
-                            let dep = divisor.and_then(|c| {
-                                if c.abs() < f64::EPSILON {
-                                    None
-                                } else {
-                                    left_dep.map(|mut d| {
-                                        dep_scale(&mut d, 1.0 / c);
-                                        d
-                                    })
-                                }
-                            });
-                            ExprResultValue {
-                                exp: Value::Numeric(a / b),
-                                ty: Type::Known,
-                                dep,
-                                pair_dep: None,
-                            }
-                        }
-                        Value::Pair(x, y) => {
-                            let (mut dx, mut dy) =
-                                left_pair_dep.unwrap_or_else(|| (const_dep(x), const_dep(y)));
-                            dep_scale(&mut dx, 1.0 / b);
-                            dep_scale(&mut dy, 1.0 / b);
-                            ExprResultValue {
-                                exp: Value::Pair(x / b, y / b),
-                                ty: Type::PairType,
-                                dep: None,
-                                pair_dep: Some((dx, dy)),
-                            }
-                        }
-                        _ => {
-                            return Err(InterpreterError::new(
-                                ErrorKind::TypeError,
-                                format!(
-                                    "Invalid types for /: {} and {}",
-                                    left.ty(),
-                                    right.ty()
-                                ),
-                            ));
-                        }
-                    }
-                }
+                let result = self.div_deps(left_val, left_dep, left_pair_dep, &right)?;
+                Ok(InfixAction::Continue(result))
             }
+
             Command::And => {
-                // Logical and
-                let right = right_result.exp;
-                let a = value_to_bool(&left)?;
-                let b = value_to_bool(&right)?;
+                let left_val = left.exp;
+                self.get_x_next();
+                let right = self.scan_rhs(cmd)?;
+                let a = value_to_bool(&left_val)?;
+                let b = value_to_bool(&right.exp)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                ExprResultValue {
+                Ok(InfixAction::Continue(ExprResultValue {
                     exp: Value::Boolean(a && b),
                     ty: Type::Boolean,
                     dep: None,
                     pair_dep: None,
-                }
+                }))
             }
-            _ => {
-                return Err(InterpreterError::new(
-                    ErrorKind::Internal,
-                    "Unexpected command in scan_secondary_infix_op",
-                ));
-            }
-        };
-        Ok((result, false))
-    }
 
-    fn scan_tertiary_infix_op(
-        &mut self,
-        left_result: ExprResultValue,
-    ) -> InterpResult<(ExprResultValue, bool)> {
-        let cmd = self.cur.command;
-
-        if cmd == Command::TertiarySecondaryMacro {
-            // User-defined tertiarydef operator
-            let left = left_result.exp;
-            let result = self.expand_binary_macro(&left)?;
-            return Ok((result, true));
-        }
-
-        let op = self.cur.modifier;
-        let left_dep = left_result.dep.clone();
-        let left_pair_dep = left_result.pair_dep.clone();
-        let left = left_result.exp;
-        self.get_x_next();
-        let right_result = self.scan_rhs_for_infix_command(cmd)?;
-        let right_dep = right_result.dep.clone();
-        let right_pair_dep = right_result.pair_dep.clone();
-
-        let result = match cmd {
+            // ----- Tertiary level: +, -, ++, +-+ -----
             Command::PlusOrMinus => {
-                let Some(op) = PlusMinusOp::from_modifier(op) else {
+                let Some(op) = PlusMinusOp::from_modifier(modifier) else {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
                         "Invalid plus/minus modifier",
                     ));
                 };
-                let right = right_result.exp;
+                let left_dep = left.dep.clone();
+                let left_pair_dep = left.pair_dep.clone();
+                let left_val = left.exp;
+                self.get_x_next();
+                let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                let (val, ty) = Self::do_plus_minus(op, &left, &right)?;
+                let (val, ty) = Self::do_plus_minus(op, &left_val, &right.exp)?;
                 let factor = if op == PlusMinusOp::Plus {
                     1.0
                 } else {
                     -1.0
                 };
-
-                if matches!(val, Value::Pair(_, _)) {
-                    let (lx, ly) = if let Value::Pair(x, y) = left {
-                        (x, y)
-                    } else {
-                        (0.0, 0.0)
-                    };
-                    let (rx, ry) = if let Value::Pair(x, y) = right {
-                        (x, y)
-                    } else {
-                        (0.0, 0.0)
-                    };
-
-                    let (ldx, ldy) =
-                        left_pair_dep.unwrap_or_else(|| (const_dep(lx), const_dep(ly)));
-                    let (rdx, rdy) =
-                        right_pair_dep.unwrap_or_else(|| (const_dep(rx), const_dep(ry)));
-
-                    ExprResultValue {
-                        exp: val,
-                        ty,
-                        dep: None,
-                        pair_dep: Some((
-                            dep_add_scaled(&ldx, &rdx, factor),
-                            dep_add_scaled(&ldy, &rdy, factor),
-                        )),
-                    }
-                } else {
-                    let dep = match (left_dep.as_ref(), right_dep.as_ref()) {
-                        (Some(ld), Some(rd)) => Some(dep_add_scaled(ld, rd, factor)),
-                        _ => None,
-                    };
-                    ExprResultValue {
-                        exp: val,
-                        ty,
-                        dep,
-                        pair_dep: None,
-                    }
-                }
+                let result =
+                    Self::add_sub_deps(val, ty, factor, &left_val, left_dep, left_pair_dep, &right);
+                Ok(InfixAction::Continue(result))
             }
+
             Command::TertiaryBinary => {
-                let Some(op) = TertiaryBinaryOp::from_modifier(op) else {
+                let Some(op) = TertiaryBinaryOp::from_modifier(modifier) else {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
                         "Invalid tertiary binary modifier",
                     ));
                 };
-                let right = right_result.exp;
+                let left_val = left.exp;
+                self.get_x_next();
+                let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                let (val, ty) = Self::do_tertiary_binary(op, &left, &right)?;
-                ExprResultValue {
+                let (val, ty) = Self::do_tertiary_binary(op, &left_val, &right.exp)?;
+                Ok(InfixAction::Continue(ExprResultValue {
                     exp: val,
                     ty,
                     dep: None,
                     pair_dep: None,
-                }
+                }))
             }
-            _ => {
-                return Err(InterpreterError::new(
-                    ErrorKind::Internal,
-                    "Unexpected command in scan_tertiary_infix_op",
-                ));
-            }
-        };
-        Ok((result, false))
-    }
 
-    fn scan_expression_infix_op(
-        &mut self,
-        left_result: ExprResultValue,
-        equals_is_equation: bool,
-    ) -> InterpResult<(ExprResultValue, bool)> {
-        let cmd = self.cur.command;
-        let op = self.cur.modifier;
-
-        match cmd {
+            // ----- Expression level: =, <, >, path join, &, ... -----
             Command::Equals if equals_is_equation => {
-                // In statement context, `=` is an equation/assignment
-                // delimiter — don't consume it.
-                Ok((left_result, true))
+                // In statement context, `=` is an equation/assignment — stop.
+                Ok(InfixAction::Break(left))
             }
+
             Command::Equals => {
-                // In expression context (e.g. exitif, if), `=` is an
-                // equality comparison producing a boolean.
-                let left = left_result.exp;
+                // In expression context, `=` is equality comparison.
+                let left_val = left.exp;
                 self.get_x_next();
-                let right_result = self.scan_rhs_for_infix_command(cmd)?;
-                let right = right_result.exp;
+                let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) =
-                    Self::do_expression_binary(ExpressionBinaryOp::EqualTo, &left, &right)?;
-                Ok((
-                    ExprResultValue {
-                        exp: val,
-                        ty,
-                        dep: None,
-                        pair_dep: None,
-                    },
-                    false,
-                ))
+                    Self::do_expression_binary(ExpressionBinaryOp::EqualTo, &left_val, &right.exp)?;
+                Ok(InfixAction::Continue(ExprResultValue {
+                    exp: val,
+                    ty,
+                    dep: None,
+                    pair_dep: None,
+                }))
             }
-            Command::PathJoin => {
-                // Path construction
-                let result = self.scan_path_construction(left_result)?;
-                Ok((result, true))
-            }
-            Command::Ampersand => {
-                // & is path join for pairs/paths, string concat otherwise
-                if matches!(left_result.ty, Type::PairType | Type::Path) {
-                    let result = self.scan_path_construction(left_result)?;
-                    Ok((result, true))
-                } else {
-                    // String concatenation
-                    let left = left_result.exp;
-                    self.get_x_next();
-                    let right_result = self.scan_rhs_for_infix_command(cmd)?;
-                    let right = right_result.exp;
-                    self.lhs_tracking.last_lhs_binding = None;
-                    let (val, ty) = Self::do_expression_binary(
-                        ExpressionBinaryOp::Concatenate,
-                        &left,
-                        &right,
-                    )?;
-                    Ok((
-                        ExprResultValue {
-                            exp: val,
-                            ty,
-                            dep: None,
-                            pair_dep: None,
-                        },
-                        true,
-                    ))
-                }
-            }
-            Command::ExpressionTertiaryMacro => {
-                // User-defined secondarydef operator
-                let left = left_result.exp;
-                let mut result = self.expand_binary_macro(&left)?;
-                result.dep = None;
-                result.pair_dep = None;
-                Ok((result, true))
-            }
+
             Command::ExpressionBinary => {
-                let Some(op) = ExpressionBinaryOp::from_modifier(op) else {
+                let Some(op) = ExpressionBinaryOp::from_modifier(modifier) else {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
                         "Invalid expression binary modifier",
                     ));
                 };
-                let left = left_result.exp;
+                let left_val = left.exp;
                 self.get_x_next();
-                let right_result = self.scan_rhs_for_infix_command(cmd)?;
-                let right = right_result.exp;
+                let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                let (val, ty) = Self::do_expression_binary(op, &left, &right)?;
-                Ok((
-                    ExprResultValue {
+                let (val, ty) = Self::do_expression_binary(op, &left_val, &right.exp)?;
+                Ok(InfixAction::Continue(ExprResultValue {
+                    exp: val,
+                    ty,
+                    dep: None,
+                    pair_dep: None,
+                }))
+            }
+
+            // ----- Path construction and & -----
+            Command::PathJoin | Command::LeftBrace => {
+                let result = self.scan_path_construction(left)?;
+                Ok(InfixAction::Break(result))
+            }
+
+            Command::Ampersand => {
+                if matches!(left.ty, Type::PairType | Type::Path) {
+                    let result = self.scan_path_construction(left)?;
+                    Ok(InfixAction::Break(result))
+                } else {
+                    // String concatenation
+                    let left_val = left.exp;
+                    self.get_x_next();
+                    let right = self.scan_rhs(cmd)?;
+                    self.lhs_tracking.last_lhs_binding = None;
+                    let (val, ty) = Self::do_expression_binary(
+                        ExpressionBinaryOp::Concatenate,
+                        &left_val,
+                        &right.exp,
+                    )?;
+                    Ok(InfixAction::Break(ExprResultValue {
                         exp: val,
                         ty,
                         dep: None,
                         pair_dep: None,
+                    }))
+                }
+            }
+
+            _ => Ok(InfixAction::Break(left)),
+        }
+    }
+
+    // =====================================================================
+    // Dependency propagation helpers
+    // =====================================================================
+
+    /// Compute dependency info for multiplication (`*`).
+    fn mul_deps(
+        val: Value,
+        ty: Type,
+        left_val: &Value,
+        left_dep: Option<DepList>,
+        left_pair_dep: Option<(DepList, DepList)>,
+        right: &ExprResultValue,
+    ) -> ExprResultValue {
+        let left_const = left_dep.as_ref().and_then(constant_value);
+        let right_const = right.dep.as_ref().and_then(constant_value);
+
+        match val {
+            Value::Numeric(_) => {
+                let dep = left_const.map_or_else(
+                    || {
+                        right_const.and_then(|factor| {
+                            left_dep.map(|mut d| {
+                                dep_scale(&mut d, factor);
+                                d
+                            })
+                        })
                     },
-                    false,
-                ))
+                    |factor| {
+                        right.dep.clone().map(|mut d| {
+                            dep_scale(&mut d, factor);
+                            d
+                        })
+                    },
+                );
+                ExprResultValue {
+                    exp: val,
+                    ty,
+                    dep,
+                    pair_dep: None,
+                }
             }
-            Command::LeftBrace => {
-                // Direction specification — start of path construction
-                let result = self.scan_path_construction(left_result)?;
-                Ok((result, true))
+            Value::Pair(_, _) => {
+                let pair_deps = match (left_val, &right.exp) {
+                    (Value::Numeric(_), Value::Pair(rx, ry)) => {
+                        let left_linear =
+                            left_dep.as_ref().is_some_and(|d| constant_value(d).is_none());
+                        let right_linear = right.pair_dep.as_ref().is_some_and(|(dx, dy)| {
+                            constant_value(dx).is_none() || constant_value(dy).is_none()
+                        });
+                        if left_linear && right_linear {
+                            None
+                        } else if left_linear {
+                            let dep = left_dep.unwrap_or_else(|| const_dep(0.0));
+                            let mut dx = dep.clone();
+                            let mut dy = dep;
+                            dep_scale(&mut dx, *rx);
+                            dep_scale(&mut dy, *ry);
+                            Some((dx, dy))
+                        } else {
+                            let scalar = left_const
+                                .unwrap_or_else(|| value_to_scalar(left_val).unwrap_or(0.0));
+                            let (mut dx, mut dy) = right
+                                .pair_dep
+                                .clone()
+                                .unwrap_or_else(|| (const_dep(*rx), const_dep(*ry)));
+                            dep_scale(&mut dx, scalar);
+                            dep_scale(&mut dy, scalar);
+                            Some((dx, dy))
+                        }
+                    }
+                    (Value::Pair(lx, ly), Value::Numeric(_)) => {
+                        let left_linear = left_pair_dep.as_ref().is_some_and(|(dx, dy)| {
+                            constant_value(dx).is_none() || constant_value(dy).is_none()
+                        });
+                        let right_linear = right
+                            .dep
+                            .as_ref()
+                            .is_some_and(|d| constant_value(d).is_none());
+                        if left_linear && right_linear {
+                            None
+                        } else if right_linear {
+                            let dep = right.dep.clone().unwrap_or_else(|| const_dep(0.0));
+                            let mut dx = dep.clone();
+                            let mut dy = dep;
+                            dep_scale(&mut dx, *lx);
+                            dep_scale(&mut dy, *ly);
+                            Some((dx, dy))
+                        } else {
+                            let scalar = right_const
+                                .unwrap_or_else(|| value_to_scalar(&right.exp).unwrap_or(0.0));
+                            let (mut dx, mut dy) = left_pair_dep
+                                .unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
+                            dep_scale(&mut dx, scalar);
+                            dep_scale(&mut dy, scalar);
+                            Some((dx, dy))
+                        }
+                    }
+                    _ => None,
+                };
+                ExprResultValue {
+                    exp: val,
+                    ty,
+                    dep: None,
+                    pair_dep: pair_deps,
+                }
             }
-            _ => Ok((left_result, true)),
+            _ => ExprResultValue {
+                exp: val,
+                ty,
+                dep: None,
+                pair_dep: None,
+            },
+        }
+    }
+
+    /// Compute dependency info for division (`/`).
+    fn div_deps(
+        &mut self,
+        left_val: Value,
+        left_dep: Option<DepList>,
+        left_pair_dep: Option<(DepList, DepList)>,
+        right: &ExprResultValue,
+    ) -> InterpResult<ExprResultValue> {
+        let b = value_to_scalar(&right.exp)?;
+        if b.abs() < f64::EPSILON {
+            self.report_error(ErrorKind::ArithmeticError, "Division by zero");
+            return Ok(match left_val {
+                Value::Pair(_, _) => ExprResultValue {
+                    exp: Value::Pair(0.0, 0.0),
+                    ty: Type::PairType,
+                    dep: None,
+                    pair_dep: Some((const_dep(0.0), const_dep(0.0))),
+                },
+                _ => ExprResultValue {
+                    exp: Value::Numeric(0.0),
+                    ty: Type::Known,
+                    dep: Some(const_dep(0.0)),
+                    pair_dep: None,
+                },
+            });
+        }
+        Ok(match left_val {
+            Value::Numeric(a) => {
+                let divisor = right
+                    .dep
+                    .as_ref()
+                    .and_then(constant_value)
+                    .or_else(|| value_to_scalar(&right.exp).ok());
+                let dep = divisor.and_then(|c| {
+                    if c.abs() < f64::EPSILON {
+                        None
+                    } else {
+                        left_dep.map(|mut d| {
+                            dep_scale(&mut d, 1.0 / c);
+                            d
+                        })
+                    }
+                });
+                ExprResultValue {
+                    exp: Value::Numeric(a / b),
+                    ty: Type::Known,
+                    dep,
+                    pair_dep: None,
+                }
+            }
+            Value::Pair(x, y) => {
+                let (mut dx, mut dy) =
+                    left_pair_dep.unwrap_or_else(|| (const_dep(x), const_dep(y)));
+                dep_scale(&mut dx, 1.0 / b);
+                dep_scale(&mut dy, 1.0 / b);
+                ExprResultValue {
+                    exp: Value::Pair(x / b, y / b),
+                    ty: Type::PairType,
+                    dep: None,
+                    pair_dep: Some((dx, dy)),
+                }
+            }
+            _ => {
+                return Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!(
+                        "Invalid types for /: {} and {}",
+                        left_val.ty(),
+                        right.exp.ty()
+                    ),
+                ));
+            }
+        })
+    }
+
+    /// Compute dependency info for addition/subtraction (`+`, `-`).
+    fn add_sub_deps(
+        val: Value,
+        ty: Type,
+        factor: f64,
+        left_val: &Value,
+        left_dep: Option<DepList>,
+        left_pair_dep: Option<(DepList, DepList)>,
+        right: &ExprResultValue,
+    ) -> ExprResultValue {
+        if matches!(val, Value::Pair(_, _)) {
+            let (lx, ly) = if let Value::Pair(x, y) = left_val {
+                (*x, *y)
+            } else {
+                (0.0, 0.0)
+            };
+            let (rx, ry) = if let Value::Pair(x, y) = &right.exp {
+                (*x, *y)
+            } else {
+                (0.0, 0.0)
+            };
+            let (ldx, ldy) = left_pair_dep.unwrap_or_else(|| (const_dep(lx), const_dep(ly)));
+            let (rdx, rdy) = right
+                .pair_dep
+                .clone()
+                .unwrap_or_else(|| (const_dep(rx), const_dep(ry)));
+            ExprResultValue {
+                exp: val,
+                ty,
+                dep: None,
+                pair_dep: Some((
+                    dep_add_scaled(&ldx, &rdx, factor),
+                    dep_add_scaled(&ldy, &rdy, factor),
+                )),
+            }
+        } else {
+            let dep = match (left_dep.as_ref(), right.dep.as_ref()) {
+                (Some(ld), Some(rd)) => Some(dep_add_scaled(ld, rd, factor)),
+                _ => None,
+            };
+            ExprResultValue {
+                exp: val,
+                ty,
+                dep,
+                pair_dep: None,
+            }
+        }
+    }
+
+    /// Compute pair dependency info for non-`*` secondary ops (transforms).
+    #[allow(clippy::too_many_arguments)]
+    fn transform_deps(
+        &mut self,
+        val: Value,
+        ty: Type,
+        op: SecondaryBinaryOp,
+        left_val: &Value,
+        left_pair_dep: Option<(DepList, DepList)>,
+        right: &ExprResultValue,
+        right_binding: Option<LhsBinding>,
+    ) -> ExprResultValue {
+        let pair_dep = if matches!(val, Value::Pair(_, _)) {
+            let base_dep = left_pair_dep.or_else(|| {
+                if let Value::Pair(lx, ly) = left_val {
+                    Some((const_dep(*lx), const_dep(*ly)))
+                } else {
+                    None
+                }
+            });
+
+            base_dep.map(|(ldx, ldy)| {
+                // Unknown transform: propagate component deps individually
+                if op == SecondaryBinaryOp::Transformed
+                    && let Some(LhsBinding::Variable { id, .. }) = right_binding
+                    && let VarValue::Transform {
+                        tx,
+                        ty: ty_id,
+                        txx,
+                        txy,
+                        tyx,
+                        tyy,
+                    } = self.variables.get(id).clone()
+                {
+                    let (lx, ly) = if let Value::Pair(lx, ly) = left_val {
+                        (*lx, *ly)
+                    } else {
+                        (0.0, 0.0)
+                    };
+
+                    let mut dep_x = self.numeric_dep_for_var(tx);
+                    dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txx), lx);
+                    dep_x = dep_add_scaled(&dep_x, &self.numeric_dep_for_var(txy), ly);
+
+                    let mut dep_y = self.numeric_dep_for_var(ty_id);
+                    dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyx), lx);
+                    dep_y = dep_add_scaled(&dep_y, &self.numeric_dep_for_var(tyy), ly);
+
+                    return (dep_x, dep_y);
+                }
+
+                // Known transform: apply affine transform to dep lists
+                let t = Self::secondary_op_to_transform(op, &right.exp);
+
+                let mut new_x = ldx.clone();
+                dep_scale(&mut new_x, t.txx);
+                new_x = dep_add_scaled(&new_x, &ldy, t.txy);
+                new_x = dep_add_scaled(&new_x, &const_dep(t.tx), 1.0);
+
+                let mut new_y = ldx;
+                dep_scale(&mut new_y, t.tyx);
+                new_y = dep_add_scaled(&new_y, &ldy, t.tyy);
+                new_y = dep_add_scaled(&new_y, &const_dep(t.ty), 1.0);
+
+                (new_x, new_y)
+            })
+        } else {
+            None
+        };
+        ExprResultValue {
+            exp: val,
+            ty,
+            dep: None,
+            pair_dep,
+        }
+    }
+
+    /// Convert a secondary binary op + RHS value into a concrete transform.
+    fn secondary_op_to_transform(
+        op: SecondaryBinaryOp,
+        right: &Value,
+    ) -> postmeta_graphics::types::Transform {
+        match op {
+            SecondaryBinaryOp::Scaled => {
+                postmeta_graphics::transform::scaled(value_to_scalar(right).unwrap_or(1.0))
+            }
+            SecondaryBinaryOp::Shifted => {
+                let (dx, dy) = value_to_pair(right).unwrap_or((0.0, 0.0));
+                postmeta_graphics::transform::shifted(dx, dy)
+            }
+            SecondaryBinaryOp::Rotated => {
+                postmeta_graphics::transform::rotated(value_to_scalar(right).unwrap_or(0.0))
+            }
+            SecondaryBinaryOp::XScaled => {
+                postmeta_graphics::transform::xscaled(value_to_scalar(right).unwrap_or(1.0))
+            }
+            SecondaryBinaryOp::YScaled => {
+                postmeta_graphics::transform::yscaled(value_to_scalar(right).unwrap_or(1.0))
+            }
+            SecondaryBinaryOp::Slanted => {
+                postmeta_graphics::transform::slanted(value_to_scalar(right).unwrap_or(0.0))
+            }
+            SecondaryBinaryOp::ZScaled => {
+                let (a, b) = value_to_pair(right).unwrap_or((1.0, 0.0));
+                postmeta_graphics::transform::zscaled(a, b)
+            }
+            SecondaryBinaryOp::Transformed => value_to_transform(right)
+                .unwrap_or(postmeta_graphics::types::Transform::IDENTITY),
+            SecondaryBinaryOp::Times
+            | SecondaryBinaryOp::Over
+            | SecondaryBinaryOp::DotProd
+            | SecondaryBinaryOp::Infont => postmeta_graphics::types::Transform::IDENTITY,
         }
     }
 }
