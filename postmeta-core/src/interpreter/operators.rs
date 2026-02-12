@@ -536,28 +536,20 @@ impl Interpreter {
 
     /// Execute a tertiary binary operator.
     pub(super) fn do_tertiary_binary(
-        &mut self,
         op: TertiaryBinaryOp,
         left: &Value,
         right: &Value,
-    ) -> InterpResult<()> {
-        let (value, ty) = tertiary_binary_value(op, left, right)?;
-        self.cur_expr.exp = value;
-        self.cur_expr.ty = ty;
-        Ok(())
+    ) -> InterpResult<(Value, Type)> {
+        tertiary_binary_value(op, left, right)
     }
 
     /// Execute an expression binary operator.
     pub(super) fn do_expression_binary(
-        &mut self,
         op: ExpressionBinaryOp,
         left: &Value,
         right: &Value,
-    ) -> InterpResult<()> {
-        let (value, ty) = expression_binary_value(op, left, right)?;
-        self.cur_expr.exp = value;
-        self.cur_expr.ty = ty;
-        Ok(())
+    ) -> InterpResult<(Value, Type)> {
+        expression_binary_value(op, left, right)
     }
 
     // =======================================================================

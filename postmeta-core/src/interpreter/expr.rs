@@ -1143,7 +1143,9 @@ impl Interpreter {
                     };
                     let right = right_result.exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_tertiary_binary(op, &left, &right)?;
+                    let (val, ty) = Self::do_tertiary_binary(op, &left, &right)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
@@ -1170,7 +1172,9 @@ impl Interpreter {
                     self.scan_rhs_for_infix_command(cmd)?;
                     let right = self.take_cur_result().exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left, &right)?;
+                    let (val, ty) = Self::do_expression_binary(ExpressionBinaryOp::EqualTo, &left, &right)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
             }
@@ -1192,11 +1196,13 @@ impl Interpreter {
                         self.scan_rhs_for_infix_command(cmd)?;
                         let right = self.take_cur_result().exp;
                         self.lhs_tracking.last_lhs_binding = None;
-                        self.do_expression_binary(
+                        let (val, ty) = Self::do_expression_binary(
                             ExpressionBinaryOp::Concatenate,
                             &left,
                             &right,
                         )?;
+                        self.cur_expr.exp = val;
+                        self.cur_expr.ty = ty;
                         self.cur_expr.dep = None;
                         self.cur_expr.pair_dep = None;
                     }
@@ -1222,7 +1228,9 @@ impl Interpreter {
                     self.scan_rhs_for_infix_command(cmd)?;
                     let right = self.take_cur_result().exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_expression_binary(op, &left, &right)?;
+                    let (val, ty) = Self::do_expression_binary(op, &left, &right)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
