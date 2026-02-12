@@ -150,9 +150,9 @@ impl Interpreter {
         self.get_x_next();
         self.lhs_tracking.equals_means_equation = false;
         let condition = if self.scan_expression().is_ok() {
-            match &self.cur_expr.exp {
-                Value::Boolean(b) => *b,
-                Value::Numeric(v) => *v != 0.0,
+            match self.take_cur_result().exp {
+                Value::Boolean(b) => b,
+                Value::Numeric(v) => v != 0.0,
                 _ => {
                     self.report_error(ErrorKind::TypeError, "if condition must be boolean");
                     false
@@ -693,9 +693,9 @@ impl Interpreter {
         self.get_x_next(); // skip `exitif`
         self.lhs_tracking.equals_means_equation = false;
         let should_exit = if self.scan_expression().is_ok() {
-            match &self.cur_expr.exp {
-                Value::Boolean(b) => *b,
-                Value::Numeric(v) => *v != 0.0,
+            match self.take_cur_result().exp {
+                Value::Boolean(b) => b,
+                Value::Numeric(v) => v != 0.0,
                 _ => {
                     self.report_error(ErrorKind::TypeError, "exitif condition must be boolean");
                     false
@@ -1589,7 +1589,7 @@ impl Interpreter {
 
         // Scan the string expression
         if self.scan_primary().is_ok() {
-            if let Value::String(ref s) = self.cur_expr.exp {
+            if let Value::String(ref s) = self.take_cur_result().exp {
                 let source = s.to_string();
 
                 // Save the token that terminated scan_primary (mp.web's

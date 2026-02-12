@@ -307,7 +307,7 @@ impl Interpreter {
             // {curl <numeric>}
             self.get_x_next();
             self.scan_tertiary()?;
-            let curl_val = value_to_scalar(&self.cur_expr.exp)?;
+            let curl_val = value_to_scalar(&self.take_cur_result().exp)?;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {
