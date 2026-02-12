@@ -310,8 +310,10 @@ impl Interpreter {
                             // so they are re-read in the right order.
                             use crate::input::StoredToken;
                             let ty = self.cur_expr.ty;
+                            let dep = self.take_cur_dep();
+                            let pair_dep = self.take_cur_pair_dep();
                             let val = self.take_cur_exp();
-                            let mut tl = vec![StoredToken::Capsule(val, ty)];
+                            let mut tl = vec![StoredToken::Capsule(val, ty, dep, pair_dep)];
                             self.store_current_token(&mut tl);
                             self.input.push_token_list(
                                 tl,
@@ -432,20 +434,19 @@ impl Interpreter {
             Command::CapsuleToken => {
                 // A capsule: an already-evaluated expression pushed back
                 // via back_expr. Extract the payload directly.
-                if let Some((val, ty)) = self.cur.capsule.take() {
+                if let Some((val, ty, dep, pair_dep)) = self.cur.capsule.take() {
                     self.cur_expr.exp = val;
                     self.cur_expr.ty = ty;
+                    self.cur_expr.dep = dep;
+                    self.cur_expr.pair_dep = pair_dep;
                 } else {
                     // CapsuleToken without payload — shouldn't happen, treat as vacuous
                     self.cur_expr.exp = Value::Vacuous;
                     self.cur_expr.ty = Type::Vacuous;
+                    self.cur_expr.dep = None;
+                    self.cur_expr.pair_dep = None;
                 }
                 self.lhs_tracking.last_lhs_binding = None;
-                self.cur_expr.dep = if let Value::Numeric(v) = self.cur_expr.exp {
-                    Some(const_dep(v))
-                } else {
-                    None
-                };
                 self.get_x_next();
                 Ok(())
             }
@@ -516,6 +517,14 @@ impl Interpreter {
                 let a_dep = self.cur_expr.dep.clone().unwrap_or_else(|| const_dep(a));
                 self.get_x_next();
                 self.scan_expression()?;
+                let b_binding = self.lhs_tracking.last_lhs_binding.clone();
+                let b_dep = self.take_cur_dep().or_else(|| {
+                    if let Some(LhsBinding::Variable { id, .. }) = b_binding {
+                        Some(self.numeric_dep_for_var(id))
+                    } else {
+                        None
+                    }
+                });
                 let b_pair_dep = self.take_cur_pair_dep();
                 let b = self.take_cur_exp();
                 if self.cur.command == Command::Comma {
@@ -527,6 +536,14 @@ impl Interpreter {
                     ));
                 }
                 self.scan_expression()?;
+                let c_binding = self.lhs_tracking.last_lhs_binding.clone();
+                let c_dep = self.take_cur_dep().or_else(|| {
+                    if let Some(LhsBinding::Variable { id, .. }) = c_binding {
+                        Some(self.numeric_dep_for_var(id))
+                    } else {
+                        None
+                    }
+                });
                 let c_pair_dep = self.take_cur_pair_dep();
                 let c = self.take_cur_exp();
                 if self.cur.command == Command::RightBracket {
@@ -541,7 +558,21 @@ impl Interpreter {
                     (Value::Numeric(bn), Value::Numeric(cn)) => {
                         self.cur_expr.exp = Value::Numeric(a.mul_add(cn - bn, bn));
                         self.cur_expr.ty = Type::Known;
-                        self.cur_expr.dep = Some(dep_add_scaled(&const_dep(bn), &a_dep, cn - bn));
+                        let b_dep = b_dep.unwrap_or_else(|| const_dep(bn));
+                        let c_dep = c_dep.unwrap_or_else(|| const_dep(cn));
+                        let a_is_linear = constant_value(&a_dep).is_none();
+                        let bc_have_linear =
+                            constant_value(&b_dep).is_none() || constant_value(&c_dep).is_none();
+
+                        self.cur_expr.dep = if a_is_linear && bc_have_linear {
+                            None
+                        } else if a_is_linear {
+                            Some(dep_add_scaled(&b_dep, &a_dep, cn - bn))
+                        } else {
+                            let mut dep = b_dep;
+                            dep_scale(&mut dep, one_minus_a);
+                            Some(dep_add_scaled(&dep, &c_dep, a))
+                        };
                         self.cur_expr.pair_dep = None;
                     }
                     (Value::Pair(bx, by), Value::Pair(cx, cy)) => {
@@ -549,10 +580,34 @@ impl Interpreter {
                             Value::Pair(one_minus_a * bx + a * cx, one_minus_a * by + a * cy);
                         self.cur_expr.ty = Type::PairType;
                         self.cur_expr.dep = None;
-                        let _ = (b_pair_dep, c_pair_dep);
-                        let dep_x = dep_add_scaled(&const_dep(bx), &a_dep, cx - bx);
-                        let dep_y = dep_add_scaled(&const_dep(by), &a_dep, cy - by);
-                        self.cur_expr.pair_dep = Some((dep_x, dep_y));
+                        let (b_dep_x, b_dep_y) =
+                            b_pair_dep.unwrap_or_else(|| (const_dep(bx), const_dep(by)));
+                        let (c_dep_x, c_dep_y) =
+                            c_pair_dep.unwrap_or_else(|| (const_dep(cx), const_dep(cy)));
+                        let a_is_linear = constant_value(&a_dep).is_none();
+                        let pair_has_linear = constant_value(&b_dep_x).is_none()
+                            || constant_value(&b_dep_y).is_none()
+                            || constant_value(&c_dep_x).is_none()
+                            || constant_value(&c_dep_y).is_none();
+
+                        self.cur_expr.pair_dep = if a_is_linear && pair_has_linear {
+                            None
+                        } else if a_is_linear {
+                            Some((
+                                dep_add_scaled(&b_dep_x, &a_dep, cx - bx),
+                                dep_add_scaled(&b_dep_y, &a_dep, cy - by),
+                            ))
+                        } else {
+                            let mut dep_x = b_dep_x;
+                            dep_scale(&mut dep_x, one_minus_a);
+                            dep_x = dep_add_scaled(&dep_x, &c_dep_x, a);
+
+                            let mut dep_y = b_dep_y;
+                            dep_scale(&mut dep_y, one_minus_a);
+                            dep_y = dep_add_scaled(&dep_y, &c_dep_y, a);
+
+                            Some((dep_x, dep_y))
+                        };
                     }
                     (Value::Color(bc), Value::Color(cc)) => {
                         self.cur_expr.exp = Value::Color(postmeta_graphics::types::Color::new(

@@ -6,11 +6,15 @@
 //! input levels, matching `mp.web`'s input stack.
 
 use crate::command::Command;
+use crate::equation::DepList;
 use crate::scanner::ScanError;
 use crate::scanner::Scanner;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::token::{Token, TokenKind};
 use crate::types::{Type, Value};
+
+/// Captured expression state used by capsule tokens.
+pub type CapsulePayload = (Value, Type, Option<DepList>, Option<(DepList, DepList)>);
 
 // ---------------------------------------------------------------------------
 // Resolved token — what the parser sees after hash lookup
@@ -27,12 +31,12 @@ pub struct ResolvedToken {
     pub sym: Option<SymbolId>,
     /// The original token (for span info and literal values).
     pub token: Token,
-    /// Capsule payload: an already-evaluated `(Value, Type)` pair.
+    /// Capsule payload: an already-evaluated expression state.
     ///
     /// Present only when `command == CapsuleToken` and this token was produced
     /// by `back_expr`. The expression parser picks this up instead of
     /// evaluating the token normally.
-    pub capsule: Option<(Value, Type)>,
+    pub capsule: Option<CapsulePayload>,
 }
 
 // ---------------------------------------------------------------------------
@@ -56,7 +60,7 @@ pub enum StoredToken {
     /// When the expression parser needs to push a value back into the input
     /// stream (e.g., after discovering that `[` was not the start of a
     /// mediation), the value is wrapped in a capsule token.
-    Capsule(Value, Type),
+    Capsule(Value, Type, Option<DepList>, Option<(DepList, DepList)>),
 }
 
 /// A token list (macro body, loop body, etc.).
@@ -174,9 +178,15 @@ impl InputSystem {
     /// `CapsuleToken` carrying the value. This is `mp.web`'s `back_expr` —
     /// used when the expression parser needs to re-inject a computed value
     /// (e.g., after discovering that `[` was not a mediation bracket).
-    pub fn back_expr(&mut self, value: Value, ty: Type) {
+    pub fn back_expr(
+        &mut self,
+        value: Value,
+        ty: Type,
+        dep: Option<DepList>,
+        pair_dep: Option<(DepList, DepList)>,
+    ) {
         self.push_token_list(
-            vec![StoredToken::Capsule(value, ty)],
+            vec![StoredToken::Capsule(value, ty, dep, pair_dep)],
             Vec::new(),
             "backed-up expr".into(),
         );
@@ -297,9 +307,11 @@ impl InputSystem {
                             capsule: None,
                         })
                     }
-                    StoredToken::Capsule(val, ty) => {
+                    StoredToken::Capsule(val, ty, dep, pair_dep) => {
                         let val = val.clone();
                         let ty = *ty;
+                        let dep = dep.clone();
+                        let pair_dep = pair_dep.clone();
                         LevelAction::Token(ResolvedToken {
                             command: Command::CapsuleToken,
                             modifier: 0,
@@ -308,7 +320,7 @@ impl InputSystem {
                                 kind: TokenKind::Symbolic("<capsule>".to_owned()),
                                 span: crate::token::Span::at(0),
                             },
-                            capsule: Some((val, ty)),
+                            capsule: Some((val, ty, dep, pair_dep)),
                         })
                     }
                     StoredToken::Param(idx) => {
@@ -516,14 +528,16 @@ mod tests {
         let mut symbols = SymbolTable::new();
 
         // Push an expression capsule
-        input.back_expr(Value::Numeric(99.0), Type::Known);
+        input.back_expr(Value::Numeric(99.0), Type::Known, None, None);
 
         let t = input.next_raw_token(&mut symbols);
         assert_eq!(t.command, Command::CapsuleToken);
         assert!(t.capsule.is_some());
-        let (val, ty) = t.capsule.unwrap();
+        let (val, ty, dep, pair_dep) = t.capsule.unwrap();
         assert_eq!(ty, Type::Known);
         assert_eq!(val.as_numeric(), Some(99.0));
+        assert!(dep.is_none());
+        assert!(pair_dep.is_none());
     }
 
     #[test]
@@ -535,14 +549,16 @@ mod tests {
         input.push_source(";");
 
         // Push a pair capsule
-        input.back_expr(Value::Pair(3.0, 7.0), Type::PairType);
+        input.back_expr(Value::Pair(3.0, 7.0), Type::PairType, None, None);
 
         // Should get capsule first
         let t = input.next_raw_token(&mut symbols);
         assert_eq!(t.command, Command::CapsuleToken);
-        let (val, ty) = t.capsule.unwrap();
+        let (val, ty, dep, pair_dep) = t.capsule.unwrap();
         assert_eq!(ty, Type::PairType);
         assert_eq!(val.as_pair(), Some((3.0, 7.0)));
+        assert!(dep.is_none());
+        assert!(pair_dep.is_none());
 
         // Then ";"
         let t2 = input.next_raw_token(&mut symbols);
@@ -557,7 +573,7 @@ mod tests {
         let mut symbols = SymbolTable::new();
 
         // Push back an expression first (goes on token list stack)
-        input.back_expr(Value::Numeric(10.0), Type::Known);
+        input.back_expr(Value::Numeric(10.0), Type::Known, None, None);
 
         // Then push back a token (goes in backed_up slot)
         let semicolon = ResolvedToken {

@@ -317,9 +317,11 @@ impl Interpreter {
     /// placed on the input stream. The next token read will be a
     /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
     pub(super) fn back_expr(&mut self) {
+        let dep = self.take_cur_dep();
+        let pair_dep = self.take_cur_pair_dep();
         let ty = self.cur_expr.ty;
         let val = self.take_cur_exp();
-        self.input.back_expr(val, ty);
+        self.input.back_expr(val, ty, dep, pair_dep);
     }
 
     /// Store the current token into a token list.
@@ -327,8 +329,13 @@ impl Interpreter {
         use crate::input::StoredToken;
 
         if self.cur.command == Command::CapsuleToken {
-            if let Some((val, ty)) = &self.cur.capsule {
-                list.push(StoredToken::Capsule(val.clone(), *ty));
+            if let Some((val, ty, dep, pair_dep)) = &self.cur.capsule {
+                list.push(StoredToken::Capsule(
+                    val.clone(),
+                    *ty,
+                    dep.clone(),
+                    pair_dep.clone(),
+                ));
             }
             return;
         }
@@ -1583,6 +1590,38 @@ mod tests {
         interp.run("show 1/4[0, 100];").unwrap();
         let msg = &interp.errors[0].message;
         assert!(msg.contains("25"), "expected 25 in: {msg}");
+    }
+
+    #[test]
+    fn mediation_preserves_numeric_endpoint_dependencies() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric a,b,c,x; a := 0.25; x = a[b,c]; b = 2; c = 10; show x;")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(infos.iter().any(|m| m.contains('4')), "expected x=4 in: {infos:?}");
+    }
+
+    #[test]
+    fn mediation_preserves_pair_endpoint_dependencies() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("numeric a; pair b,c,p; a := 0.5; p = a[b,c]; b = (2,4); c = (6,8); show p;")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(infos.iter().any(|m| m.contains("(4,6)")), "expected p=(4,6) in: {infos:?}");
     }
 
     // -----------------------------------------------------------------------

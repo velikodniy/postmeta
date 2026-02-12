@@ -136,6 +136,8 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
                 // Vacuous and any remaining variants fall here.
                 _ => Type::Vacuous,
             },
+            None,
+            None,
         )],
     }
 }
