@@ -706,6 +706,29 @@ impl Default for Interpreter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::filesystem::FileSystem;
+
+    struct PlainMpFs;
+
+    fn read_plain_mp() -> Option<String> {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("workspace root")
+                .join("lib/plain.mp"),
+        )
+        .ok()
+    }
+
+    impl FileSystem for PlainMpFs {
+        fn read_file(&self, name: &str) -> Option<String> {
+            if name == "plain" || name == "plain.mp" {
+                read_plain_mp()
+            } else {
+                None
+            }
+        }
+    }
 
     #[test]
     fn eval_numeric_literal() {
@@ -2389,27 +2412,8 @@ mod tests {
 
     #[test]
     fn plain_mp_error_count() {
-        use crate::filesystem::FileSystem;
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp.run("input plain;").unwrap();
 
         let error_count = interp
@@ -2423,55 +2427,16 @@ mod tests {
 
     #[test]
     fn plain_mp_loads() {
-        use crate::filesystem::FileSystem;
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         // Should not return Err (hard error) — warnings are OK
         interp.run("input plain;").unwrap();
     }
 
     #[test]
     fn plain_beginfig_draw_endfig() {
-        use crate::filesystem::FileSystem;
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run("input plain; beginfig(1); draw (0,0)..(10,10); endfig; end;")
             .unwrap();
@@ -2487,28 +2452,8 @@ mod tests {
 
     #[test]
     fn plain_path_examples_39_and_56() {
-        use crate::filesystem::FileSystem;
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run(
                 "input plain;
@@ -2533,29 +2478,8 @@ mod tests {
 
     #[test]
     fn plain_fill_has_no_stroke_pen() {
-        use crate::filesystem::FileSystem;
-
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run("input plain; beginfig(1); fill fullcircle scaled 10bp; endfig; end;")
             .unwrap();
@@ -2577,29 +2501,8 @@ mod tests {
 
     #[test]
     fn plain_filldraw_withpen_sets_stroke_pen() {
-        use crate::filesystem::FileSystem;
-
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run(
                 "input plain;
@@ -2635,30 +2538,9 @@ mod tests {
 
     #[test]
     fn plain_hide_postfix_preserves_left_expression() {
-        use crate::filesystem::FileSystem;
         use crate::variables::VarValue;
-
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run(
                 "input plain;
@@ -2688,29 +2570,8 @@ mod tests {
 
     #[test]
     fn plain_drawarrow_example_17() {
-        use crate::filesystem::FileSystem;
-
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run(
                 "input plain;
@@ -2735,29 +2596,8 @@ mod tests {
 
     #[test]
     fn plain_drawdblarrow_example_18() {
-        use crate::filesystem::FileSystem;
-
-        struct TestFs;
-        impl FileSystem for TestFs {
-            fn read_file(&self, name: &str) -> Option<String> {
-                if name == "plain" || name == "plain.mp" {
-                    Some(
-                        std::fs::read_to_string(
-                            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                                .parent()
-                                .unwrap()
-                                .join("lib/plain.mp"),
-                        )
-                        .ok()?,
-                    )
-                } else {
-                    None
-                }
-            }
-        }
-
         let mut interp = Interpreter::new();
-        interp.set_filesystem(Box::new(TestFs));
+        interp.set_filesystem(Box::new(PlainMpFs));
         interp
             .run(
                 "input plain;
