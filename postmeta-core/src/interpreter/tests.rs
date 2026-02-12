@@ -3145,11 +3145,11 @@ fn empty_path_cycle_reports_error_without_panic() {
 }
 
 #[test]
-fn ampersand_requires_path_rhs() {
+fn ampersand_requires_pair_or_path_rhs() {
     let mut interp = Interpreter::new();
     let run_err = interp
-        .run("path p; p := (0,0) & (1,1);")
-        .expect_err("expected `&` with non-path RHS to fail");
+        .run("path p; p := (0,0) & 1;")
+        .expect_err("expected `&` with non-path/pair RHS to fail");
 
     assert_eq!(run_err.kind, crate::error::ErrorKind::TypeError);
 }

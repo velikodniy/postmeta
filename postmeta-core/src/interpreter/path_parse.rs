@@ -136,22 +136,27 @@ impl Interpreter {
             // Parse the next point
             let point_val = self.scan_tertiary()?.exp;
 
-            // `&` can concatenate paths.
+            // `&` can concatenate paths; a pair is treated as a one-knot path.
             if join_type == u16::MAX {
-                if let Value::Path(mut rhs) = point_val {
-                    if let Some(dir) = post_dir
-                        && let Some(first) = rhs.knots.first_mut()
-                    {
-                        first.left = dir;
+                let mut rhs_knots = match point_val {
+                    Value::Path(rhs) => rhs.knots,
+                    Value::Pair(x, y) => vec![Knot::new(Point::new(x, y))],
+                    other => {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            format!("`&` requires a path or pair on the right, got {}", other.ty()),
+                        ));
                     }
-                    Self::append_path_concat(&mut knots, rhs.knots);
-                    continue;
+                };
+
+                if let Some(dir) = post_dir
+                    && let Some(first) = rhs_knots.first_mut()
+                {
+                    first.left = dir;
                 }
 
-                return Err(InterpreterError::new(
-                    ErrorKind::TypeError,
-                    format!("`&` requires a path on the right, got {}", point_val.ty()),
-                ));
+                Self::append_path_concat(&mut knots, rhs_knots);
+                continue;
             }
 
             let mut knot = Self::value_to_knot(&point_val)?;
@@ -513,5 +518,30 @@ mod tests {
         assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
         assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
         assert!(matches!(path.knots[2].left, KnotDirection::Explicit(_)));
+    }
+
+    #[test]
+    fn ampersand_accepts_pair_rhs() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "path p,q;
+                 p := (0,0)..(1,0);
+                 q := p & (2,0);",
+            )
+            .expect("path and pair concatenation should parse");
+
+        let qid = interp
+            .variables
+            .lookup_existing("q")
+            .expect("path variable q should exist");
+        let path = match interp.variables.get(qid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+
+        assert_eq!(path.knots.len(), 3, "expected appended pair knot");
+        assert!((path.knots[2].point.x - 2.0).abs() < 1e-9);
+        assert!((path.knots[2].point.y - 0.0).abs() < 1e-9);
     }
 }
