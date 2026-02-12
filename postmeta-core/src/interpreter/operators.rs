@@ -576,59 +576,9 @@ impl Interpreter {
     ) -> InterpResult<()> {
         let right = self.take_cur_exp();
 
-        match op {
-            ExpressionBinaryOp::LessThan => {
-                let result = Self::compare_values(left, &right, |ord| ord == Ordering::Less)?;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::LessOrEqual => {
-                let result = Self::compare_values(left, &right, |ord| ord != Ordering::Greater)?;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::GreaterThan => {
-                let result = Self::compare_values(left, &right, |ord| ord == Ordering::Greater)?;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::GreaterOrEqual => {
-                let result = Self::compare_values(left, &right, |ord| ord != Ordering::Less)?;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::EqualTo => {
-                let result = left == &right;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::UnequalTo => {
-                let result = left != &right;
-                self.cur_expr.exp = Value::Boolean(result);
-                self.cur_expr.ty = Type::Boolean;
-            }
-            ExpressionBinaryOp::Concatenate => {
-                let a = value_to_string(left)?;
-                let b = value_to_string(&right)?;
-                let result = format!("{a}{b}");
-                self.cur_expr.exp = Value::String(Arc::from(result.as_str()));
-                self.cur_expr.ty = Type::String;
-            }
-            ExpressionBinaryOp::IntersectionTimes => {
-                let p1 = value_to_path(left)?;
-                let p2 = value_to_path(&right)?;
-                let result = postmeta_graphics::intersection::intersection_times(p1, p2);
-                match result {
-                    Some(isect) => {
-                        self.cur_expr.exp = Value::Pair(isect.t1, isect.t2);
-                    }
-                    None => {
-                        self.cur_expr.exp = Value::Pair(-1.0, -1.0);
-                    }
-                }
-                self.cur_expr.ty = Type::PairType;
-            }
-        }
+        let (value, ty) = expression_binary_value(op, left, &right)?;
+        self.cur_expr.exp = value;
+        self.cur_expr.ty = ty;
         Ok(())
     }
 
@@ -793,6 +743,56 @@ fn tertiary_binary_value(
             let a = value_to_bool(left)?;
             let b = value_to_bool(right)?;
             Ok((Value::Boolean(a || b), Type::Boolean))
+        }
+    }
+}
+
+fn expression_binary_value(
+    op: ExpressionBinaryOp,
+    left: &Value,
+    right: &Value,
+) -> InterpResult<(Value, Type)> {
+    match op {
+        ExpressionBinaryOp::LessThan => Ok((
+            Value::Boolean(Interpreter::compare_values(left, right, |ord| {
+                ord == Ordering::Less
+            })?),
+            Type::Boolean,
+        )),
+        ExpressionBinaryOp::LessOrEqual => Ok((
+            Value::Boolean(Interpreter::compare_values(left, right, |ord| {
+                ord != Ordering::Greater
+            })?),
+            Type::Boolean,
+        )),
+        ExpressionBinaryOp::GreaterThan => Ok((
+            Value::Boolean(Interpreter::compare_values(left, right, |ord| {
+                ord == Ordering::Greater
+            })?),
+            Type::Boolean,
+        )),
+        ExpressionBinaryOp::GreaterOrEqual => Ok((
+            Value::Boolean(Interpreter::compare_values(left, right, |ord| {
+                ord != Ordering::Less
+            })?),
+            Type::Boolean,
+        )),
+        ExpressionBinaryOp::EqualTo => Ok((Value::Boolean(left == right), Type::Boolean)),
+        ExpressionBinaryOp::UnequalTo => Ok((Value::Boolean(left != right), Type::Boolean)),
+        ExpressionBinaryOp::Concatenate => {
+            let a = value_to_string(left)?;
+            let b = value_to_string(right)?;
+            let result = format!("{a}{b}");
+            Ok((Value::String(Arc::from(result)), Type::String))
+        }
+        ExpressionBinaryOp::IntersectionTimes => {
+            let p1 = value_to_path(left)?;
+            let p2 = value_to_path(right)?;
+            let value = postmeta_graphics::intersection::intersection_times(p1, p2).map_or_else(
+                || Value::Pair(-1.0, -1.0),
+                |isect| Value::Pair(isect.t1, isect.t2),
+            );
+            Ok((value, Type::PairType))
         }
     }
 }
