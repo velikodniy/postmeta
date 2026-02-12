@@ -9,7 +9,7 @@ use postmeta_graphics::types::{Knot, KnotDirection, Path, Point, Scalar};
 
 use crate::command::Command;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::types::{Type, Value};
+use crate::types::Value;
 
 use super::helpers::{value_to_pair, value_to_scalar};
 use super::Interpreter;
@@ -159,55 +159,87 @@ impl Interpreter {
                 continue;
             }
 
-            let mut knot = Self::value_to_knot(&point_val)?;
-            if let Some(dir) = post_dir {
-                knot.left = dir;
+            match point_val {
+                // MetaPost allows `..` with a path operand in macros like
+                // `buildcycle`; treat this as joining to the first knot of the
+                // right path and appending the whole path.
+                Value::Path(mut rhs) => {
+                    if rhs.knots.is_empty() {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            "Expected non-empty path in path construction",
+                        ));
+                    }
+
+                    if let Some(dir) = post_dir
+                        && let Some(first) = rhs.knots.first_mut()
+                    {
+                        first.left = dir;
+                    }
+
+                    if let Some(first) = rhs.knots.first_mut() {
+                        match pending {
+                            Some(PendingJoin::Tension(t)) => first.left_tension = t,
+                            Some(PendingJoin::Control(pt)) => {
+                                first.left = KnotDirection::Explicit(pt);
+                            }
+                            None => {}
+                        }
+                    }
+
+                    knots.append(&mut rhs.knots);
+                }
+                other => {
+                    let mut knot = Self::value_to_knot(&other)?;
+                    if let Some(dir) = post_dir {
+                        knot.left = dir;
+                    }
+                    // Apply pending left-side join from tension/controls
+                    match pending {
+                        Some(PendingJoin::Tension(t)) => knot.left_tension = t,
+                        Some(PendingJoin::Control(pt)) => knot.left = KnotDirection::Explicit(pt),
+                        None => {}
+                    }
+                    knots.push(knot);
+                }
             }
-            // Apply pending left-side join from tension/controls
-            match pending {
-                Some(PendingJoin::Tension(t)) => knot.left_tension = t,
-                Some(PendingJoin::Control(pt)) => knot.left = KnotDirection::Explicit(pt),
-                None => {}
-            }
-            knots.push(knot);
         }
 
         // Build the path
         let mut path_obj = Path::from_knots(knots, is_cyclic);
         hobby::make_choices(&mut path_obj);
 
-        Ok(super::ExprResultValue {
-            exp: Value::Path(path_obj),
-            ty: Type::Path,
-            dep: None,
-            pair_dep: None,
-        })
+        Ok(super::ExprResultValue::plain(Value::Path(path_obj)))
     }
 
     /// Concatenate path knots for `&`.
     ///
     /// If the tail point of `lhs` equals the head point of `rhs`, merge the
     /// shared knot and keep the outgoing side from `rhs`.
-    fn append_path_concat(lhs: &mut Vec<Knot>, mut rhs: Vec<Knot>) {
-        if rhs.is_empty() {
+    fn append_path_concat(lhs: &mut Vec<Knot>, rhs: Vec<Knot>) {
+        let mut rhs_iter = rhs.into_iter();
+        let Some(first_rhs) = rhs_iter.next() else {
             return;
-        }
+        };
 
         if lhs.is_empty() {
-            lhs.append(&mut rhs);
+            lhs.push(first_rhs);
+            lhs.extend(rhs_iter);
             return;
         }
 
         let li = lhs.len() - 1;
         let lp = lhs[li].point;
-        let rp = rhs[0].point;
+        let rp = first_rhs.point;
         if (lp.x - rp.x).abs() < 1e-9 && (lp.y - rp.y).abs() < 1e-9 {
-            lhs[li].right = rhs[0].right;
-            lhs[li].right_tension = rhs[0].right_tension;
-            rhs.remove(0);
+            lhs[li].right = first_rhs.right;
+            lhs[li].right_tension = first_rhs.right_tension;
+            lhs.extend(rhs_iter);
+            return;
         }
 
-        lhs.append(&mut rhs);
+        lhs.push(first_rhs);
+        lhs.extend(rhs_iter);
     }
 
     /// Parse tension/controls options after `..`.
@@ -224,7 +256,7 @@ impl Interpreter {
                 if at_least {
                     self.get_x_next();
                 }
-                let t1 = value_to_scalar(&self.scan_tertiary()?.exp)?;
+                let t1 = value_to_scalar(&self.scan_primary()?.exp)?;
                 let t1 = if at_least { -t1.abs() } else { t1 };
 
                 let t2 = if self.cur.command == Command::And {
@@ -233,7 +265,7 @@ impl Interpreter {
                     if at_least2 {
                         self.get_x_next();
                     }
-                    let t_val = value_to_scalar(&self.scan_tertiary()?.exp)?;
+                    let t_val = value_to_scalar(&self.scan_primary()?.exp)?;
                     if at_least2 {
                         -t_val.abs()
                     } else {
@@ -543,5 +575,29 @@ mod tests {
         assert_eq!(path.knots.len(), 3, "expected appended pair knot");
         assert!((path.knots[2].point.x - 2.0).abs() < 1e-9);
         assert!((path.knots[2].point.y - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn path_join_accepts_path_rhs() {
+        let mut interp = Interpreter::new();
+        interp
+            .run(
+                "path a,b,c;
+                 a := (0,0)..(1,0);
+                 b := (1,1)..(2,1);
+                 c := a .. b;",
+            )
+            .expect("path join with path rhs should parse");
+
+        let cid = interp
+            .variables
+            .lookup_existing("c")
+            .expect("path variable c should exist");
+        let path = match interp.variables.get(cid) {
+            VarValue::Known(Value::Path(p)) => p,
+            other => panic!("expected path variable, got {other:?}"),
+        };
+
+        assert_eq!(path.knots.len(), 4, "expected all rhs knots appended");
     }
 }

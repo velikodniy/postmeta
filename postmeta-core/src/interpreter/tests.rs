@@ -2151,7 +2151,9 @@ fn whatever_calls_are_independent() {
         .map(|e| e.message.clone())
         .collect();
     assert!(
-        infos.iter().any(|m| m.contains(">> 0")),
+        infos
+            .iter()
+            .any(|m| m.contains(">> 0") || m.contains(">> -0")),
         "expected show a=0, got: {infos:?}"
     );
     assert!(
@@ -3332,11 +3334,54 @@ fn nonlinear_equation_without_bindable_lhs_reports_error() {
 }
 
 #[test]
-fn path_tension_accepts_tertiary_expression() {
+fn path_tension_rejects_non_primary_expression() {
     let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0) .. tension 1+1 .. (10,0);")
-        .unwrap();
+    let run_result = interp.run("path p; p := (0,0) .. tension 1+1 .. (10,0);");
+
+    assert!(
+        run_result.is_err(),
+        "expected parse failure for tension 1+1"
+    );
+    if let Err(err) = run_result {
+        assert_eq!(err.kind, crate::error::ErrorKind::UnexpectedToken);
+    }
+}
+
+#[test]
+fn relax_command_is_accepted_as_noop() {
+    let mut interp = Interpreter::new();
+    interp.run("relax; show 1;").unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        infos.iter().any(|m| m.contains(">> 1")),
+        "show output: {infos:?}"
+    );
+}
+
+#[test]
+fn randomseed_statement_sets_seed() {
+    let mut interp = Interpreter::new();
+    interp.run("randomseed := 123;").unwrap();
+    assert_eq!(interp.random_seed, 123);
+}
+
+#[test]
+fn special_statement_reports_unimplemented() {
+    let mut interp = Interpreter::new();
+    interp.run("special \"x\";").unwrap();
 
     let errors: Vec<_> = interp
         .errors
@@ -3344,7 +3389,9 @@ fn path_tension_accepts_tertiary_expression() {
         .filter(|e| e.severity == crate::error::Severity::Error)
         .collect();
     assert!(
-        errors.is_empty(),
-        "expected no errors for tension expression, got: {errors:?}"
+        errors
+            .iter()
+            .any(|e| e.kind == crate::error::ErrorKind::InvalidExpression),
+        "expected unimplemented diagnostic, got: {errors:?}"
     );
 }

@@ -99,6 +99,7 @@ pub fn constant_value(dep: &DepList) -> Option<Scalar> {
 }
 
 /// Negate all terms in a dependency list.
+#[cfg(test)]
 pub fn negate(dep: &mut DepList) {
     for term in dep {
         term.coeff = -term.coeff;
@@ -117,6 +118,7 @@ const COEFF_THRESHOLD: Scalar = 1e-9;
 /// Both lists must be sorted by decreasing serial number.
 /// The result is also sorted and cleaned of near-zero coefficients.
 #[must_use]
+#[cfg(test)]
 pub fn dep_add(a: &DepList, b: &DepList) -> DepList {
     dep_add_scaled(a, b, 1.0)
 }
@@ -340,21 +342,28 @@ pub fn solve_equation(dep: &DepList) -> SolveResult {
         return SolveResult::Redundant;
     }
 
-    // Find the term with the largest absolute coefficient
-    let (pivot_idx, _) = dep
+    // MetaPost pivots on the variable with the greatest serial number.
+    // Our dep lists are maintained in descending variable-id order, so the
+    // first significant variable term is the pivot.
+    let Some((pivot_idx, pivot_term)) = dep
         .iter()
         .enumerate()
-        .filter(|(_, t)| t.var_id.is_some())
-        .max_by(|(_, a), (_, b)| {
-            a.coeff
-                .abs()
-                .partial_cmp(&b.coeff.abs())
-                .unwrap_or(std::cmp::Ordering::Equal)
-        })
-        .unwrap_or((0, &dep[0])); // safe: we checked non-constant above
+        .find(|(_, t)| t.var_id.is_some() && t.coeff.abs() > COEFF_THRESHOLD)
+    else {
+        let c = dep
+            .iter()
+            .find_map(|t| t.var_id.is_none().then_some(t.coeff))
+            .unwrap_or(0.0);
+        if c.abs() > COEFF_THRESHOLD * 64.0 {
+            return SolveResult::Inconsistent(c);
+        }
+        return SolveResult::Redundant;
+    };
 
-    let pivot_var = dep[pivot_idx].var_id;
-    let pivot_coeff = dep[pivot_idx].coeff;
+    let Some(pivot_var) = pivot_term.var_id else {
+        return SolveResult::Redundant;
+    };
+    let pivot_coeff = pivot_term.coeff;
 
     // Build the result: pivot_var = -(remaining terms) / pivot_coeff
     let mut result = Vec::with_capacity(dep.len() - 1);
@@ -369,15 +378,10 @@ pub fn solve_equation(dep: &DepList) -> SolveResult {
     }
 
     // Ensure constant term is last
-    if result.is_empty() || result.last().is_some_and(|t| t.var_id.is_some()) {
-        result.push(DepTerm {
-            coeff: 0.0,
-            var_id: None,
-        });
-    }
+    ensure_constant_term(&mut result);
 
     SolveResult::Solved {
-        var_id: pivot_var.unwrap_or(VarId(0)),
+        var_id: pivot_var,
         dep: result,
     }
 }

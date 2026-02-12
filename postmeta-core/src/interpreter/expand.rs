@@ -136,6 +136,10 @@ impl Interpreter {
                 Command::ScanTokens => self.expand_scantokens(),
                 Command::StartTex => self.expand_start_tex(),
                 Command::ExpandAfter => self.expand_expandafter(),
+                Command::Relax => {
+                    self.get_next();
+                    self.expand_current();
+                }
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -1552,12 +1556,7 @@ impl Interpreter {
 
         // Push a string capsule — `thelabel` will call `s infont defaultfont`
         // to convert to a picture.
-        self.back_expr_value(super::ExprResultValue {
-            exp: Value::String(text),
-            ty: crate::types::Type::String,
-            dep: None,
-            pair_dep: None,
-        });
+        self.back_expr_value(super::ExprResultValue::plain(Value::String(text)));
 
         // Advance past the capsule and continue expansion.
         self.get_next();

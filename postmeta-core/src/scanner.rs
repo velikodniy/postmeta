@@ -178,6 +178,7 @@ impl Scanner {
     }
 
     /// Scan all remaining tokens (including `Eof`).
+    #[cfg(test)]
     pub fn scan_all(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
         loop {
@@ -192,6 +193,7 @@ impl Scanner {
     }
 
     /// Return accumulated scan errors.
+    #[cfg(test)]
     #[must_use]
     pub fn errors(&self) -> &[ScanError] {
         &self.errors
@@ -276,9 +278,16 @@ impl Scanner {
             }
 
             if next_class == PERIOD {
-                // `..` or `...` — merge consecutive periods
-                while self.pos < self.src.len() && char_class(self.src[self.pos]) == PERIOD {
-                    self.pos += 1;
+                // `..` always forms a token.
+                // `...` forms a token only when there isn't a fourth period;
+                // for longer runs we split as `..`, `..`, ... to match MetaPost.
+                self.pos += 1; // consume the second '.'
+                if self.pos < self.src.len()
+                    && char_class(self.src[self.pos]) == PERIOD
+                    && (self.pos + 1 >= self.src.len()
+                        || char_class(self.src[self.pos + 1]) != PERIOD)
+                {
+                    self.pos += 1; // consume a third '.' only for exact `...`
                 }
                 let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap_or("..");
                 return Some(Token {
@@ -592,6 +601,21 @@ mod tests {
             vec![
                 TokenKind::Symbolic("a".into()),
                 TokenKind::Symbolic("...".into()),
+                TokenKind::Symbolic("b".into()),
+                TokenKind::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn four_dots_split_into_two_path_joins() {
+        let tokens = kinds("a....b");
+        assert_eq!(
+            tokens,
+            vec![
+                TokenKind::Symbolic("a".into()),
+                TokenKind::Symbolic("..".into()),
+                TokenKind::Symbolic("..".into()),
                 TokenKind::Symbolic("b".into()),
                 TokenKind::Eof,
             ]

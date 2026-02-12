@@ -39,8 +39,7 @@ impl Interpreter {
         } else {
             let l = value_to_scalar(left)?;
             let r = value_to_scalar(right)?;
-            let ord = l.partial_cmp(&r).unwrap_or(Ordering::Equal);
-            Ok(predicate(ord))
+            Ok(l.partial_cmp(&r).is_some_and(predicate))
         }
     }
 
@@ -149,6 +148,58 @@ impl Interpreter {
             UnaryOp::MLog => {
                 let v = value_to_scalar(input)?;
                 Ok((Value::Numeric(math::mlog(v)), Type::Known))
+            }
+            UnaryOp::Oct => {
+                let v = value_to_scalar(input)?;
+                if !v.is_finite() {
+                    return Err(InterpreterError::new(
+                        ErrorKind::TypeError,
+                        "oct requires a finite numeric value",
+                    ));
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "integer conversion follows MetaPost-style rounding semantics"
+                )]
+                let n = v.round() as i64;
+                Ok((Value::String(Arc::from(format!("{n:o}"))), Type::String))
+            }
+            UnaryOp::Hex => {
+                let v = value_to_scalar(input)?;
+                if !v.is_finite() {
+                    return Err(InterpreterError::new(
+                        ErrorKind::TypeError,
+                        "hex requires a finite numeric value",
+                    ));
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "integer conversion follows MetaPost-style rounding semantics"
+                )]
+                let n = v.round() as i64;
+                Ok((Value::String(Arc::from(format!("{n:X}"))), Type::String))
+            }
+            UnaryOp::ASCII => {
+                let s = value_to_string(input)?;
+                let n = s.chars().next().map_or(0.0, |ch| f64::from(u32::from(ch)));
+                Ok((Value::Numeric(n), Type::Known))
+            }
+            UnaryOp::Char => {
+                let v = value_to_scalar(input)?;
+                if !v.is_finite() {
+                    return Err(InterpreterError::new(
+                        ErrorKind::TypeError,
+                        "char requires a finite numeric value",
+                    ));
+                }
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "character code is computed from rounded numeric"
+                )]
+                let rounded = v.round() as i64;
+                let code = rounded.rem_euclid(256) as u32;
+                let ch = char::from_u32(code).unwrap_or('\0');
+                Ok((Value::String(Arc::from(ch.to_string())), Type::String))
             }
             UnaryOp::Angle => {
                 let (px, py) = value_to_pair(input)?;
@@ -280,7 +331,10 @@ impl Interpreter {
                 Ok((Value::Pair(px, py), Type::PairType))
             }
             // Part-extraction ops are handled in do_unary before calling this.
-            _ => Ok((input.clone(), input.ty())),
+            _ => Err(InterpreterError::new(
+                ErrorKind::InvalidExpression,
+                format!("Unimplemented unary operator: {op:?}"),
+            )),
         }
     }
 
@@ -587,12 +641,7 @@ impl Interpreter {
                         })
                     }
                 } else {
-                    Ok(super::ExprResultValue {
-                        exp: Value::Numeric(v),
-                        ty: Type::Known,
-                        dep: None,
-                        pair_dep: None,
-                    })
+                    Ok(super::ExprResultValue::numeric_known(v))
                 }
             }
             Value::Transform(t) => {
@@ -610,12 +659,7 @@ impl Interpreter {
                         ))
                     }
                 };
-                Ok(super::ExprResultValue {
-                    exp: Value::Numeric(v),
-                    ty: Type::Known,
-                    dep: None,
-                    pair_dep: None,
-                })
+                Ok(super::ExprResultValue::numeric_known(v))
             }
             _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
@@ -759,5 +803,29 @@ fn expression_binary_value(
             );
             Ok((value, Type::PairType))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compare_values_nan_is_not_comparable() {
+        let is_less_or_equal =
+            Interpreter::compare_values(&Value::Numeric(f64::NAN), &Value::Numeric(1.0), |ord| {
+                ord != Ordering::Greater
+            })
+            .expect("comparison should not error");
+        assert!(!is_less_or_equal);
+    }
+
+    #[test]
+    fn unary_char_from_numeric_code() {
+        let mut seed = 0_u64;
+        let (val, ty) = Interpreter::eval_unary(UnaryOp::Char, &Value::Numeric(34.0), &mut seed)
+            .expect("char should evaluate");
+        assert_eq!(ty, Type::String);
+        assert_eq!(val, Value::String(Arc::from("\"")));
     }
 }

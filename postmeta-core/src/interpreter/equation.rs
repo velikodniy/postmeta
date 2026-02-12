@@ -23,25 +23,26 @@ impl Interpreter {
         // Repeat because substituting one dependent variable may introduce
         // another known/dependent variable into the dep list.
         for _ in 0..MAX_REDUCTION_PASSES {
-            let mut changed = false;
-
-            for term in &reduced.clone() {
+            let mut substitutions = Vec::new();
+            for term in &reduced {
                 let Some(id) = term.var_id else { continue };
                 match self.variables.get(id) {
                     VarValue::NumericVar(NumericState::Known(v)) => {
-                        reduced = dep_substitute(&reduced, id, &const_dep(*v));
-                        changed = true;
+                        substitutions.push((id, const_dep(*v)));
                     }
                     VarValue::NumericVar(NumericState::Dependent(sub)) => {
-                        reduced = dep_substitute(&reduced, id, sub);
-                        changed = true;
+                        substitutions.push((id, sub.clone()));
                     }
                     _ => {}
                 }
             }
 
-            if !changed {
+            if substitutions.is_empty() {
                 return reduced;
+            }
+
+            for (id, replacement) in substitutions {
+                reduced = dep_substitute(&reduced, id, &replacement);
             }
         }
 
@@ -221,8 +222,6 @@ impl Interpreter {
 
     /// Assign a value to a variable, handling compound types (Pair, Color).
     pub(super) fn assign_to_variable(&mut self, var_id: crate::equation::VarId, value: &Value) {
-        let currentpicture_id = self.variables.lookup_existing("currentpicture");
-
         match value {
             Value::Numeric(v) => {
                 self.variables
@@ -257,10 +256,13 @@ impl Interpreter {
             }
         }
 
-        if Some(var_id) == currentpicture_id {
-            if let Value::Picture(p) = value {
-                self.picture_state.current_picture = p.clone();
-            }
+        if let Value::Picture(p) = value
+            && self
+                .variables
+                .lookup_existing("currentpicture")
+                .is_some_and(|id| id == var_id)
+        {
+            self.picture_state.current_picture = p.clone();
         }
     }
 }

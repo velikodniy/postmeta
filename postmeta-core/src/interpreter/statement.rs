@@ -5,14 +5,11 @@
 //! `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`,
 //! `newinternal`, `show`, `message`, and `endgroup`.
 
-use std::sync::Arc;
-
 use postmeta_graphics::picture;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Path, Pen, Picture,
-    StrokeObject,
+    Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Pen, Picture, StrokeObject,
 };
 
 use crate::command::{
@@ -21,7 +18,7 @@ use crate::command::{
 use crate::error::{ErrorKind, InterpResult};
 use crate::internals::InternalId;
 use crate::types::{DrawingState, Type, Value};
-use crate::variables::{NumericState, SaveEntry, SuffixSegment, VarValue};
+use crate::variables::{SaveEntry, SuffixSegment, VarValue};
 
 use super::helpers::{value_to_path_owned, value_to_scalar};
 use super::{Interpreter, LhsBinding};
@@ -65,6 +62,16 @@ impl Interpreter {
             Command::NewInternal => self.do_new_internal(),
             Command::Show => self.do_show(),
             Command::MessageCommand => self.do_message(),
+            Command::ModeCommand => self.do_mode_command(),
+            Command::RandomSeed => self.do_randomseed(),
+            Command::EveryJob => self.do_unimplemented_statement("everyjob"),
+            Command::Special => self.do_unimplemented_statement("special"),
+            Command::Write => self.do_unimplemented_statement("write"),
+            Command::DoubleColon => {
+                self.report_error(ErrorKind::UnexpectedToken, "Unexpected `::`");
+                self.get_x_next();
+                Ok(())
+            }
             Command::BeginGroup => {
                 self.save_stack.push_boundary();
                 self.get_x_next();
@@ -240,18 +247,9 @@ impl Interpreter {
                 let mp_type = Self::type_op_to_type(type_op);
 
                 // Set the variable to the correct type
-                let val = match type_op {
-                    TypeNameOp::Numeric => VarValue::NumericVar(NumericState::Numeric),
-                    TypeNameOp::Boolean => VarValue::Known(Value::Boolean(false)),
-                    TypeNameOp::String => VarValue::Known(Value::String(Arc::from(""))),
-                    TypeNameOp::Path => VarValue::Known(Value::Path(Path::default())),
-                    TypeNameOp::Pen => VarValue::Known(Value::Pen(Pen::circle(0.0))),
-                    TypeNameOp::Picture => VarValue::Known(Value::Picture(Picture::default())),
-                    TypeNameOp::Pair => self.alloc_pair_value(&name),
-                    TypeNameOp::Color => self.alloc_color_value(&name),
-                    TypeNameOp::Transform => self.alloc_transform_value(&name),
-                    TypeNameOp::Known | TypeNameOp::Unknown => VarValue::Undefined,
-                };
+                let val = self
+                    .default_var_value_for_type(mp_type, &name)
+                    .unwrap_or(VarValue::Undefined);
                 self.variables.set(var_id, val);
 
                 // Register in the variable type trie
@@ -409,6 +407,11 @@ impl Interpreter {
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
                     target.merge_from(p);
+                } else {
+                    self.report_error(
+                        ErrorKind::TypeError,
+                        "`addto ... also` requires a picture expression",
+                    );
                 }
             }
             _ => {
@@ -431,9 +434,9 @@ impl Interpreter {
             pen: Pen::default_pen(),
             color: Color::BLACK,
             dash: None,
-            line_cap: LineCap::from_f64(self.internals.get(InternalId::LineCap as u16)),
-            line_join: LineJoin::from_f64(self.internals.get(InternalId::LineJoin as u16)),
-            miter_limit: self.internals.get(InternalId::MiterLimit as u16),
+            line_cap: LineCap::from_f64(self.internals.get_id(InternalId::LineCap)),
+            line_join: LineJoin::from_f64(self.internals.get_id(InternalId::LineJoin)),
+            miter_limit: self.internals.get_id(InternalId::MiterLimit),
         };
         let mut pen_specified = false;
 
@@ -601,17 +604,45 @@ impl Interpreter {
     /// Execute `interim` statement.
     fn do_interim(&mut self) -> InterpResult<()> {
         self.get_x_next();
-        if self.cur.command == Command::InternalQuantity {
-            let idx = self.cur.modifier;
-            let prev = self.state.internals.get(idx);
-            self.state.save_stack.save_internal(idx, prev);
-            self.get_x_next();
-            if self.cur.command == Command::Assignment {
+        if self.cur.command != Command::InternalQuantity {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected internal quantity after `interim`",
+            );
+            while self.cur.command != Command::Semicolon
+                && self.cur.command != Command::Stop
+                && self.cur.command != Command::EndGroup
+            {
                 self.get_x_next();
-                let val = value_to_scalar(&self.scan_expression()?.exp)?;
-                self.state.internals.set(idx, val);
             }
+            self.eat_semicolon();
+            return Ok(());
         }
+
+        let idx = self.cur.modifier;
+        let prev = self.state.internals.get(idx);
+        self.state.save_stack.save_internal(idx, prev);
+        self.get_x_next();
+
+        if self.cur.command != Command::Assignment {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected `:=` in interim statement",
+            );
+            while self.cur.command != Command::Semicolon
+                && self.cur.command != Command::Stop
+                && self.cur.command != Command::EndGroup
+            {
+                self.get_x_next();
+            }
+            self.eat_semicolon();
+            return Ok(());
+        }
+
+        self.get_x_next();
+        let val = value_to_scalar(&self.scan_expression()?.exp)?;
+        self.state.internals.set(idx, val);
+
         self.eat_semicolon();
         Ok(())
     }
@@ -622,11 +653,22 @@ impl Interpreter {
         self.get_next();
         let lhs = self.cur.sym;
         self.get_x_next();
-        // Expect = or :=
-        if self.cur.command == Command::Equals || self.cur.command == Command::Assignment {
-            // RHS: get_symbol (non-expanding) — must not expand macros
-            self.get_next();
+        if self.cur.command != Command::Equals && self.cur.command != Command::Assignment {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "Expected `=` or `:=` in let statement",
+            );
+            while self.cur.command != Command::Semicolon
+                && self.cur.command != Command::Stop
+                && self.cur.command != Command::EndGroup
+            {
+                self.get_x_next();
+            }
+            return Ok(());
         }
+
+        // RHS: get_symbol (non-expanding) — must not expand macros
+        self.get_next();
         let rhs = self.cur.sym;
         if let (Some(l), Some(r)) = (lhs, rhs) {
             let entry = self.symbols.get(r);
@@ -635,6 +677,11 @@ impl Interpreter {
             if let Some(macro_info) = self.macros.get(&r).cloned() {
                 self.macros.insert(l, macro_info);
             }
+        } else {
+            self.report_error(
+                ErrorKind::UnexpectedToken,
+                "Expected symbolic right-hand side in let statement",
+            );
         }
         self.get_x_next();
         Ok(())
@@ -734,13 +781,7 @@ impl Interpreter {
         self.get_x_next();
         // Print the value
         let val = self.scan_expression()?.exp;
-        self.report_error(
-            ErrorKind::Internal, // Not really an error, but using error channel for output
-            format!(">> {val}"),
-        );
-        if let Some(e) = self.errors.last_mut() {
-            e.severity = crate::error::Severity::Info;
-        }
+        self.report_info(format!(">> {val}"));
         self.eat_semicolon();
         Ok(())
     }
@@ -754,14 +795,76 @@ impl Interpreter {
             Value::String(s) => s.to_string(),
             other => format!("{other}"),
         };
-        let severity = if is_err {
-            crate::error::Severity::Error
+        if is_err {
+            self.report_error(ErrorKind::Internal, msg);
         } else {
-            crate::error::Severity::Info
-        };
-        self.errors.push(
-            crate::error::InterpreterError::new(ErrorKind::Internal, msg).with_severity(severity),
+            self.report_info(msg);
+        }
+        self.eat_semicolon();
+        Ok(())
+    }
+
+    /// Execute mode-setting commands (`batchmode`, `nonstopmode`, etc.).
+    fn do_mode_command(&mut self) -> InterpResult<()> {
+        // Mode commands affect terminal interaction in original MetaPost.
+        // PostMeta runs non-interactively, so these are accepted as no-ops.
+        self.get_x_next();
+        self.eat_semicolon();
+        Ok(())
+    }
+
+    /// Execute `randomseed` statement.
+    fn do_randomseed(&mut self) -> InterpResult<()> {
+        self.get_x_next();
+        if self.cur.command != Command::Assignment {
+            self.report_error(ErrorKind::MissingToken, "Expected `:=` after `randomseed`");
+            while self.cur.command != Command::Semicolon
+                && self.cur.command != Command::Stop
+                && self.cur.command != Command::EndGroup
+            {
+                self.get_x_next();
+            }
+            self.eat_semicolon();
+            return Ok(());
+        }
+
+        self.get_x_next();
+        let seed_val = value_to_scalar(&self.scan_expression()?.exp)?;
+        if seed_val.is_finite() {
+            #[expect(
+                clippy::cast_sign_loss,
+                reason = "negative seeds clamp to zero before conversion"
+            )]
+            #[expect(
+                clippy::cast_possible_truncation,
+                reason = "seed is an implementation-defined integer state"
+            )]
+            {
+                self.random_seed = seed_val.round().max(0.0) as u64;
+            }
+        } else {
+            self.report_error(
+                ErrorKind::TypeError,
+                "randomseed must be a finite numeric value",
+            );
+        }
+
+        self.eat_semicolon();
+        Ok(())
+    }
+
+    fn do_unimplemented_statement(&mut self, name: &str) -> InterpResult<()> {
+        self.report_error(
+            ErrorKind::InvalidExpression,
+            format!("`{name}` is not implemented"),
         );
+        self.get_x_next();
+        while self.cur.command != Command::Semicolon
+            && self.cur.command != Command::Stop
+            && self.cur.command != Command::EndGroup
+        {
+            self.get_x_next();
+        }
         self.eat_semicolon();
         Ok(())
     }
