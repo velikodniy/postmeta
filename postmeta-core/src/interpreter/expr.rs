@@ -680,7 +680,7 @@ impl Interpreter {
     pub(super) fn scan_secondary(&mut self) -> InterpResult<()> {
         self.scan_primary()?;
 
-        while self.cur.command.is_secondary_op() {
+        while self.cur.command.infix_binding_power() == Some(Command::BP_SECONDARY) {
             let cmd = self.cur.command;
 
             if cmd == Command::SecondaryPrimaryMacro {
@@ -1007,7 +1007,7 @@ impl Interpreter {
     pub(super) fn scan_tertiary(&mut self) -> InterpResult<()> {
         self.scan_secondary()?;
 
-        while self.cur.command.is_tertiary_op() {
+        while self.cur.command.infix_binding_power() == Some(Command::BP_TERTIARY) {
             let cmd = self.cur.command;
 
             if cmd == Command::TertiarySecondaryMacro {
@@ -1104,7 +1104,7 @@ impl Interpreter {
 
         self.scan_tertiary()?;
 
-        while self.cur.command.is_expression_op() {
+        while self.cur.command.infix_binding_power() == Some(Command::BP_EXPRESSION) {
             let cmd = self.cur.command;
             let op = self.cur.modifier;
 

@@ -117,6 +117,30 @@ fn eval_comparison() {
 }
 
 #[test]
+fn eval_operator_precedence_layers() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("show 1 + 2 * 3 = 7; show 1 + 2 * 3 > 6; show (1 + 2) * 3 = 9;")
+        .unwrap();
+    assert_eq!(interp.errors.len(), 3);
+    assert!(
+        interp.errors[0].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[0].message
+    );
+    assert!(
+        interp.errors[1].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[1].message
+    );
+    assert!(
+        interp.errors[2].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[2].message
+    );
+}
+
+#[test]
 fn eval_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\" & \" world\";").unwrap();
