@@ -47,23 +47,11 @@ use expand::{ControlFlow, MacroInfo};
 /// Groups the value, type, and linear dependency state that the expression
 /// parser writes to and consumers read from. These four fields are always
 /// mutated as a unit, so bundling them reduces `Interpreter`'s field count
-/// and makes the ownership boundary explicit.
-pub(super) struct CurExpr {
-    /// The expression value.
-    pub exp: Value,
-    /// The expression type.
-    pub ty: Type,
-    /// Scalar linear dependency list (for numeric expressions in the equation system).
-    pub dep: Option<DepList>,
-    /// Pair (x, y) dependency lists (for pair expressions in the equation system).
-    pub pair_dep: Option<(DepList, DepList)>,
-}
-
-/// Immutable expression evaluation result.
+/// Expression evaluation result.
 ///
-/// This is the value-oriented counterpart of [`CurExpr`]. It is used when
-/// callers need to move expression results across parser boundaries without
-/// sharing mutable interpreter state.
+/// Carries a value, its type, and optional dependency information for the
+/// equation solver. This is the canonical result type returned by all
+/// expression-parsing functions.
 #[derive(Clone)]
 pub(super) struct ExprResultValue {
     pub exp: Value,
@@ -72,39 +60,14 @@ pub(super) struct ExprResultValue {
     pub pair_dep: Option<(DepList, DepList)>,
 }
 
-impl CurExpr {
-    const fn new() -> Self {
+impl ExprResultValue {
+    const fn vacuous() -> Self {
         Self {
             exp: Value::Vacuous,
             ty: Type::Vacuous,
             dep: None,
             pair_dep: None,
         }
-    }
-
-    fn snapshot(&self) -> ExprResultValue {
-        ExprResultValue {
-            exp: self.exp.clone(),
-            ty: self.ty,
-            dep: self.dep.clone(),
-            pair_dep: self.pair_dep.clone(),
-        }
-    }
-
-    const fn take_result(&mut self) -> ExprResultValue {
-        ExprResultValue {
-            exp: std::mem::replace(&mut self.exp, Value::Vacuous),
-            ty: std::mem::replace(&mut self.ty, Type::Vacuous),
-            dep: self.dep.take(),
-            pair_dep: self.pair_dep.take(),
-        }
-    }
-
-    fn set_result(&mut self, result: ExprResultValue) {
-        self.exp = result.exp;
-        self.ty = result.ty;
-        self.dep = result.dep;
-        self.pair_dep = result.pair_dep;
     }
 }
 
@@ -218,8 +181,8 @@ pub struct MachineState {
 pub struct Interpreter {
     /// Long-lived machine state.
     state: MachineState,
-    /// Current expression result (value, type, and dependency state).
-    cur_expr: CurExpr,
+    /// Stashed expression result for group return values and `get_x_next` protection.
+    cur_expr: ExprResultValue,
     /// Current resolved token (set by `get_next`).
     cur: ResolvedToken,
     /// Latest bindable left-hand-side context.
@@ -278,7 +241,7 @@ impl Interpreter {
                 job_name: "output".into(),
                 next_delimiter_id: 1, // 0 is reserved for built-in ()
             },
-            cur_expr: CurExpr::new(),
+            cur_expr: ExprResultValue::vacuous(),
             cur,
             lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
@@ -315,10 +278,10 @@ impl Interpreter {
     fn get_x_next(&mut self) {
         // Expansion is token-oriented; it should not overwrite the current
         // expression value that the parser may already have computed.
-        let saved = self.cur_expr.snapshot();
+        let saved = self.cur_expr.clone();
         self.get_next();
         self.expand_current();
-        self.set_cur_result(saved);
+        self.cur_expr = saved;
     }
 
     /// Push the current token back into the input stream.
@@ -383,11 +346,11 @@ impl Interpreter {
     // =======================================================================
 
     const fn take_cur_result(&mut self) -> ExprResultValue {
-        self.cur_expr.take_result()
+        std::mem::replace(&mut self.cur_expr, ExprResultValue::vacuous())
     }
 
     fn set_cur_result(&mut self, result: ExprResultValue) {
-        self.cur_expr.set_result(result);
+        self.cur_expr = result;
     }
 
     fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
