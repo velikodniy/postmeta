@@ -201,6 +201,13 @@ pub enum Command {
 }
 
 impl Command {
+    /// Pratt-style binding power for expression-level operators.
+    pub const BP_EXPRESSION: u8 = 10;
+    /// Pratt-style binding power for tertiary operators.
+    pub const BP_TERTIARY: u8 = 20;
+    /// Pratt-style binding power for secondary operators.
+    pub const BP_SECONDARY: u8 = 30;
+
     /// Minimum command code that survives macro expansion.
     pub const MIN_COMMAND: Self = Self::Save;
 
@@ -226,6 +233,20 @@ impl Command {
     #[must_use]
     pub const fn is_expression_op(self) -> bool {
         (self as u8) >= (Self::LeftBrace as u8) && (self as u8) <= (Self::Equals as u8)
+    }
+
+    /// Return Pratt-style infix binding power for this command.
+    #[must_use]
+    pub const fn infix_binding_power(self) -> Option<u8> {
+        if self.is_secondary_op() {
+            Some(Self::BP_SECONDARY)
+        } else if self.is_tertiary_op() {
+            Some(Self::BP_TERTIARY)
+        } else if self.is_expression_op() {
+            Some(Self::BP_EXPRESSION)
+        } else {
+            None
+        }
     }
 
     /// Is this an expandable command (should be expanded before parsing)?
@@ -1619,6 +1640,23 @@ mod tests {
         assert!(Command::PathJoin.is_expression_op());
         assert!(Command::Ampersand.is_expression_op());
         assert!(!Command::And.is_expression_op());
+    }
+
+    #[test]
+    fn infix_binding_power_ordering() {
+        assert_eq!(
+            Command::SecondaryBinary.infix_binding_power(),
+            Some(Command::BP_SECONDARY)
+        );
+        assert_eq!(
+            Command::PlusOrMinus.infix_binding_power(),
+            Some(Command::BP_TERTIARY)
+        );
+        assert_eq!(
+            Command::Equals.infix_binding_power(),
+            Some(Command::BP_EXPRESSION)
+        );
+        assert_eq!(Command::TagToken.infix_binding_power(), None);
     }
 
     #[test]
