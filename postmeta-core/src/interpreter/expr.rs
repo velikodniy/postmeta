@@ -369,8 +369,6 @@ impl Interpreter {
                 self.cur_expr.ty = Type::Known;
                 self.cur_expr.dep = Some(const_dep(self.internals.get(idx)));
                 // Track for assignment LHS
-                self.lhs_tracking.last_internal_idx = Some(idx);
-                self.lhs_tracking.last_var_id = None;
                 self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
                 Ok(())

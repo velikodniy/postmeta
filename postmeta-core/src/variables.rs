@@ -313,15 +313,6 @@ impl Variables {
         }
     }
 
-    /// Get the dependency list of a dependent variable.
-    #[must_use]
-    pub fn dep_list(&self, id: VarId) -> Option<&DepList> {
-        match self.get(id) {
-            VarValue::NumericVar(NumericState::Dependent(dep)) => Some(dep),
-            _ => None,
-        }
-    }
-
     /// Check if a variable is unknown (undefined or declared-but-unconstrained).
     ///
     /// This includes Undefined, `NumericVar(Undefined)`, `NumericVar(Numeric)`,

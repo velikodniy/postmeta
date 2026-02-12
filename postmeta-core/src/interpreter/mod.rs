@@ -109,12 +109,6 @@ pub(super) enum LhsBinding {
 /// distinguish equations/assignments to variables, internals, and compound
 /// parts.
 pub(super) struct LhsTracking {
-    /// Last scanned variable id (for assignment LHS tracking).
-    pub last_var_id: Option<VarId>,
-    /// Last scanned variable name (for assignment LHS tracking).
-    pub last_var_name: String,
-    /// Last scanned internal quantity index (for `interim` assignment).
-    pub last_internal_idx: Option<u16>,
     /// Binding for expression forms that can be equation left-hand sides.
     pub last_lhs_binding: Option<LhsBinding>,
     /// When true, `=` in `scan_expression` is treated as an equation
@@ -127,9 +121,6 @@ pub(super) struct LhsTracking {
 impl LhsTracking {
     const fn new() -> Self {
         Self {
-            last_var_id: None,
-            last_var_name: String::new(),
-            last_internal_idx: None,
             last_lhs_binding: None,
             equals_means_equation: false,
         }
@@ -553,10 +544,6 @@ impl Interpreter {
         let var_id = self.variables.lookup(name);
         self.initialize_declared_variable(var_id, name, sym, suffixes);
         // Track last scanned variable for assignment LHS
-        self.lhs_tracking.last_var_id = Some(var_id);
-        self.lhs_tracking.last_var_name.clear();
-        self.lhs_tracking.last_var_name.push_str(name);
-        self.lhs_tracking.last_internal_idx = None;
         self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
             id: var_id,
             negated: false,
