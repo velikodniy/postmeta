@@ -63,8 +63,9 @@ impl Interpreter {
                 // [min_primary_command..numeric_token) — i.e., anything
                 // that can start a primary EXCEPT +/- and another number.
                 if self.cur.command.can_start_implicit_mul() {
-                    let factor_dep = self.take_cur_dep();
-                    let factor = self.take_cur_exp();
+                    let factor_result = self.take_cur_result();
+                    let factor_dep = factor_result.dep;
+                    let factor = factor_result.exp;
                     self.scan_primary()?;
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_implicit_mul(&factor)?;
@@ -271,7 +272,7 @@ impl Interpreter {
                         "Missing `of`",
                     ));
                 }
-                let first = self.take_cur_exp();
+                let first = self.take_cur_result().exp;
                 self.get_x_next();
                 self.scan_primary()?;
                 self.lhs_tracking.last_lhs_binding = None;
@@ -406,15 +407,16 @@ impl Interpreter {
                 self.get_x_next();
                 self.scan_expression()?;
                 let b_binding = self.lhs_tracking.last_lhs_binding.clone();
-                let b_dep = self.take_cur_dep().or_else(|| {
+                let b_result = self.take_cur_result();
+                let b_dep = b_result.dep.or_else(|| {
                     if let Some(LhsBinding::Variable { id, .. }) = b_binding {
                         Some(self.numeric_dep_for_var(id))
                     } else {
                         None
                     }
                 });
-                let b_pair_dep = self.take_cur_pair_dep();
-                let b = self.take_cur_exp();
+                let b_pair_dep = b_result.pair_dep;
+                let b = b_result.exp;
                 if self.cur.command == Command::Comma {
                     self.get_x_next();
                 } else {
@@ -425,15 +427,16 @@ impl Interpreter {
                 }
                 self.scan_expression()?;
                 let c_binding = self.lhs_tracking.last_lhs_binding.clone();
-                let c_dep = self.take_cur_dep().or_else(|| {
+                let c_result = self.take_cur_result();
+                let c_dep = c_result.dep.or_else(|| {
                     if let Some(LhsBinding::Variable { id, .. }) = c_binding {
                         Some(self.numeric_dep_for_var(id))
                     } else {
                         None
                     }
                 });
-                let c_pair_dep = self.take_cur_pair_dep();
-                let c = self.take_cur_exp();
+                let c_pair_dep = c_result.pair_dep;
+                let c = c_result.exp;
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
                 } else {
@@ -682,7 +685,7 @@ impl Interpreter {
 
             if cmd == Command::SecondaryPrimaryMacro {
                 // User-defined primarydef operator
-                let left = self.take_cur_exp();
+                let left = self.take_cur_result().exp;
                 self.expand_binary_macro(&left)?;
                 break;
             }
@@ -913,7 +916,7 @@ impl Interpreter {
                 }
                 Command::Slash => {
                     // Division
-                    let right = self.take_cur_exp();
+                    let right = right_result.exp;
                     let b = value_to_scalar(&right)?;
                     if b.abs() < f64::EPSILON {
                         self.report_error(ErrorKind::ArithmeticError, "Division by zero");
@@ -985,7 +988,7 @@ impl Interpreter {
                 }
                 Command::And => {
                     // Logical and
-                    let right = self.take_cur_exp();
+                    let right = right_result.exp;
                     let a = value_to_bool(&left)?;
                     let b = value_to_bool(&right)?;
                     self.cur_expr.exp = Value::Boolean(a && b);
@@ -1009,7 +1012,7 @@ impl Interpreter {
 
             if cmd == Command::TertiarySecondaryMacro {
                 // User-defined tertiarydef operator
-                let left = self.take_cur_exp();
+                let left = self.take_cur_result().exp;
                 self.expand_binary_macro(&left)?;
                 break;
             }
@@ -1021,7 +1024,7 @@ impl Interpreter {
             let left = left_result.exp;
             self.get_x_next();
             self.scan_secondary()?;
-            let right_result = self.cur_expr.snapshot();
+            let right_result = self.take_cur_result();
             let right_dep = right_result.dep.clone();
             let right_pair_dep = right_result.pair_dep.clone();
 
@@ -1033,8 +1036,7 @@ impl Interpreter {
                             "Invalid plus/minus modifier",
                         ));
                     };
-                    let right_pair_dep_taken = self.take_cur_pair_dep();
-                    let right = self.take_cur_exp();
+                    let right = right_result.exp;
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_plus_minus(op, &left, &right)?;
                     let factor = if op == PlusMinusOp::Plus {
@@ -1058,8 +1060,7 @@ impl Interpreter {
 
                         let (ldx, ldy) =
                             left_pair_dep.unwrap_or_else(|| (const_dep(lx), const_dep(ly)));
-                        let (rdx, rdy) = right_pair_dep_taken
-                            .or(right_pair_dep)
+                        let (rdx, rdy) = right_pair_dep
                             .unwrap_or_else(|| (const_dep(rx), const_dep(ry)));
 
                         self.cur_expr.pair_dep = Some((
@@ -1081,8 +1082,7 @@ impl Interpreter {
                             "Invalid tertiary binary modifier",
                         ));
                     };
-                    let _ = self.take_cur_pair_dep();
-                    let right = self.take_cur_exp();
+                    let right = right_result.exp;
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_tertiary_binary(op, &left, &right)?;
                     self.cur_expr.dep = None;
@@ -1117,7 +1117,7 @@ impl Interpreter {
                 Command::Equals => {
                     // In expression context (e.g. exitif, if), `=` is an
                     // equality comparison producing a boolean.
-                    let left = self.take_cur_exp();
+                    let left = self.take_cur_result().exp;
                     self.get_x_next();
                     self.scan_tertiary()?;
                     self.lhs_tracking.last_lhs_binding = None;
@@ -1138,7 +1138,7 @@ impl Interpreter {
                         self.scan_path_construction()?;
                     } else {
                         // String concatenation
-                        let left = self.take_cur_exp();
+                        let left = self.take_cur_result().exp;
                         self.get_x_next();
                         self.scan_tertiary()?;
                         self.lhs_tracking.last_lhs_binding = None;
@@ -1150,7 +1150,7 @@ impl Interpreter {
                 }
                 Command::ExpressionTertiaryMacro => {
                     // User-defined secondarydef operator
-                    let left = self.take_cur_exp();
+                    let left = self.take_cur_result().exp;
                     self.expand_binary_macro(&left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
@@ -1163,7 +1163,7 @@ impl Interpreter {
                             "Invalid expression binary modifier",
                         ));
                     };
-                    let left = self.take_cur_exp();
+                    let left = self.take_cur_result().exp;
                     self.get_x_next();
                     self.scan_tertiary()?;
                     self.lhs_tracking.last_lhs_binding = None;

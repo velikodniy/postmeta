@@ -91,16 +91,6 @@ impl CurExpr {
         val
     }
 
-    /// Take the scalar dependency list.
-    const fn take_dep(&mut self) -> Option<DepList> {
-        self.dep.take()
-    }
-
-    /// Take the pair dependency lists.
-    const fn take_pair_dep(&mut self) -> Option<(DepList, DepList)> {
-        self.pair_dep.take()
-    }
-
     fn snapshot(&self) -> ExprResultValue {
         ExprResultValue {
             exp: self.exp.clone(),
@@ -408,14 +398,6 @@ impl Interpreter {
 
     fn set_cur_result(&mut self, result: ExprResultValue) {
         self.cur_expr.set_result(result);
-    }
-
-    const fn take_cur_dep(&mut self) -> Option<DepList> {
-        self.cur_expr.take_dep()
-    }
-
-    const fn take_cur_pair_dep(&mut self) -> Option<(DepList, DepList)> {
-        self.cur_expr.take_pair_dep()
     }
 
     fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
