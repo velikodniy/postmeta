@@ -1932,6 +1932,62 @@ mod tests {
     }
 
     #[test]
+    fn reports_missing_right_paren_in_parenthesized_expression() {
+        let mut interp = Interpreter::new();
+        interp.run("show (1+2; show 7;").unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|e| {
+                e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `)`")
+            }),
+            "expected missing right paren diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn reports_missing_right_bracket_in_mediation() {
+        let mut interp = Interpreter::new();
+        interp.run("show 0.5[(0,0),(2,2); show 9;").unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|e| {
+                e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `]`")
+            }),
+            "expected missing right bracket diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn reports_missing_right_brace_in_path_direction() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("path p; p := (0,0){curl 1..(1,0); show 1;")
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(
+            errors.iter().any(|e| {
+                e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `}`")
+            }),
+            "expected missing right brace diagnostic, got: {errors:?}"
+        );
+    }
+
+    #[test]
     fn dashpattern_basic() {
         let mut interp = Interpreter::new();
         interp

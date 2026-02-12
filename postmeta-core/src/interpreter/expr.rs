@@ -195,6 +195,8 @@ impl Interpreter {
                 // Expect closing delimiter
                 if self.cur.command == Command::RightDelimiter {
                     self.get_x_next();
+                } else {
+                    self.report_error(ErrorKind::MissingToken, "Expected `)`");
                 }
                 Ok(())
             }
@@ -529,6 +531,8 @@ impl Interpreter {
                 let c = self.take_cur_exp();
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
+                } else {
+                    self.report_error(ErrorKind::MissingToken, "Expected `]` in mediation a[b,c]");
                 }
 
                 // a[b,c] = b + a*(c-b) = (1-a)*b + a*c

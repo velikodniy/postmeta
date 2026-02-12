@@ -297,6 +297,8 @@ impl Interpreter {
             let curl_val = value_to_scalar(&self.cur_expr.exp)?;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
+            } else {
+                self.report_error(ErrorKind::MissingToken, "Expected `}` after `curl` direction");
             }
             Ok(KnotDirection::Curl(curl_val))
         } else {
@@ -306,6 +308,8 @@ impl Interpreter {
             let dir = self.take_cur_exp();
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
+            } else {
+                self.report_error(ErrorKind::MissingToken, "Expected `}` after direction expression");
             }
             Self::value_to_direction(&dir)
         }
