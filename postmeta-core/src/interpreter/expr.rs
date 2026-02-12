@@ -154,21 +154,21 @@ impl Interpreter {
 
                 if self.cur.command == Command::Comma {
                     // Pair or color
-                    let first_dep = self.take_cur_dep();
-                    let first = self.take_cur_exp();
+                    let first_result = self.take_cur_result();
+                    let first = first_result.exp;
                     let first_binding = self.lhs_tracking.last_lhs_binding.clone();
                     self.get_x_next();
                     self.scan_expression()?;
-                    let second_dep = self.take_cur_dep();
-                    let second = self.take_cur_exp();
+                    let second_result = self.take_cur_result();
+                    let second = second_result.exp;
                     let second_binding = self.lhs_tracking.last_lhs_binding.clone();
 
                     if self.cur.command == Command::Comma {
                         // Color: (r, g, b)
                         self.get_x_next();
                         self.scan_expression()?;
-                        let third_dep = self.take_cur_dep();
-                        let third = self.take_cur_exp();
+                        let third_result = self.take_cur_result();
+                        let third = third_result.exp;
                         let third_binding = self.lhs_tracking.last_lhs_binding.clone();
 
                         let r = value_to_scalar(&first)?;
@@ -176,7 +176,7 @@ impl Interpreter {
                         let b = value_to_scalar(&third)?;
                         self.cur_expr.exp = Value::Color(postmeta_graphics::types::Color::new(r, g, b));
                         self.cur_expr.ty = Type::ColorType;
-                        let _ = (first_dep, second_dep, third_dep);
+                        let _ = (first_result.dep, second_result.dep, third_result.dep);
                         self.lhs_tracking.last_lhs_binding = if first_binding.is_some()
                             || second_binding.is_some()
                             || third_binding.is_some()
@@ -196,8 +196,8 @@ impl Interpreter {
                         self.cur_expr.exp = Value::Pair(x, y);
                         self.cur_expr.ty = Type::PairType;
                         self.cur_expr.pair_dep = Some((
-                            first_dep.unwrap_or_else(|| const_dep(x)),
-                            second_dep.unwrap_or_else(|| const_dep(y)),
+                            first_result.dep.unwrap_or_else(|| const_dep(x)),
+                            second_result.dep.unwrap_or_else(|| const_dep(y)),
                         ));
                         self.lhs_tracking.last_lhs_binding =
                             if first_binding.is_some() || second_binding.is_some() {
@@ -598,7 +598,7 @@ impl Interpreter {
                 }
                 has_suffixes = true;
                 self.get_x_next();
-            } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
+                } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
                 // Speculatively scan for a bracketed subscript: var[expr].
                 // If the expression is followed by `]`, this is a subscript.
                 // Otherwise (e.g. `,` in `lambda[A,B]`), back up and let
@@ -625,11 +625,13 @@ impl Interpreter {
                     // Build a token list [capsule(expr), cur_tok]
                     // so they are re-read in the right order.
                     use crate::input::StoredToken;
-                    let ty = self.cur_expr.ty;
-                    let dep = self.take_cur_dep();
-                    let pair_dep = self.take_cur_pair_dep();
-                    let val = self.take_cur_exp();
-                    let mut tl = vec![StoredToken::Capsule(val, ty, dep, pair_dep)];
+                    let result = self.take_cur_result();
+                    let mut tl = vec![StoredToken::Capsule(
+                        result.exp,
+                        result.ty,
+                        result.dep,
+                        result.pair_dep,
+                    )];
                     self.store_current_token(&mut tl);
                     self.input
                         .push_token_list(tl, Vec::new(), "mediation backtrack".into());
