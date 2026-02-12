@@ -3222,3 +3222,39 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
         Some(postmeta_graphics::types::GraphicsObject::ClipEnd)
     ));
 }
+
+#[test]
+fn nonlinear_equation_without_bindable_lhs_reports_error() {
+    let mut interp = Interpreter::new();
+    interp.run("numeric x, y; x*x = y;").unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.kind == crate::error::ErrorKind::IncompatibleTypes),
+        "expected nonlinear-equation error, got: {errors:?}"
+    );
+}
+
+#[test]
+fn path_tension_accepts_tertiary_expression() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("path p; p := (0,0) .. tension 1+1 .. (10,0);")
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "expected no errors for tension expression, got: {errors:?}"
+    );
+}

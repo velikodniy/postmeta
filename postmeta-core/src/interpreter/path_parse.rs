@@ -209,7 +209,7 @@ impl Interpreter {
                 if at_least {
                     self.get_x_next();
                 }
-                self.scan_primary()?;
+                self.scan_tertiary()?;
                 let t1 = value_to_scalar(&self.take_cur_exp())?;
                 let t1 = if at_least { -t1.abs() } else { t1 };
 
@@ -219,7 +219,7 @@ impl Interpreter {
                     if at_least2 {
                         self.get_x_next();
                     }
-                    self.scan_primary()?;
+                    self.scan_tertiary()?;
                     let t = value_to_scalar(&self.take_cur_exp())?;
                     if at_least2 {
                         -t.abs()
@@ -306,7 +306,7 @@ impl Interpreter {
         if self.cur.command == Command::CurlCommand {
             // {curl <numeric>}
             self.get_x_next();
-            self.scan_primary()?;
+            self.scan_tertiary()?;
             let curl_val = value_to_scalar(&self.cur_expr.exp)?;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
