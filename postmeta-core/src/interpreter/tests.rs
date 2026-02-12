@@ -3127,3 +3127,98 @@ fn vardef_at_suffix_only_preserves_trailing_token() {
         "expected trailing message after macro call: {infos:?}"
     );
 }
+
+#[test]
+fn mismatched_custom_delimiters_report_error() {
+    let mut interp = Interpreter::new();
+    let _ = interp.run("delimiters {{ }}; show {{ 3 + 4 );");
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.kind == crate::error::ErrorKind::MissingToken),
+        "expected missing-token error for mismatched delimiters, got: {errors:?}"
+    );
+}
+
+#[test]
+fn known_equation_reports_inconsistency_without_assignment() {
+    let mut interp = Interpreter::new();
+    interp.run("numeric x; x := 1; x = 2; show x;").unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.kind == crate::error::ErrorKind::InconsistentEquation),
+        "expected inconsistent-equation error, got: {errors:?}"
+    );
+
+    let x_id = interp
+        .variables
+        .lookup_existing("x")
+        .expect("x should exist after declaration");
+    let x = interp.variables.known_value(x_id).unwrap_or(f64::NAN);
+    assert!((x - 1.0).abs() < 1e-12, "x should remain 1, got {x}");
+}
+
+#[test]
+fn addto_picture_target_accepts_symbolic_suffixes() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture pic.layer; addto pic.layer contour ((0,0)..(1,0)..(1,1)..cycle);")
+        .unwrap();
+
+    let layer_id = interp
+        .variables
+        .lookup_existing("pic.layer")
+        .expect("pic.layer should exist");
+    let layer_pic = match interp.variables.get(layer_id) {
+        crate::variables::VarValue::Known(Value::Picture(p)) => p,
+        other => panic!("pic.layer should be picture, got {other:?}"),
+    };
+    assert_eq!(
+        layer_pic.objects.len(),
+        1,
+        "expected contour on pic.layer picture"
+    );
+}
+
+#[test]
+fn clip_picture_target_accepts_symbolic_suffixes() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic.layer; \
+             addto pic.layer contour ((0,0)..(1,0)..(1,1)..cycle); \
+             clip pic.layer to ((-1,-1)..(2,-1)..(2,2)..(-1,2)..cycle);",
+        )
+        .unwrap();
+
+    let layer_id = interp
+        .variables
+        .lookup_existing("pic.layer")
+        .expect("pic.layer should exist");
+    let layer_pic = match interp.variables.get(layer_id) {
+        crate::variables::VarValue::Known(Value::Picture(p)) => p,
+        other => panic!("pic.layer should be picture, got {other:?}"),
+    };
+
+    assert!(matches!(
+        layer_pic.objects.first(),
+        Some(postmeta_graphics::types::GraphicsObject::ClipStart(_))
+    ));
+    assert!(matches!(
+        layer_pic.objects.last(),
+        Some(postmeta_graphics::types::GraphicsObject::ClipEnd)
+    ));
+}

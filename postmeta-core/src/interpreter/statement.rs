@@ -327,11 +327,8 @@ impl Interpreter {
 
         // Optional target picture name. If omitted, default to currentpicture.
         let pic_name = if self.cur.command == Command::TagToken {
-            let name = self
-                .cur_symbolic_name()
-                .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
-            self.get_x_next();
-            name
+            self.scan_target_picture_name()
+                .unwrap_or_else(|| "currentpicture".to_owned())
         } else {
             "currentpicture".to_owned()
         };
@@ -474,11 +471,8 @@ impl Interpreter {
 
         // Optional picture name before `to`. If omitted, target currentpicture.
         let pic_name = if self.cur.command == Command::TagToken {
-            let name = self
-                .cur_symbolic_name()
-                .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
-            self.get_x_next();
-            name
+            self.scan_target_picture_name()
+                .unwrap_or_else(|| "currentpicture".to_owned())
         } else {
             "currentpicture".to_owned()
         };
@@ -505,6 +499,33 @@ impl Interpreter {
 
         self.eat_semicolon();
         Ok(())
+    }
+
+    /// Scan a compound picture target name used by `addto` and `clip/setbounds`.
+    ///
+    /// This accepts symbolic suffix chains like `pic.layer.sub` and keeps
+    /// suffix names from expanding while they are being collected.
+    fn scan_target_picture_name(&mut self) -> Option<String> {
+        let mut name = self.cur_symbolic_name()?.to_owned();
+
+        // Use non-expanding reads so vardef suffix names are treated as suffix
+        // tokens here, mirroring type-declaration parsing behavior.
+        self.get_next();
+        while self.cur.command == Command::TagToken
+            || self.cur.command == Command::DefinedMacro
+            || self.cur.command == Command::InternalQuantity
+        {
+            if let crate::token::TokenKind::Symbolic(ref suffix) = self.cur.token.kind {
+                name.push('.');
+                name.push_str(suffix);
+            }
+            self.get_next();
+        }
+
+        // Re-expand whatever token follows the target name so statement parsing
+        // continues in normal expanded mode.
+        self.expand_current();
+        Some(name)
     }
 
     /// Execute `shipout` statement.

@@ -148,6 +148,7 @@ impl Interpreter {
 
             Command::LeftDelimiter => {
                 // ( expr ) or ( expr , expr ) for pair/color
+                let expected_delimiter = self.cur.modifier;
                 self.get_x_next();
                 self.scan_expression()?;
 
@@ -212,10 +213,17 @@ impl Interpreter {
                 }
 
                 // Expect closing delimiter
-                if self.cur.command == Command::RightDelimiter {
+                if self.cur.command == Command::RightDelimiter
+                    && self.cur.modifier == expected_delimiter
+                {
                     self.get_x_next();
                 } else {
-                    self.report_error(ErrorKind::MissingToken, "Expected `)`");
+                    let message = if expected_delimiter == 0 {
+                        "Expected `)`"
+                    } else {
+                        "Expected matching right delimiter"
+                    };
+                    self.report_error(ErrorKind::MissingToken, message);
                 }
                 Ok(())
             }

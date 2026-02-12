@@ -100,14 +100,6 @@ impl Interpreter {
         }
 
         if let (Some(ld), Some(rd)) = (lhs_dep.as_ref(), rhs_dep.as_ref()) {
-            if lhs_binding.is_some()
-                && crate::equation::is_constant(ld)
-                && crate::equation::is_constant(rd)
-            {
-                self.assign_binding(lhs_binding, rhs)?;
-                return Ok(());
-            }
-
             let equation_dep = self.reduce_dep_with_knowns(dep_add_scaled(ld, rd, -1.0));
             self.apply_solve_result(
                 solve_equation(&equation_dep),

@@ -110,7 +110,7 @@ impl CurExpr {
         }
     }
 
-    fn take_result(&mut self) -> ExprResultValue {
+    const fn take_result(&mut self) -> ExprResultValue {
         ExprResultValue {
             exp: std::mem::replace(&mut self.exp, Value::Vacuous),
             ty: std::mem::replace(&mut self.ty, Type::Vacuous),
@@ -402,7 +402,7 @@ impl Interpreter {
         self.cur_expr.take_exp()
     }
 
-    fn take_cur_result(&mut self) -> ExprResultValue {
+    const fn take_cur_result(&mut self) -> ExprResultValue {
         self.cur_expr.take_result()
     }
 
