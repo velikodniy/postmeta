@@ -1055,6 +1055,17 @@ fn for_step_until_negative() {
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
+#[test]
+fn for_step_until_accepts_assignment_syntax() {
+    let mut interp = Interpreter::new();
+    // MetaPost allows both `for k=...` and `for k:=...`.
+    interp
+        .run("numeric s; s := 0; for k:=1 step 1 until 5: s := s + k; endfor; show s;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("15"), "expected 15 in: {msg}");
+}
+
 // -----------------------------------------------------------------------
 // Str operator
 // -----------------------------------------------------------------------

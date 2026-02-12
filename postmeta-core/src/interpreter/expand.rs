@@ -149,17 +149,19 @@ impl Interpreter {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
         self.lhs_tracking.equals_means_equation = false;
-        let condition = if let Ok(result) = self.scan_expression() {
-            match result.exp {
+        let condition = match self.scan_expression() {
+            Ok(result) => match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,
                 _ => {
                     self.report_error(ErrorKind::TypeError, "if condition must be boolean");
                     false
                 }
+            },
+            Err(err) => {
+                self.errors.push(err);
+                false
             }
-        } else {
-            false
         };
 
         // Expect `:` after the condition
@@ -337,8 +339,8 @@ impl Interpreter {
 
         self.get_next(); // skip the variable name
 
-        // Expect `=`
-        if self.cur.command != Command::Equals {
+        // Expect `=` or `:=` (MetaPost accepts both forms for the loop variable)
+        if self.cur.command != Command::Equals && self.cur.command != Command::Assignment {
             self.report_error(ErrorKind::MissingToken, "Expected `=` after loop variable");
         }
 
