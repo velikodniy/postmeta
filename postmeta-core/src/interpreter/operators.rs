@@ -64,166 +64,168 @@ impl Interpreter {
         }
     }
 
-    /// Execute a unary operator on `cur_exp`.
-    #[expect(clippy::too_many_lines, reason = "matching all unary ops")]
-    pub(super) fn do_unary(&mut self, op: UnaryOp) -> InterpResult<()> {
+    /// Execute a unary operator.
+    ///
+    /// Most operators are pure: they transform an input value into an output
+    /// `(Value, Type)` via [`Self::eval_unary`].  The part-extraction operators
+    /// (`xpart`, `ypart`, etc.) additionally propagate pair dependency info for
+    /// the equation solver, which requires mutable access to `self`.
+    pub(super) fn do_unary(&mut self, op: UnaryOp, input: Value) -> InterpResult<()> {
         self.lhs_tracking.last_lhs_binding = None;
+
+        // Part-extraction operators need pair_dep access — handle them here.
+        match op {
+            UnaryOp::XPart => return self.extract_part(&input, 0),
+            UnaryOp::YPart => return self.extract_part(&input, 1),
+            UnaryOp::XXPart => return self.extract_part(&input, 2),
+            UnaryOp::XYPart => return self.extract_part(&input, 3),
+            UnaryOp::YXPart => return self.extract_part(&input, 4),
+            UnaryOp::YYPart => return self.extract_part(&input, 5),
+            _ => {}
+        }
+
+        // All remaining unary operators are pure value transformations.
+        let (val, ty) = Self::eval_unary(op, &input, &mut self.random_seed)?;
+        self.cur_expr.exp = val;
+        self.cur_expr.ty = ty;
+        Ok(())
+    }
+
+    /// Pure evaluation of a unary operator.
+    ///
+    /// Returns the result `(Value, Type)`.  Does NOT handle part-extraction
+    /// operators (xpart, ypart, etc.) — those need pair dependency propagation
+    /// and are handled by [`Self::do_unary`] directly.
+    fn eval_unary(
+        op: UnaryOp,
+        input: &Value,
+        random_seed: &mut u64,
+    ) -> InterpResult<(Value, Type)> {
         match op {
             UnaryOp::Not => {
-                let b = value_to_bool(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Boolean(!b);
-                self.cur_expr.ty = Type::Boolean;
+                let b = value_to_bool(input)?;
+                Ok((Value::Boolean(!b), Type::Boolean))
             }
             UnaryOp::Sqrt => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(if v >= 0.0 { v.sqrt() } else { 0.0 });
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((
+                    Value::Numeric(if v >= 0.0 { v.sqrt() } else { 0.0 }),
+                    Type::Known,
+                ))
             }
             UnaryOp::SinD => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::sind(v));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((Value::Numeric(math::sind(v)), Type::Known))
             }
             UnaryOp::CosD => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::cosd(v));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((Value::Numeric(math::cosd(v)), Type::Known))
             }
             UnaryOp::Floor => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::floor(v));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((Value::Numeric(math::floor(v)), Type::Known))
             }
             UnaryOp::MExp => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::mexp(v));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((Value::Numeric(math::mexp(v)), Type::Known))
             }
             UnaryOp::MLog => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::mlog(v));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((Value::Numeric(math::mlog(v)), Type::Known))
             }
             UnaryOp::Angle => {
-                let (px, py) = value_to_pair(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::angle(px, py));
-                self.cur_expr.ty = Type::Known;
+                let (px, py) = value_to_pair(input)?;
+                Ok((Value::Numeric(math::angle(px, py)), Type::Known))
             }
             UnaryOp::UniformDeviate => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::Numeric(math::uniform_deviate(v, &mut self.random_seed));
-                self.cur_expr.ty = Type::Known;
+                let v = value_to_scalar(input)?;
+                Ok((
+                    Value::Numeric(math::uniform_deviate(v, random_seed)),
+                    Type::Known,
+                ))
             }
             UnaryOp::Length => {
-                match &self.cur_expr.exp {
+                let n = match input {
                     Value::Path(p) => {
                         #[expect(clippy::cast_precision_loss, reason = "segment count fits in f64")]
-                        let n = p.num_segments() as f64;
-                        self.cur_expr.exp = Value::Numeric(n);
+                        {
+                            p.num_segments() as f64
+                        }
                     }
                     Value::String(s) => {
                         #[expect(
                             clippy::cast_precision_loss,
                             reason = "string length in chars fits in f64 for practical inputs"
                         )]
-                        let n = s.chars().count() as f64;
-                        self.cur_expr.exp = Value::Numeric(n);
+                        {
+                            s.chars().count() as f64
+                        }
                     }
-                    Value::Pair(x, y) => {
-                        // abs(pair) = sqrt(x^2 + y^2)
-                        self.cur_expr.exp = Value::Numeric(x.hypot(*y));
-                    }
+                    Value::Pair(x, y) => x.hypot(*y),
                     _ => {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
                             "length requires path, string, or pair",
-                        ));
+                        ))
                     }
-                }
-                self.cur_expr.ty = Type::Known;
+                };
+                Ok((Value::Numeric(n), Type::Known))
             }
             UnaryOp::Decimal => {
-                let v = value_to_scalar(&self.cur_expr.exp)?;
-                self.cur_expr.exp = Value::String(Arc::from(format!("{v}").as_str()));
-                self.cur_expr.ty = Type::String;
+                let v = value_to_scalar(input)?;
+                Ok((
+                    Value::String(Arc::from(format!("{v}").as_str())),
+                    Type::String,
+                ))
             }
             UnaryOp::Reverse => {
-                if let Value::Path(ref p) = self.cur_expr.exp {
-                    self.cur_expr.exp = Value::Path(path::reverse(p));
-                    self.cur_expr.ty = Type::Path;
+                if let Value::Path(p) = input {
+                    Ok((Value::Path(path::reverse(p)), Type::Path))
                 } else {
-                    return Err(InterpreterError::new(
+                    Err(InterpreterError::new(
                         ErrorKind::TypeError,
                         "reverse requires a path",
-                    ));
+                    ))
                 }
             }
-            UnaryOp::XPart => {
-                self.extract_part(0)?;
-            }
-            UnaryOp::YPart => {
-                self.extract_part(1)?;
-            }
-            UnaryOp::XXPart => {
-                self.extract_part(2)?;
-            }
-            UnaryOp::XYPart => {
-                self.extract_part(3)?;
-            }
-            UnaryOp::YXPart => {
-                self.extract_part(4)?;
-            }
-            UnaryOp::YYPart => {
-                self.extract_part(5)?;
-            }
-            UnaryOp::RedPart => {
-                self.extract_color_part(0)?;
-            }
-            UnaryOp::GreenPart => {
-                self.extract_color_part(1)?;
-            }
-            UnaryOp::BluePart => {
-                self.extract_color_part(2)?;
-            }
+            UnaryOp::RedPart => Self::extract_color_part(input, 0),
+            UnaryOp::GreenPart => Self::extract_color_part(input, 1),
+            UnaryOp::BluePart => Self::extract_color_part(input, 2),
             UnaryOp::MakePath => {
-                if let Value::Pen(ref p) = self.cur_expr.exp {
-                    self.cur_expr.exp = Value::Path(pen::makepath(p));
-                    self.cur_expr.ty = Type::Path;
+                if let Value::Pen(p) = input {
+                    Ok((Value::Path(pen::makepath(p)), Type::Path))
                 } else {
-                    return Err(InterpreterError::new(
+                    Err(InterpreterError::new(
                         ErrorKind::TypeError,
                         "makepath requires a pen",
-                    ));
+                    ))
                 }
             }
             UnaryOp::MakePen => {
-                if let Value::Path(ref p) = self.cur_expr.exp {
+                if let Value::Path(p) = input {
                     let result = pen::makepen(p).map_err(|e| {
                         InterpreterError::new(ErrorKind::TypeError, format!("makepen: {e}"))
                     })?;
-                    self.cur_expr.exp = Value::Pen(result);
-                    self.cur_expr.ty = Type::Pen;
+                    Ok((Value::Pen(result), Type::Pen))
                 } else {
-                    return Err(InterpreterError::new(
+                    Err(InterpreterError::new(
                         ErrorKind::TypeError,
                         "makepen requires a path",
-                    ));
+                    ))
                 }
             }
             UnaryOp::CycleOp => {
-                let is_cyclic = matches!(&self.cur_expr.exp, Value::Path(p) if p.is_cyclic);
-                self.cur_expr.exp = Value::Boolean(is_cyclic);
-                self.cur_expr.ty = Type::Boolean;
+                let is_cyclic = matches!(input, Value::Path(p) if p.is_cyclic);
+                Ok((Value::Boolean(is_cyclic), Type::Boolean))
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
-                let bb = match &self.cur_expr.exp {
+                let bb = match input {
                     Value::Picture(pic) => bbox::picture_bbox(pic, false),
                     Value::Path(p) => bbox::path_bbox(p),
                     Value::Pen(p) => {
                         let mut bb = bbox::BoundingBox::EMPTY;
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
-                                // Include the four cardinal pen offsets
                                 for pt in [
                                     t.apply_to_point(Point::new(1.0, 0.0)),
                                     t.apply_to_point(Point::new(-1.0, 0.0)),
@@ -246,9 +248,9 @@ impl Interpreter {
                             ErrorKind::TypeError,
                             format!(
                                 "corner operators require a picture or path, got {}",
-                                self.cur_expr.exp.ty()
+                                input.ty()
                             ),
-                        ));
+                        ))
                     }
                 };
                 let (px, py) = match op {
@@ -258,14 +260,11 @@ impl Interpreter {
                     UnaryOp::URCorner => (bb.max_x, bb.max_y),
                     _ => (bb.max_x, bb.max_y),
                 };
-                self.cur_expr.exp = Value::Pair(px, py);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(px, py), Type::PairType))
             }
-            _ => {
-                // Unimplemented unary — leave cur_exp unchanged
-            }
+            // Part-extraction ops are handled in do_unary before calling this.
+            _ => Ok((input.clone(), input.ty())),
         }
-        Ok(())
     }
 
     /// Execute an "X of Y" binary operator.
@@ -515,8 +514,8 @@ impl Interpreter {
     /// is not fully known), the extracted component's dependency is
     /// propagated to `cur_dep` / `last_lhs_binding` so that it can
     /// participate in linear equation solving (e.g. `xpart A = 0`).
-    fn extract_part(&mut self, part: usize) -> InterpResult<()> {
-        match &self.cur_expr.exp {
+    fn extract_part(&mut self, input: &Value, part: usize) -> InterpResult<()> {
+        match input {
             Value::Pair(x, y) => {
                 let v = match part {
                     0 => *x,
@@ -573,16 +572,16 @@ impl Interpreter {
             _ => {
                 return Err(InterpreterError::new(
                     ErrorKind::TypeError,
-                    format!("{} has no xpart/ypart", self.cur_expr.exp.ty()),
+                    format!("{} has no xpart/ypart", input.ty()),
                 ));
             }
         }
         Ok(())
     }
 
-    /// Extract a color part.
-    fn extract_color_part(&mut self, part: usize) -> InterpResult<()> {
-        if let Value::Color(c) = &self.cur_expr.exp {
+    /// Extract a color part, returning `(Value::Numeric, Type::Known)`.
+    fn extract_color_part(val: &Value, part: usize) -> InterpResult<(Value, Type)> {
+        if let Value::Color(c) = val {
             let v = match part {
                 0 => c.r,
                 1 => c.g,
@@ -594,13 +593,11 @@ impl Interpreter {
                     ))
                 }
             };
-            self.cur_expr.exp = Value::Numeric(v);
-            self.cur_expr.ty = Type::Known;
-            Ok(())
+            Ok((Value::Numeric(v), Type::Known))
         } else {
             Err(InterpreterError::new(
                 ErrorKind::TypeError,
-                format!("{} has no color parts", self.cur_expr.exp.ty()),
+                format!("{} has no color parts", val.ty()),
             ))
         }
     }

@@ -129,7 +129,11 @@ impl Interpreter {
                 };
                 self.get_x_next();
                 self.scan_primary()?;
-                self.do_unary(op)?;
+                // Take the operand, but preserve pair_dep for part-extraction
+                // ops that propagate it into the equation solver.
+                let operand_result = self.take_cur_result();
+                self.cur_expr.pair_dep = operand_result.pair_dep;
+                self.do_unary(op, operand_result.exp)?;
                 // Part-extraction ops (xpart, ypart, etc.) set up cur_dep
                 // themselves for equation solving; don't clear it for those.
                 // For all other unary ops the result is a known scalar,
