@@ -32,7 +32,7 @@ enum PendingJoin {
 impl Interpreter {
     /// Parse a path expression starting from the current point/expression.
     pub(super) fn scan_path_construction(&mut self) -> InterpResult<()> {
-        let first_expr = self.take_cur_exp();
+        let first_expr = self.take_cur_result().exp;
         let (mut knots, mut is_cyclic) = match first_expr {
             Value::Pair(x, y) => (vec![Knot::new(Point::new(x, y))], false),
             Value::Path(p) => (p.knots, p.is_cyclic),
@@ -127,7 +127,7 @@ impl Interpreter {
 
             // Parse the next point
             self.scan_tertiary()?;
-            let point_val = self.take_cur_exp();
+            let point_val = self.take_cur_result().exp;
 
             // `&` can concatenate paths.
             if join_type == u16::MAX {
@@ -210,7 +210,7 @@ impl Interpreter {
                     self.get_x_next();
                 }
                 self.scan_tertiary()?;
-                let t1 = value_to_scalar(&self.take_cur_exp())?;
+                let t1 = value_to_scalar(&self.take_cur_result().exp)?;
                 let t1 = if at_least { -t1.abs() } else { t1 };
 
                 let t2 = if self.cur.command == Command::And {
@@ -220,11 +220,11 @@ impl Interpreter {
                         self.get_x_next();
                     }
                     self.scan_tertiary()?;
-                    let t = value_to_scalar(&self.take_cur_exp())?;
+                    let t_val = value_to_scalar(&self.take_cur_result().exp)?;
                     if at_least2 {
-                        -t.abs()
+                        -t_val.abs()
                     } else {
-                        t
+                        t_val
                     }
                 } else {
                     t1
@@ -248,13 +248,13 @@ impl Interpreter {
             Command::Controls => {
                 self.get_x_next();
                 self.scan_primary()?;
-                let cp1 = self.take_cur_exp();
+                let cp1 = self.take_cur_result().exp;
                 let (x1, y1) = value_to_pair(&cp1)?;
 
                 let (x2, y2) = if self.cur.command == Command::And {
                     self.get_x_next();
                     self.scan_primary()?;
-                    let cp2 = self.take_cur_exp();
+                    let cp2 = self.take_cur_result().exp;
                     value_to_pair(&cp2)?
                 } else {
                     (x1, y1)
@@ -318,7 +318,7 @@ impl Interpreter {
             // {<expression>} — direction as pair, or numeric angle in degrees
             // (converted to internal radians).
             self.scan_expression()?;
-            let dir = self.take_cur_exp();
+            let dir = self.take_cur_result().exp;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {
