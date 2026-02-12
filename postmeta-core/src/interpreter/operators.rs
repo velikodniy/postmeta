@@ -393,35 +393,51 @@ impl Interpreter {
             }
             SecondaryBinaryOp::Scaled => {
                 let factor = value_to_scalar(right)?;
-                self.apply_transform(left, &transform::scaled(factor))?;
+                let (v, ty) = Self::apply_transform(left, &transform::scaled(factor))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::Shifted => {
                 let (dx, dy) = value_to_pair(right)?;
-                self.apply_transform(left, &transform::shifted(dx, dy))?;
+                let (v, ty) = Self::apply_transform(left, &transform::shifted(dx, dy))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::Rotated => {
                 let angle = value_to_scalar(right)?;
-                self.apply_transform(left, &transform::rotated(angle))?;
+                let (v, ty) = Self::apply_transform(left, &transform::rotated(angle))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::XScaled => {
                 let factor = value_to_scalar(right)?;
-                self.apply_transform(left, &transform::xscaled(factor))?;
+                let (v, ty) = Self::apply_transform(left, &transform::xscaled(factor))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::YScaled => {
                 let factor = value_to_scalar(right)?;
-                self.apply_transform(left, &transform::yscaled(factor))?;
+                let (v, ty) = Self::apply_transform(left, &transform::yscaled(factor))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::Slanted => {
                 let factor = value_to_scalar(right)?;
-                self.apply_transform(left, &transform::slanted(factor))?;
+                let (v, ty) = Self::apply_transform(left, &transform::slanted(factor))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::ZScaled => {
                 let (a, b) = value_to_pair(right)?;
-                self.apply_transform(left, &transform::zscaled(a, b))?;
+                let (v, ty) = Self::apply_transform(left, &transform::zscaled(a, b))?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::Transformed => {
                 let t = value_to_transform(right)?;
-                self.apply_transform(left, &t)?;
+                let (v, ty) = Self::apply_transform(left, &t)?;
+                self.cur_expr.exp = v;
+                self.cur_expr.ty = ty;
             }
             SecondaryBinaryOp::DotProd => {
                 let (ax, ay) = value_to_pair(left)?;
@@ -457,52 +473,34 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Apply a transform to a value and set `cur_exp`.
-    fn apply_transform(&mut self, val: &Value, t: &Transform) -> InterpResult<()> {
+    /// Apply a transform to a value, returning the transformed `(Value, Type)`.
+    fn apply_transform(val: &Value, t: &Transform) -> InterpResult<(Value, Type)> {
         match val {
             Value::Pair(x, y) => {
                 let pt = Point::new(*x, *y).transformed(t);
-                self.cur_expr.exp = Value::Pair(pt.x, pt.y);
-                self.cur_expr.ty = Type::PairType;
+                Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
-            Value::Path(p) => {
-                self.cur_expr.exp = Value::Path(p.transformed(t));
-                self.cur_expr.ty = Type::Path;
-            }
-            Value::Pen(p) => {
-                self.cur_expr.exp = Value::Pen(p.transformed(t));
-                self.cur_expr.ty = Type::Pen;
-            }
-            Value::Picture(p) => {
-                self.cur_expr.exp = Value::Picture(p.transformed(t));
-                self.cur_expr.ty = Type::Picture;
-            }
-            Value::Transform(existing) => {
-                self.cur_expr.exp = Value::Transform(existing.transformed(t));
-                self.cur_expr.ty = Type::TransformType;
-            }
-            _ => {
-                // For unknown/numeric values (e.g., in equation context), leave unchanged
-                self.report_error(
-                    ErrorKind::TypeError,
-                    format!("Cannot transform {}", val.ty()),
-                );
-            }
+            Value::Path(p) => Ok((Value::Path(p.transformed(t)), Type::Path)),
+            Value::Pen(p) => Ok((Value::Pen(p.transformed(t)), Type::Pen)),
+            Value::Picture(p) => Ok((Value::Picture(p.transformed(t)), Type::Picture)),
+            Value::Transform(existing) => Ok((
+                Value::Transform(existing.transformed(t)),
+                Type::TransformType,
+            )),
+            _ => Err(InterpreterError::new(
+                ErrorKind::TypeError,
+                format!("Cannot transform {}", val.ty()),
+            )),
         }
-        Ok(())
     }
 
     /// Execute plus or minus on two operands.
     pub(super) fn do_plus_minus(
-        &mut self,
         op: PlusMinusOp,
         left: &Value,
         right: &Value,
-    ) -> InterpResult<()> {
-        let (value, ty) = plus_minus_value(op, left, right)?;
-        self.cur_expr.exp = value;
-        self.cur_expr.ty = ty;
-        Ok(())
+    ) -> InterpResult<(Value, Type)> {
+        plus_minus_value(op, left, right)
     }
 
     /// Perform implicit multiplication (e.g., `3x`, `2bp`, `.5(1,2)`).

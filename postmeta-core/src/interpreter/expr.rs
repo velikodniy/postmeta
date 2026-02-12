@@ -1097,7 +1097,9 @@ impl Interpreter {
                     };
                     let right = right_result.exp;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_plus_minus(op, &left, &right)?;
+                    let (val, ty) = Self::do_plus_minus(op, &left, &right)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     let factor = if op == PlusMinusOp::Plus {
                         1.0
                     } else {
