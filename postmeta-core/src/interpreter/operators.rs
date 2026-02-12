@@ -366,7 +366,8 @@ impl Interpreter {
     ) -> InterpResult<(Value, Type)> {
         match op {
             SecondaryBinaryOp::Times => {
-                // Scalar * scalar, or scalar * pair, or pair * scalar
+                // Scalar * scalar, scalar * pair, pair * scalar,
+                // scalar * color, color * scalar.
                 match (left, right) {
                     (Value::Numeric(a), Value::Numeric(b)) => {
                         Ok((Value::Numeric(a * b), Type::Known))
@@ -377,6 +378,14 @@ impl Interpreter {
                     (Value::Pair(ax, ay), Value::Numeric(b)) => {
                         Ok((Value::Pair(ax * b, ay * b), Type::PairType))
                     }
+                    (Value::Numeric(a), Value::Color(c)) => Ok((
+                        Value::Color(Color::new(a * c.r, a * c.g, a * c.b)),
+                        Type::ColorType,
+                    )),
+                    (Value::Color(c), Value::Numeric(a)) => Ok((
+                        Value::Color(Color::new(c.r * a, c.g * a, c.b * a)),
+                        Type::ColorType,
+                    )),
                     _ => Err(InterpreterError::new(
                         ErrorKind::TypeError,
                         "Invalid types for *",
