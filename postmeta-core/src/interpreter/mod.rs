@@ -960,6 +960,80 @@ mod tests {
     }
 
     #[test]
+    fn nested_forever_loops_keep_outer_replay_state() {
+        // Regression: nested `forever` loops used a single pending body slot,
+        // so an inner loop could clobber outer replay state.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric nouter; nouter := 0;\n",
+                "forever:\n",
+                "  nouter := nouter + 1;\n",
+                "  forever: exitif true; endfor;\n",
+                "  exitif nouter > 2;\n",
+                "endfor;\n",
+                "show nouter;\n",
+            ))
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains('3')),
+            "expected outer=3 in infos: {infos:?}"
+        );
+    }
+
+    #[test]
+    fn nested_forever_exitif_equals_is_comparison() {
+        // Regression: `exitif i = 2` inside expansion context must be parsed
+        // as a boolean comparison, not statement equation semantics.
+        let mut interp = Interpreter::new();
+        interp
+            .run(concat!(
+                "numeric nouter, i;\n",
+                "nouter := 0;\n",
+                "forever:\n",
+                "  nouter := nouter + 1;\n",
+                "  i := 0;\n",
+                "  forever: i := i + 1; exitif i = 2; endfor;\n",
+                "  exitif nouter = 2;\n",
+                "endfor;\n",
+                "show nouter; show i;\n",
+            ))
+            .unwrap();
+
+        let errors: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Error)
+            .collect();
+        assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.clone())
+            .collect();
+        assert!(
+            infos.iter().any(|m| m.contains('2')),
+            "expected show outputs containing 2, got infos: {infos:?}"
+        );
+    }
+
+    #[test]
     fn eval_xpart_ypart_pair() {
         let mut interp = Interpreter::new();
         interp.run("show xpart (3, 7);").unwrap();

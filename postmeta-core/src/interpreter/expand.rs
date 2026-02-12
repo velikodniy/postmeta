@@ -33,22 +33,27 @@ pub(super) enum IfState {
 ///
 /// Extracted from `Interpreter` to reduce the top-level field count.
 /// Only accessed by the expansion code in this module.
+#[derive(Debug, Clone)]
+pub(super) struct ForeverLoopFrame {
+    /// Loop body tokens replayed by `RepeatLoop`.
+    pub body: TokenList,
+    /// Set by `exitif` to stop replaying this frame.
+    pub exit_requested: bool,
+}
+
 #[derive(Debug)]
 pub(super) struct ControlFlow {
     /// If-stack depth tracking for nested conditionals.
     pub if_stack: Vec<IfState>,
-    /// Flag set by `exitif` to signal that the current loop should terminate.
-    pub loop_exit: bool,
-    /// Pending loop body for `forever` loops (re-pushed on each `RepeatLoop` sentinel).
-    pub pending_loop_body: Option<TokenList>,
+    /// Active `forever` loop frames (outer -> inner).
+    pub forever_stack: Vec<ForeverLoopFrame>,
 }
 
 impl ControlFlow {
     pub const fn new() -> Self {
         Self {
             if_stack: Vec::new(),
-            loop_exit: false,
-            pending_loop_body: None,
+            forever_stack: Vec::new(),
         }
     }
 }
@@ -140,6 +145,7 @@ impl Interpreter {
     fn expand_if(&mut self) {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
+        self.lhs_tracking.equals_means_equation = false;
         let condition = if self.scan_expression().is_ok() {
             match &self.cur_expr.exp {
                 Value::Boolean(b) => *b,
@@ -367,8 +373,12 @@ impl Interpreter {
         // Scan the loop body
         let body = self.scan_loop_body();
 
-        // Store the body in the interpreter for re-pushing on RepeatLoop
-        self.control_flow.pending_loop_body = Some(body.clone());
+        // Push a new forever-loop frame. Nested forever loops are handled
+        // by stack discipline, so each loop replays its own body.
+        self.control_flow.forever_stack.push(ForeverLoopFrame {
+            body: body.clone(),
+            exit_requested: false,
+        });
 
         // Push the first iteration with a RepeatLoop sentinel at the end
         let mut iteration = body;
@@ -394,24 +404,21 @@ impl Interpreter {
     ///
     /// Re-pushes the loop body for the next iteration, or stops if `exitif` fired.
     fn expand_repeat_loop(&mut self) {
-        if self.control_flow.loop_exit {
-            // Exit was requested — consume the sentinel and stop looping
-            self.control_flow.pending_loop_body = None;
-            self.control_flow.loop_exit = false;
-            self.get_next();
-            self.expand_current();
-            return;
-        }
+        if let Some(frame) = self.control_flow.forever_stack.last_mut() {
+            if frame.exit_requested {
+                // Exit was requested for this loop.
+                self.control_flow.forever_stack.pop();
+                self.get_next();
+                self.expand_current();
+                return;
+            }
 
-        // Re-push the body for the next iteration
-        if let Some(ref body) = self.control_flow.pending_loop_body.clone() {
+            // Re-push the body for the next iteration.
             let repeat_sym = self.symbols.lookup("__repeat_loop__");
-            let mut iteration = body.clone();
+            let mut iteration = frame.body.clone();
             iteration.push(StoredToken::Symbol(repeat_sym));
             self.input
                 .push_token_list(iteration, Vec::new(), "forever-body".into());
-        } else {
-            self.control_flow.pending_loop_body = None;
         }
 
         self.get_next();
@@ -653,6 +660,7 @@ impl Interpreter {
     /// On return, `self.cur` is the first non-expandable token after `exitif`.
     fn expand_exitif(&mut self) {
         self.get_x_next(); // skip `exitif`
+        self.lhs_tracking.equals_means_equation = false;
         let should_exit = if self.scan_expression().is_ok() {
             match &self.cur_expr.exp {
                 Value::Boolean(b) => *b,
@@ -670,8 +678,8 @@ impl Interpreter {
         // any RepeatLoop sentinel encountered during expand_current
         // will see the exit request.
         if should_exit {
-            if self.control_flow.pending_loop_body.is_some() {
-                self.control_flow.loop_exit = true;
+            if let Some(frame) = self.control_flow.forever_stack.last_mut() {
+                frame.exit_requested = true;
             } else {
                 self.report_error(ErrorKind::BadExitIf, "No loop is in progress");
             }
