@@ -16,12 +16,13 @@ use super::{Interpreter, LhsBinding};
 impl Interpreter {
     /// Substitute all known and dependent variables in `dep` until only
     /// independent variables (or a constant) remain.
-    fn reduce_dep_with_knowns(&self, dep: DepList) -> DepList {
+    fn reduce_dep_with_knowns(&mut self, dep: DepList) -> DepList {
+        const MAX_REDUCTION_PASSES: usize = 1024;
         let mut reduced = dep;
 
         // Repeat because substituting one dependent variable may introduce
         // another known/dependent variable into the dep list.
-        loop {
+        for _ in 0..MAX_REDUCTION_PASSES {
             let mut changed = false;
 
             for term in &reduced.clone() {
@@ -40,11 +41,31 @@ impl Interpreter {
             }
 
             if !changed {
-                break;
+                return reduced;
             }
         }
 
+        self.report_error(
+            ErrorKind::Internal,
+            "Dependency reduction exceeded iteration limit; possible cycle in equation dependencies",
+        );
+
         reduced
+    }
+
+    fn apply_solve_result(&mut self, result: SolveResult, inconsistent_context: &str) {
+        match result {
+            SolveResult::Solved { var_id, dep } => {
+                self.variables.apply_linear_solution(var_id, &dep);
+            }
+            SolveResult::Redundant => {}
+            SolveResult::Inconsistent(v) => {
+                self.report_error(
+                    ErrorKind::InconsistentEquation,
+                    format!("{inconsistent_context}: {v}"),
+                );
+            }
+        }
     }
 
     /// Execute an equation: `lhs = rhs`.
@@ -65,32 +86,16 @@ impl Interpreter {
 
         if let (Some((lx, ly)), Some((rx, ry))) = (lhs_pair_dep, rhs_pair_dep) {
             let eqx = self.reduce_dep_with_knowns(dep_add_scaled(&lx, &rx, -1.0));
-            match solve_equation(&eqx) {
-                SolveResult::Solved { var_id, dep } => {
-                    self.variables.apply_linear_solution(var_id, &dep);
-                }
-                SolveResult::Redundant => {}
-                SolveResult::Inconsistent(v) => {
-                    self.report_error(
-                        ErrorKind::InconsistentEquation,
-                        format!("Inconsistent pair equation residual (x): {v}"),
-                    );
-                }
-            }
+            self.apply_solve_result(
+                solve_equation(&eqx),
+                "Inconsistent pair equation residual (x)",
+            );
 
             let eqy = self.reduce_dep_with_knowns(dep_add_scaled(&ly, &ry, -1.0));
-            match solve_equation(&eqy) {
-                SolveResult::Solved { var_id, dep } => {
-                    self.variables.apply_linear_solution(var_id, &dep);
-                }
-                SolveResult::Redundant => {}
-                SolveResult::Inconsistent(v) => {
-                    self.report_error(
-                        ErrorKind::InconsistentEquation,
-                        format!("Inconsistent pair equation residual (y): {v}"),
-                    );
-                }
-            }
+            self.apply_solve_result(
+                solve_equation(&eqy),
+                "Inconsistent pair equation residual (y)",
+            );
             return Ok(());
         }
 
@@ -104,20 +109,11 @@ impl Interpreter {
             }
 
             let equation_dep = self.reduce_dep_with_knowns(dep_add_scaled(ld, rd, -1.0));
-            match solve_equation(&equation_dep) {
-                SolveResult::Solved { var_id, dep } => {
-                    self.variables.apply_linear_solution(var_id, &dep);
-                    return Ok(());
-                }
-                SolveResult::Redundant => return Ok(()),
-                SolveResult::Inconsistent(v) => {
-                    self.report_error(
-                        ErrorKind::InconsistentEquation,
-                        format!("Inconsistent equation residual: {v}"),
-                    );
-                    return Ok(());
-                }
-            }
+            self.apply_solve_result(
+                solve_equation(&equation_dep),
+                "Inconsistent equation residual",
+            );
+            return Ok(());
         }
 
         if lhs_binding.is_some() {

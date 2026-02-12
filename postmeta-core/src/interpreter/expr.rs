@@ -219,149 +219,7 @@ impl Interpreter {
                 Ok(())
             }
 
-            Command::TagToken => {
-                // Variable reference — scan suffix parts to form compound name.
-                //
-                // MetaPost variable names are structured: `laboff.lft`, `z.r`,
-                // etc.  The scanner drops `.` separators, so suffixes appear as
-                // consecutive tokens.
-                //
-                // The suffix loop accepts only tokens with command codes in the
-                // range [`InternalQuantity`..`NumericToken`] (42..44 in mp.web).
-                // This is how `vardef` macros like `lft` can appear as suffixes:
-                // vardefs keep `TagToken` (43) as their command code, unlike
-                // regular `def` macros which use `DefinedMacro` (13).
-                //
-                // After suffix collection, if the result is a standalone root
-                // that has a vardef in `self.macros`, we trigger macro expansion
-                // instead of variable lookup.
-                let root_sym = self.cur.sym;
-                let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
-                {
-                    s.clone()
-                } else {
-                    String::new()
-                };
-
-                let mut has_suffixes = false;
-                let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
-
-                // Check early if this is a standalone vardef macro.
-                let is_root_vardef =
-                    root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
-
-                // Advance to next token. We use `get_x_next` (expanding) as
-                // mp.web does — since vardefs keep `TagToken`, they won't be
-                // expanded by `get_x_next`.
-                self.get_x_next();
-
-                // Suffix loop: collect symbolic suffixes, numeric subscripts,
-                // and bracketed subscript expressions `[expr]`.
-                //
-                // For vardef roots, do NOT collect suffix tokens here; following
-                // tokens belong to undelimited macro arguments (e.g. `foo p`).
-                loop {
-                    if !is_root_vardef
-                        && (self.cur.command == Command::TagToken
-                            || self.cur.command == Command::InternalQuantity)
-                    {
-                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                            if let Some(sym) = self.cur.sym {
-                                suffix_segs.push(SuffixSegment::Attr(sym));
-                            }
-                            name.push('.');
-                            name.push_str(s);
-                        }
-                        has_suffixes = true;
-                        self.get_x_next();
-                    } else if !is_root_vardef && self.cur.command == Command::NumericToken {
-                        // Bare numeric subscript: pen_3
-                        if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
-                            let _ = write!(name, "[{}]", v as i64);
-                            suffix_segs.push(SuffixSegment::Subscript);
-                        }
-                        has_suffixes = true;
-                        self.get_x_next();
-                    } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
-                        // Speculatively scan for a bracketed subscript: var[expr].
-                        // If the expression is followed by `]`, this is a subscript.
-                        // Otherwise (e.g. `,` in `lambda[A,B]`), back up and let
-                        // the mediation handler deal with it (mp.web §1489-1506).
-                        self.get_x_next(); // skip `[`
-                        self.scan_expression()?;
-                        if self.cur.command == Command::RightBracket {
-                            // Subscript: var[expr]
-                            let subscript = match &self.cur_expr.exp {
-                                Value::Numeric(v) => *v as i64,
-                                _ => 0,
-                            };
-                            let _ = write!(name, "[{subscript}]");
-                            suffix_segs.push(SuffixSegment::Subscript);
-                            self.get_x_next();
-                            has_suffixes = true;
-                        } else {
-                            // Not a subscript — put the expression and
-                            // the current token back, then restore `[`
-                            // as the current command so the mediation
-                            // check after variable resolution can see it
-                            // (mp.web §1498-1506).
-                            //
-                            // Build a token list [capsule(expr), cur_tok]
-                            // so they are re-read in the right order.
-                            use crate::input::StoredToken;
-                            let ty = self.cur_expr.ty;
-                            let dep = self.take_cur_dep();
-                            let pair_dep = self.take_cur_pair_dep();
-                            let val = self.take_cur_exp();
-                            let mut tl = vec![StoredToken::Capsule(val, ty, dep, pair_dep)];
-                            self.store_current_token(&mut tl);
-                            self.input.push_token_list(
-                                tl,
-                                Vec::new(),
-                                "mediation backtrack".into(),
-                            );
-                            self.cur.command = Command::LeftBracket;
-                            break;
-                        }
-                    } else {
-                        break;
-                    }
-                }
-
-                // Check if this is a vardef macro call (standalone root or
-                // root with only symbolic suffixes that don't have a variable
-                // entry, and the symbol has a vardef entry in the macro table).
-                let is_vardef_call = !has_suffixes && is_root_vardef;
-
-                if is_vardef_call {
-                    // Trigger vardef macro expansion.
-                    // `self.cur` is the token AFTER the macro name (e.g. `(`
-                    // or `;`).  We push it as a token-list level so that
-                    // `expand_defined_macro` can read it with `get_next`.
-                    // Using back_input() would put it in the priority slot,
-                    // which is read BEFORE any token-list level — including
-                    // the body that expand_defined_macro is about to push.
-                    {
-                        let mut trailing = crate::input::TokenList::new();
-                        self.store_current_token(&mut trailing);
-                        if !trailing.is_empty() {
-                            self.input.push_token_list(
-                                trailing,
-                                Vec::new(),
-                                "vardef trailing".into(),
-                            );
-                        }
-                    }
-                    self.cur.command = Command::DefinedMacro;
-                    self.cur.sym = root_sym;
-                    self.expand_defined_macro();
-                    // After expansion, re-enter scan_primary to parse the
-                    // expanded result (mp.web's `goto restart`).
-                    return self.scan_primary();
-                }
-
-                self.resolve_variable(root_sym, &name, &suffix_segs)
-            }
+            Command::TagToken => self.scan_tag_token(),
 
             Command::InternalQuantity => {
                 let idx = self.cur.modifier;
@@ -647,6 +505,138 @@ impl Interpreter {
         }
 
         Ok(())
+    }
+
+    fn scan_tag_token(&mut self) -> InterpResult<()> {
+        // Variable reference — scan suffix parts to form compound name.
+        //
+        // MetaPost variable names are structured: `laboff.lft`, `z.r`,
+        // etc. The scanner drops `.` separators, so suffixes appear as
+        // consecutive tokens.
+        //
+        // The suffix loop accepts only tokens with command codes in the
+        // range [`InternalQuantity`..`NumericToken`] (42..44 in mp.web).
+        // This is how `vardef` macros like `lft` can appear as suffixes:
+        // vardefs keep `TagToken` (43) as their command code, unlike
+        // regular `def` macros which use `DefinedMacro` (13).
+        //
+        // After suffix collection, if the result is a standalone root
+        // that has a vardef in `self.macros`, we trigger macro expansion
+        // instead of variable lookup.
+        let root_sym = self.cur.sym;
+        let mut name = self
+            .cur_symbolic_name()
+            .map_or_else(String::new, std::borrow::ToOwned::to_owned);
+
+        let mut has_suffixes = false;
+        let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
+
+        // Check early if this is a standalone vardef macro.
+        let is_root_vardef = root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
+
+        // Advance to next token. We use `get_x_next` (expanding) as
+        // mp.web does — since vardefs keep `TagToken`, they won't be
+        // expanded by `get_x_next`.
+        self.get_x_next();
+
+        // Suffix loop: collect symbolic suffixes, numeric subscripts,
+        // and bracketed subscript expressions `[expr]`.
+        //
+        // For vardef roots, do NOT collect suffix tokens here; following
+        // tokens belong to undelimited macro arguments (e.g. `foo p`).
+        loop {
+            if !is_root_vardef
+                && (self.cur.command == Command::TagToken
+                    || self.cur.command == Command::InternalQuantity)
+            {
+                if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                    if let Some(sym) = self.cur.sym {
+                        suffix_segs.push(SuffixSegment::Attr(sym));
+                    }
+                    name.push('.');
+                    name.push_str(s);
+                }
+                has_suffixes = true;
+                self.get_x_next();
+            } else if !is_root_vardef && self.cur.command == Command::NumericToken {
+                // Bare numeric subscript: pen_3
+                if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
+                    let _ = write!(name, "[{}]", v as i64);
+                    suffix_segs.push(SuffixSegment::Subscript);
+                }
+                has_suffixes = true;
+                self.get_x_next();
+            } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
+                // Speculatively scan for a bracketed subscript: var[expr].
+                // If the expression is followed by `]`, this is a subscript.
+                // Otherwise (e.g. `,` in `lambda[A,B]`), back up and let
+                // the mediation handler deal with it (mp.web §1489-1506).
+                self.get_x_next(); // skip `[`
+                self.scan_expression()?;
+                if self.cur.command == Command::RightBracket {
+                    // Subscript: var[expr]
+                    let subscript = match &self.cur_expr.exp {
+                        Value::Numeric(v) => *v as i64,
+                        _ => 0,
+                    };
+                    let _ = write!(name, "[{subscript}]");
+                    suffix_segs.push(SuffixSegment::Subscript);
+                    self.get_x_next();
+                    has_suffixes = true;
+                } else {
+                    // Not a subscript — put the expression and
+                    // the current token back, then restore `[`
+                    // as the current command so the mediation
+                    // check after variable resolution can see it
+                    // (mp.web §1498-1506).
+                    //
+                    // Build a token list [capsule(expr), cur_tok]
+                    // so they are re-read in the right order.
+                    use crate::input::StoredToken;
+                    let ty = self.cur_expr.ty;
+                    let dep = self.take_cur_dep();
+                    let pair_dep = self.take_cur_pair_dep();
+                    let val = self.take_cur_exp();
+                    let mut tl = vec![StoredToken::Capsule(val, ty, dep, pair_dep)];
+                    self.store_current_token(&mut tl);
+                    self.input
+                        .push_token_list(tl, Vec::new(), "mediation backtrack".into());
+                    self.cur.command = Command::LeftBracket;
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Check if this is a vardef macro call (standalone root or
+        // root with only symbolic suffixes that don't have a variable
+        // entry, and the symbol has a vardef entry in the macro table).
+        let is_vardef_call = !has_suffixes && is_root_vardef;
+
+        if is_vardef_call {
+            // Trigger vardef macro expansion.
+            // `self.cur` is the token AFTER the macro name (e.g. `(`
+            // or `;`). We push it as a token-list level so that
+            // `expand_defined_macro` can read it with `get_next`.
+            // Using back_input() would put it in the priority slot,
+            // which is read BEFORE any token-list level — including
+            // the body that expand_defined_macro is about to push.
+            let mut trailing = crate::input::TokenList::new();
+            self.store_current_token(&mut trailing);
+            if !trailing.is_empty() {
+                self.input
+                    .push_token_list(trailing, Vec::new(), "vardef trailing".into());
+            }
+            self.cur.command = Command::DefinedMacro;
+            self.cur.sym = root_sym;
+            self.expand_defined_macro();
+            // After expansion, re-enter scan_primary to parse the
+            // expanded result (mp.web's `goto restart`).
+            return self.scan_primary();
+        }
+
+        self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
     /// Parse and evaluate a secondary expression.

@@ -378,6 +378,69 @@ impl Interpreter {
         }
     }
 
+    fn cur_symbolic_name(&self) -> Option<&str> {
+        if let crate::token::TokenKind::Symbolic(name) = &self.cur.token.kind {
+            Some(name)
+        } else {
+            None
+        }
+    }
+
+    fn alloc_pair_value(&mut self, name: &str) -> VarValue {
+        let x = self.variables.alloc();
+        let y = self.variables.alloc();
+        self.variables
+            .set(x, VarValue::NumericVar(NumericState::Numeric));
+        self.variables
+            .set(y, VarValue::NumericVar(NumericState::Numeric));
+        self.variables.register_name(&format!("{name}.x"), x);
+        self.variables.register_name(&format!("{name}.y"), y);
+        VarValue::Pair { x, y }
+    }
+
+    fn alloc_color_value(&mut self, name: &str) -> VarValue {
+        let r = self.variables.alloc();
+        let g = self.variables.alloc();
+        let b = self.variables.alloc();
+        self.variables
+            .set(r, VarValue::NumericVar(NumericState::Numeric));
+        self.variables
+            .set(g, VarValue::NumericVar(NumericState::Numeric));
+        self.variables
+            .set(b, VarValue::NumericVar(NumericState::Numeric));
+        self.variables.register_name(&format!("{name}.r"), r);
+        self.variables.register_name(&format!("{name}.g"), g);
+        self.variables.register_name(&format!("{name}.b"), b);
+        VarValue::Color { r, g, b }
+    }
+
+    fn alloc_transform_value(&mut self, name: &str) -> VarValue {
+        let tx = self.variables.alloc();
+        let ty = self.variables.alloc();
+        let txx = self.variables.alloc();
+        let txy = self.variables.alloc();
+        let tyx = self.variables.alloc();
+        let tyy = self.variables.alloc();
+        for id in [tx, ty, txx, txy, tyx, tyy] {
+            self.variables
+                .set(id, VarValue::NumericVar(NumericState::Numeric));
+        }
+        self.variables.register_name(&format!("{name}.tx"), tx);
+        self.variables.register_name(&format!("{name}.ty"), ty);
+        self.variables.register_name(&format!("{name}.txx"), txx);
+        self.variables.register_name(&format!("{name}.txy"), txy);
+        self.variables.register_name(&format!("{name}.tyx"), tyx);
+        self.variables.register_name(&format!("{name}.tyy"), tyy);
+        VarValue::Transform {
+            tx,
+            ty,
+            txx,
+            txy,
+            tyx,
+            tyy,
+        }
+    }
+
     /// Negate the current expression (unary minus).
     fn negate_cur_exp(&mut self) {
         fn negate_binding(binding: &LhsBinding) -> Option<LhsBinding> {
@@ -473,62 +536,9 @@ impl Interpreter {
             Type::Path => VarValue::Known(Value::Path(Path::default())),
             Type::Pen => VarValue::Known(Value::Pen(Pen::circle(0.0))),
             Type::Picture => VarValue::Known(Value::Picture(Picture::default())),
-            Type::PairType => {
-                let x_id = self.variables.alloc();
-                let y_id = self.variables.alloc();
-                self.variables
-                    .set(x_id, VarValue::NumericVar(NumericState::Numeric));
-                self.variables
-                    .set(y_id, VarValue::NumericVar(NumericState::Numeric));
-                self.variables.register_name(&format!("{name}.x"), x_id);
-                self.variables.register_name(&format!("{name}.y"), y_id);
-                VarValue::Pair { x: x_id, y: y_id }
-            }
-            Type::ColorType => {
-                let r_id = self.variables.alloc();
-                let g_id = self.variables.alloc();
-                let b_id = self.variables.alloc();
-                self.variables
-                    .set(r_id, VarValue::NumericVar(NumericState::Numeric));
-                self.variables
-                    .set(g_id, VarValue::NumericVar(NumericState::Numeric));
-                self.variables
-                    .set(b_id, VarValue::NumericVar(NumericState::Numeric));
-                self.variables.register_name(&format!("{name}.r"), r_id);
-                self.variables.register_name(&format!("{name}.g"), g_id);
-                self.variables.register_name(&format!("{name}.b"), b_id);
-                VarValue::Color {
-                    r: r_id,
-                    g: g_id,
-                    b: b_id,
-                }
-            }
-            Type::TransformType => {
-                let tx = self.variables.alloc();
-                let ty = self.variables.alloc();
-                let txx = self.variables.alloc();
-                let txy = self.variables.alloc();
-                let tyx = self.variables.alloc();
-                let tyy = self.variables.alloc();
-                for id in [tx, ty, txx, txy, tyx, tyy] {
-                    self.variables
-                        .set(id, VarValue::NumericVar(NumericState::Numeric));
-                }
-                self.variables.register_name(&format!("{name}.tx"), tx);
-                self.variables.register_name(&format!("{name}.ty"), ty);
-                self.variables.register_name(&format!("{name}.txx"), txx);
-                self.variables.register_name(&format!("{name}.txy"), txy);
-                self.variables.register_name(&format!("{name}.tyx"), tyx);
-                self.variables.register_name(&format!("{name}.tyy"), tyy);
-                VarValue::Transform {
-                    tx,
-                    ty,
-                    txx,
-                    txy,
-                    tyx,
-                    tyy,
-                }
-            }
+            Type::PairType => self.alloc_pair_value(name),
+            Type::ColorType => self.alloc_color_value(name),
+            Type::TransformType => self.alloc_transform_value(name),
             _ => return,
         };
         self.variables.set(var_id, val);
@@ -3487,7 +3497,7 @@ mod tests {
     // ===================================================================
 
     // Lock down the interpreter's comparison tolerance behavior.
-    // Both values_equal and Value::PartialEq use NUMERIC_TOLERANCE (1e-4).
+    // Value::PartialEq uses NUMERIC_TOLERANCE (1e-4).
 
     #[test]
     fn equality_comparison_uses_interpreter_tolerance() {
@@ -3519,6 +3529,27 @@ mod tests {
         assert!(
             infos.is_empty(),
             "1 = 1.001 should be false, but show executed"
+        );
+    }
+
+    #[test]
+    fn undelimited_macro_arg_parse_error_does_not_reuse_stale_cur_expr() {
+        let mut interp = Interpreter::new();
+        interp
+            .run("def f primary p = show p; enddef; show 99; f;")
+            .unwrap();
+
+        let infos: Vec<_> = interp
+            .errors
+            .iter()
+            .filter(|e| e.severity == crate::error::Severity::Info)
+            .map(|e| e.message.as_str())
+            .collect();
+
+        let shows_99 = infos.iter().filter(|msg| msg.contains("99")).count();
+        assert_eq!(
+            shows_99, 1,
+            "missing undelimited arg should not reuse stale expression value"
         );
     }
 

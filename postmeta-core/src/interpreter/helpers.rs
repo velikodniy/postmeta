@@ -9,45 +9,29 @@ use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolTable;
 use crate::types::{Type, Value};
 
-pub(super) fn value_to_scalar(val: &Value) -> InterpResult<Scalar> {
-    match val {
-        Value::Numeric(v) => Ok(*v),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected numeric, got {}", val.ty()),
-        )),
-    }
+macro_rules! impl_value_extractor {
+    ($fn_name:ident, $ret:ty, $expected:literal, $pattern:pat => $result:expr) => {
+        pub(super) fn $fn_name(val: &Value) -> InterpResult<$ret> {
+            match val {
+                $pattern => Ok($result),
+                _ => Err(InterpreterError::new(
+                    ErrorKind::TypeError,
+                    format!("Expected {}, got {}", $expected, val.ty()),
+                )),
+            }
+        }
+    };
 }
 
-pub(super) fn value_to_pair(val: &Value) -> InterpResult<(Scalar, Scalar)> {
-    match val {
-        Value::Pair(x, y) => Ok((*x, *y)),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected pair, got {}", val.ty()),
-        )),
-    }
-}
-
-pub(super) fn value_to_bool(val: &Value) -> InterpResult<bool> {
-    match val {
-        Value::Boolean(b) => Ok(*b),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected boolean, got {}", val.ty()),
-        )),
-    }
-}
-
-pub(super) fn value_to_path(val: &Value) -> InterpResult<&Path> {
-    match val {
-        Value::Path(p) => Ok(p),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected path, got {}", val.ty()),
-        )),
-    }
-}
+impl_value_extractor!(value_to_scalar, Scalar, "numeric", Value::Numeric(v) => *v);
+impl_value_extractor!(
+    value_to_pair,
+    (Scalar, Scalar),
+    "pair",
+    Value::Pair(x, y) => (*x, *y)
+);
+impl_value_extractor!(value_to_bool, bool, "boolean", Value::Boolean(b) => *b);
+impl_value_extractor!(value_to_path, &Path, "path", Value::Path(p) => p);
 
 pub(super) fn value_to_path_owned(val: Value) -> InterpResult<Path> {
     match val {
@@ -59,35 +43,14 @@ pub(super) fn value_to_path_owned(val: Value) -> InterpResult<Path> {
     }
 }
 
-pub(super) fn value_to_pen(val: &Value) -> InterpResult<&Pen> {
-    match val {
-        Value::Pen(p) => Ok(p),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected pen, got {}", val.ty()),
-        )),
-    }
-}
-
-pub(super) fn value_to_string(val: &Value) -> InterpResult<String> {
-    match val {
-        Value::String(s) => Ok(s.to_string()),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected string, got {}", val.ty()),
-        )),
-    }
-}
-
-pub(super) fn value_to_transform(val: &Value) -> InterpResult<Transform> {
-    match val {
-        Value::Transform(t) => Ok(*t),
-        _ => Err(InterpreterError::new(
-            ErrorKind::TypeError,
-            format!("Expected transform, got {}", val.ty()),
-        )),
-    }
-}
+impl_value_extractor!(value_to_pen, &Pen, "pen", Value::Pen(p) => p);
+impl_value_extractor!(value_to_string, String, "string", Value::String(s) => s.to_string());
+impl_value_extractor!(
+    value_to_transform,
+    Transform,
+    "transform",
+    Value::Transform(t) => *t
+);
 
 /// Convert a runtime `Value` to a list of `StoredToken`s that reconstruct it.
 ///

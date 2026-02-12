@@ -15,7 +15,9 @@ use postmeta_graphics::types::{
     StrokeObject,
 };
 
-use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
+use crate::command::{
+    BoundsOp, Command, MacroSpecialOp, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp,
+};
 use crate::error::{ErrorKind, InterpResult};
 use crate::internals::InternalId;
 use crate::types::{DrawingState, Type, Value};
@@ -31,6 +33,12 @@ impl Interpreter {
                 var_id,
                 Value::Picture(self.picture_state.current_picture.clone()),
             );
+        }
+    }
+
+    fn eat_semicolon(&mut self) {
+        if self.cur.command == Command::Semicolon {
+            self.get_x_next();
         }
     }
 
@@ -131,7 +139,10 @@ impl Interpreter {
                 } else if self.cur.command == Command::EndGroup || self.cur.command == Command::Stop
                 {
                     // OK — endgroup or end terminates too
-                } else if self.cur.command == Command::MacroSpecial && self.cur.modifier == 0 {
+                } else if self.cur.command == Command::MacroSpecial
+                    && MacroSpecialOp::from_modifier(self.cur.modifier)
+                        == Some(MacroSpecialOp::EndDef)
+                {
                     // Allow an implicit terminator before `enddef` in macro bodies.
                     self.get_x_next();
                 } else {
@@ -157,7 +168,14 @@ impl Interpreter {
 
     /// Execute a type declaration (`numeric x, y;`).
     fn do_type_declaration(&mut self) -> InterpResult<()> {
-        let type_op = self.cur.modifier;
+        let Some(type_op) = TypeNameOp::from_modifier(self.cur.modifier) else {
+            self.report_error(
+                ErrorKind::UnexpectedToken,
+                "Invalid type declaration modifier",
+            );
+            self.get_x_next();
+            return Ok(());
+        };
         self.get_x_next();
 
         loop {
@@ -215,80 +233,16 @@ impl Interpreter {
 
                 // Set the variable to the correct type
                 let val = match type_op {
-                    x if x == TypeNameOp::Numeric as u16 => {
-                        VarValue::NumericVar(NumericState::Numeric)
-                    }
-                    x if x == TypeNameOp::Boolean as u16 => VarValue::Known(Value::Boolean(false)),
-                    x if x == TypeNameOp::String as u16 => {
-                        VarValue::Known(Value::String(Arc::from("")))
-                    }
-                    x if x == TypeNameOp::Path as u16 => {
-                        VarValue::Known(Value::Path(Path::default()))
-                    }
-                    x if x == TypeNameOp::Pen as u16 => {
-                        VarValue::Known(Value::Pen(Pen::circle(0.0)))
-                    }
-                    x if x == TypeNameOp::Picture as u16 => {
-                        VarValue::Known(Value::Picture(Picture::default()))
-                    }
-                    x if x == TypeNameOp::Pair as u16 => {
-                        let x_id = self.variables.alloc();
-                        let y_id = self.variables.alloc();
-                        self.variables
-                            .set(x_id, VarValue::NumericVar(NumericState::Numeric));
-                        self.variables
-                            .set(y_id, VarValue::NumericVar(NumericState::Numeric));
-                        // Also register named sub-parts so xpart/ypart can find them
-                        self.variables.register_name(&format!("{name}.x"), x_id);
-                        self.variables.register_name(&format!("{name}.y"), y_id);
-                        VarValue::Pair { x: x_id, y: y_id }
-                    }
-                    x if x == TypeNameOp::Color as u16 => {
-                        let r_id = self.variables.alloc();
-                        let g_id = self.variables.alloc();
-                        let b_id = self.variables.alloc();
-                        self.variables
-                            .set(r_id, VarValue::NumericVar(NumericState::Numeric));
-                        self.variables
-                            .set(g_id, VarValue::NumericVar(NumericState::Numeric));
-                        self.variables
-                            .set(b_id, VarValue::NumericVar(NumericState::Numeric));
-                        self.variables.register_name(&format!("{name}.r"), r_id);
-                        self.variables.register_name(&format!("{name}.g"), g_id);
-                        self.variables.register_name(&format!("{name}.b"), b_id);
-                        VarValue::Color {
-                            r: r_id,
-                            g: g_id,
-                            b: b_id,
-                        }
-                    }
-                    x if x == TypeNameOp::Transform as u16 => {
-                        let tx = self.variables.alloc();
-                        let ty = self.variables.alloc();
-                        let txx = self.variables.alloc();
-                        let txy = self.variables.alloc();
-                        let tyx = self.variables.alloc();
-                        let tyy = self.variables.alloc();
-                        for id in [tx, ty, txx, txy, tyx, tyy] {
-                            self.variables
-                                .set(id, VarValue::NumericVar(NumericState::Numeric));
-                        }
-                        self.variables.register_name(&format!("{name}.tx"), tx);
-                        self.variables.register_name(&format!("{name}.ty"), ty);
-                        self.variables.register_name(&format!("{name}.txx"), txx);
-                        self.variables.register_name(&format!("{name}.txy"), txy);
-                        self.variables.register_name(&format!("{name}.tyx"), tyx);
-                        self.variables.register_name(&format!("{name}.tyy"), tyy);
-                        VarValue::Transform {
-                            tx,
-                            ty,
-                            txx,
-                            txy,
-                            tyx,
-                            tyy,
-                        }
-                    }
-                    _ => VarValue::Undefined,
+                    TypeNameOp::Numeric => VarValue::NumericVar(NumericState::Numeric),
+                    TypeNameOp::Boolean => VarValue::Known(Value::Boolean(false)),
+                    TypeNameOp::String => VarValue::Known(Value::String(Arc::from(""))),
+                    TypeNameOp::Path => VarValue::Known(Value::Path(Path::default())),
+                    TypeNameOp::Pen => VarValue::Known(Value::Pen(Pen::circle(0.0))),
+                    TypeNameOp::Picture => VarValue::Known(Value::Picture(Picture::default())),
+                    TypeNameOp::Pair => self.alloc_pair_value(&name),
+                    TypeNameOp::Color => self.alloc_color_value(&name),
+                    TypeNameOp::Transform => self.alloc_transform_value(&name),
+                    TypeNameOp::Known | TypeNameOp::Unknown => VarValue::Undefined,
                 };
                 self.variables.set(var_id, val);
 
@@ -308,25 +262,23 @@ impl Interpreter {
             break;
         }
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
     /// Convert a `TypeNameOp` modifier to a `Type`.
-    const fn type_op_to_type(type_op: u16) -> Type {
+    const fn type_op_to_type(type_op: TypeNameOp) -> Type {
         match type_op {
-            x if x == TypeNameOp::Numeric as u16 => Type::Numeric,
-            x if x == TypeNameOp::Boolean as u16 => Type::Boolean,
-            x if x == TypeNameOp::String as u16 => Type::String,
-            x if x == TypeNameOp::Path as u16 => Type::Path,
-            x if x == TypeNameOp::Pen as u16 => Type::Pen,
-            x if x == TypeNameOp::Picture as u16 => Type::Picture,
-            x if x == TypeNameOp::Pair as u16 => Type::PairType,
-            x if x == TypeNameOp::Color as u16 => Type::ColorType,
-            x if x == TypeNameOp::Transform as u16 => Type::TransformType,
-            _ => Type::Undefined,
+            TypeNameOp::Numeric => Type::Numeric,
+            TypeNameOp::Boolean => Type::Boolean,
+            TypeNameOp::String => Type::String,
+            TypeNameOp::Path => Type::Path,
+            TypeNameOp::Pen => Type::Pen,
+            TypeNameOp::Picture => Type::Picture,
+            TypeNameOp::Pair => Type::PairType,
+            TypeNameOp::Color => Type::ColorType,
+            TypeNameOp::Transform => Type::TransformType,
+            TypeNameOp::Known | TypeNameOp::Unknown => Type::Undefined,
         }
     }
 
@@ -374,20 +326,18 @@ impl Interpreter {
         self.get_x_next();
 
         // Get the target picture variable name
-        let pic_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
-        } else {
-            "currentpicture".to_owned()
-        };
+        let pic_name = self
+            .cur_symbolic_name()
+            .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
         self.get_x_next();
 
         // Expect contour / doublepath / also
-        let thing = self.cur.modifier;
+        let thing = ThingToAddOp::from_modifier(self.cur.modifier);
         self.get_x_next();
 
         // Parse expressions and options first, then apply to the target picture.
         match thing {
-            x if x == ThingToAddOp::Contour as u16 => {
+            Some(ThingToAddOp::Contour) => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
                 let path = value_to_path_owned(path_val)?;
@@ -405,7 +355,7 @@ impl Interpreter {
                     },
                 );
             }
-            x if x == ThingToAddOp::DoublePath as u16 => {
+            Some(ThingToAddOp::DoublePath) => {
                 self.scan_expression()?;
                 let path_val = self.take_cur_exp();
                 let (ds, _) = self.scan_with_options()?;
@@ -446,7 +396,7 @@ impl Interpreter {
                     }
                 }
             }
-            x if x == ThingToAddOp::Also as u16 => {
+            Some(ThingToAddOp::Also) => {
                 self.scan_expression()?;
                 let pic_val = self.take_cur_exp();
                 if let Value::Picture(p) = pic_val {
@@ -464,9 +414,7 @@ impl Interpreter {
 
         self.flush_target_picture(&pic_name);
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -483,26 +431,26 @@ impl Interpreter {
         let mut pen_specified = false;
 
         while self.cur.command == Command::WithOption {
-            let opt = self.cur.modifier;
+            let opt = WithOptionOp::from_modifier(self.cur.modifier);
             self.get_x_next();
             self.scan_expression()?;
             let val = self.take_cur_exp();
 
             match opt {
-                x if x == WithOptionOp::WithPen as u16 => {
+                Some(WithOptionOp::WithPen) => {
                     if let Value::Pen(p) = val {
                         ds.pen = p;
                         pen_specified = true;
                     }
                 }
-                x if x == WithOptionOp::WithColor as u16 => {
+                Some(WithOptionOp::WithColor) => {
                     if let Value::Color(c) = val {
                         ds.color = c;
                     } else if let Value::Numeric(v) = val {
                         ds.color = Color::new(v, v, v);
                     }
                 }
-                x if x == WithOptionOp::Dashed as u16 => {
+                Some(WithOptionOp::Dashed) => {
                     if let Value::Picture(ref pic) = val {
                         ds.dash = extract_dash_pattern(pic);
                     }
@@ -516,15 +464,13 @@ impl Interpreter {
 
     /// Execute `clip`/`setbounds` statement.
     fn do_bounds(&mut self) -> InterpResult<()> {
-        let is_clip = self.cur.modifier == BoundsOp::Clip as u16;
+        let is_clip = BoundsOp::from_modifier(self.cur.modifier) == Some(BoundsOp::Clip);
         self.get_x_next();
 
         // Get picture name
-        let pic_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
-        } else {
-            "currentpicture".to_owned()
-        };
+        let pic_name = self
+            .cur_symbolic_name()
+            .map_or_else(|| "currentpicture".to_owned(), ToOwned::to_owned);
         self.get_x_next();
 
         // Expect "to"
@@ -545,9 +491,7 @@ impl Interpreter {
 
         self.flush_target_picture(&pic_name);
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -565,9 +509,7 @@ impl Interpreter {
 
         self.picture_state.pictures.push(pic);
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -588,9 +530,7 @@ impl Interpreter {
                 break;
             }
         }
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -612,9 +552,7 @@ impl Interpreter {
             }
             self.get_x_next();
         }
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -632,9 +570,7 @@ impl Interpreter {
                 self.internals.set(idx, val);
             }
         }
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -702,9 +638,7 @@ impl Interpreter {
             );
         }
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -747,9 +681,7 @@ impl Interpreter {
             break;
         }
 
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
@@ -768,15 +700,13 @@ impl Interpreter {
         if let Some(e) = self.errors.last_mut() {
             e.severity = crate::error::Severity::Info;
         }
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 
     /// Execute `message` / `errmessage` statement.
     fn do_message(&mut self) -> InterpResult<()> {
-        let is_err = self.cur.modifier == MessageOp::ErrMessage as u16;
+        let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
         self.scan_expression()?;
         let msg = match &self.cur_expr.exp {
@@ -791,9 +721,7 @@ impl Interpreter {
         self.errors.push(
             crate::error::InterpreterError::new(ErrorKind::Internal, msg).with_severity(severity),
         );
-        if self.cur.command == Command::Semicolon {
-            self.get_x_next();
-        }
+        self.eat_semicolon();
         Ok(())
     }
 

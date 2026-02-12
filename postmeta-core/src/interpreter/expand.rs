@@ -5,7 +5,7 @@
 //! (`def`/`vardef`/`primarydef`/`secondarydef`/`tertiarydef`), macro
 //! expansion, `input`, and `scantokens`.
 
-use crate::command::{Command, FiOrElseOp, IterationOp, MacroDefOp, ParamTypeOp};
+use crate::command::{Command, FiOrElseOp, IterationOp, MacroDefOp, MacroSpecialOp, ParamTypeOp};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolId;
@@ -182,13 +182,19 @@ impl Interpreter {
     ///
     /// On return, `self.cur` is the next non-expandable token.
     fn expand_fi_or_else(&mut self) {
-        let modifier = self.cur.modifier;
-        if modifier == FiOrElseOp::Fi as u16 {
+        let Some(modifier) = FiOrElseOp::from_modifier(self.cur.modifier) else {
+            self.report_error(ErrorKind::UnexpectedToken, "Invalid fi/else modifier");
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+
+        if modifier == FiOrElseOp::Fi {
             // End of conditional
             self.control_flow.if_stack.pop();
             self.get_next();
             self.expand_current();
-        } else if modifier == FiOrElseOp::Else as u16 || modifier == FiOrElseOp::ElseIf as u16 {
+        } else if modifier == FiOrElseOp::Else || modifier == FiOrElseOp::ElseIf {
             // Active branch done — skip remaining branches to `fi`.
             if let Some(state) = self.control_flow.if_stack.last_mut() {
                 *state = IfState::Done;
@@ -210,19 +216,24 @@ impl Interpreter {
                     self.get_next();
                 }
                 Command::FiOrElse if depth > 0 => {
-                    if self.cur.modifier == FiOrElseOp::Fi as u16 {
+                    if FiOrElseOp::from_modifier(self.cur.modifier) == Some(FiOrElseOp::Fi) {
                         depth -= 1;
                     }
                     self.get_next();
                 }
                 Command::FiOrElse if depth == 0 => {
-                    let modifier = self.cur.modifier;
-                    if modifier == FiOrElseOp::Fi as u16 {
+                    let Some(modifier) = FiOrElseOp::from_modifier(self.cur.modifier) else {
+                        self.report_error(ErrorKind::UnexpectedToken, "Invalid fi/else modifier");
+                        self.get_next();
+                        continue;
+                    };
+
+                    if modifier == FiOrElseOp::Fi {
                         self.control_flow.if_stack.pop();
                         self.get_next();
                         self.expand_current();
                         return;
-                    } else if modifier == FiOrElseOp::Else as u16 {
+                    } else if modifier == FiOrElseOp::Else {
                         if let Some(state) = self.control_flow.if_stack.last_mut() {
                             *state = IfState::Active;
                         }
@@ -233,7 +244,7 @@ impl Interpreter {
                         }
                         self.expand_current();
                         return;
-                    } else if modifier == FiOrElseOp::ElseIf as u16 {
+                    } else if modifier == FiOrElseOp::ElseIf {
                         self.control_flow.if_stack.pop();
                         // Process the new `elseif` as an `if`
                         self.expand_if();
@@ -263,7 +274,7 @@ impl Interpreter {
             match self.cur.command {
                 Command::IfTest => depth += 1,
                 Command::FiOrElse => {
-                    if self.cur.modifier == FiOrElseOp::Fi as u16 {
+                    if FiOrElseOp::from_modifier(self.cur.modifier) == Some(FiOrElseOp::Fi) {
                         if depth == 0 {
                             self.control_flow.if_stack.pop();
                             self.get_next();
@@ -295,14 +306,19 @@ impl Interpreter {
     ///
     /// On return, `self.cur` is the first non-expandable token after the loop.
     fn expand_iteration(&mut self) {
-        let op = self.cur.modifier;
+        let Some(op) = IterationOp::from_modifier(self.cur.modifier) else {
+            self.report_error(ErrorKind::UnexpectedToken, "Invalid iteration modifier");
+            self.get_next();
+            self.expand_current();
+            return;
+        };
 
-        if op == IterationOp::Forever as u16 {
+        if op == IterationOp::Forever {
             self.expand_forever();
             return;
         }
 
-        let is_forsuffixes = op == IterationOp::ForSuffixes as u16;
+        let is_forsuffixes = op == IterationOp::ForSuffixes;
 
         // Parse: <variable> = <value_list> : <body> endfor
         self.get_next(); // skip `for`/`forsuffixes`
@@ -534,7 +550,10 @@ impl Interpreter {
                     self.store_current_token(&mut body);
                     self.get_next();
                 }
-                Command::MacroSpecial if self.cur.modifier == 1 => {
+                Command::MacroSpecial
+                    if MacroSpecialOp::from_modifier(self.cur.modifier)
+                        == Some(MacroSpecialOp::EndFor) =>
+                {
                     // `endfor` — modifier 1 on MacroSpecial
                     if depth == 0 {
                         // This is our endfor — don't store it, just stop
@@ -576,11 +595,11 @@ impl Interpreter {
         loop {
             match self.cur.command {
                 Command::Iteration => {
-                    let op = self.cur.modifier;
+                    let op = IterationOp::from_modifier(self.cur.modifier);
                     self.store_current_token(&mut body);
                     self.get_next();
 
-                    if op == IterationOp::Forever as u16 {
+                    if op == Some(IterationOp::Forever) {
                         nested_shadow_stack.push(false);
                         skip_next_substitution = false;
                     } else {
@@ -592,7 +611,10 @@ impl Interpreter {
                         skip_next_substitution = true;
                     }
                 }
-                Command::MacroSpecial if self.cur.modifier == 1 => {
+                Command::MacroSpecial
+                    if MacroSpecialOp::from_modifier(self.cur.modifier)
+                        == Some(MacroSpecialOp::EndFor) =>
+                {
                     // `endfor`
                     if nested_shadow_stack.is_empty() {
                         return body;
@@ -708,11 +730,15 @@ impl Interpreter {
     ///   `secondarydef <lhs> <op> <rhs> = <body> enddef`
     ///   `tertiarydef <lhs> <op> <rhs> = <body> enddef`
     pub(super) fn do_macro_def(&mut self) -> InterpResult<()> {
-        let def_op = self.cur.modifier;
-        let is_vardef = def_op == MacroDefOp::VarDef as u16;
-        let is_binary_def = def_op == MacroDefOp::PrimaryDef as u16
-            || def_op == MacroDefOp::SecondaryDef as u16
-            || def_op == MacroDefOp::TertiaryDef as u16;
+        let Some(def_op) = MacroDefOp::from_modifier(self.cur.modifier) else {
+            self.report_error(ErrorKind::UnexpectedToken, "Invalid macro def modifier");
+            return Ok(());
+        };
+        let is_vardef = def_op == MacroDefOp::VarDef;
+        let is_binary_def = matches!(
+            def_op,
+            MacroDefOp::PrimaryDef | MacroDefOp::SecondaryDef | MacroDefOp::TertiaryDef
+        );
 
         self.get_next(); // skip `def`/`vardef`/etc.
 
@@ -744,7 +770,10 @@ impl Interpreter {
 
         // For vardef: check for `@#` suffix parameter marker
         let mut has_at_suffix = false;
-        if is_vardef && self.cur.command == Command::MacroSpecial && self.cur.modifier == 4 {
+        if is_vardef
+            && self.cur.command == Command::MacroSpecial
+            && MacroSpecialOp::from_modifier(self.cur.modifier) == Some(MacroSpecialOp::MacroSuffix)
+        {
             // `@#` suffix parameter — consume it
             has_at_suffix = true;
             self.get_next();
@@ -817,7 +846,7 @@ impl Interpreter {
     /// Handle `primarydef`/`secondarydef`/`tertiarydef`.
     ///
     /// Syntax: `primarydef <lhs_param> <op_name> <rhs_param> = body enddef`
-    fn do_binary_macro_def(&mut self, def_op: u16) -> InterpResult<()> {
+    fn do_binary_macro_def(&mut self, def_op: MacroDefOp) -> InterpResult<()> {
         // Parse: <lhs_param> <op_name> <rhs_param>
         let lhs_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
             s.clone()
@@ -873,9 +902,16 @@ impl Interpreter {
 
         // Set the symbol to the appropriate operator command
         let cmd = match def_op {
-            x if x == MacroDefOp::PrimaryDef as u16 => Command::SecondaryPrimaryMacro,
-            x if x == MacroDefOp::SecondaryDef as u16 => Command::ExpressionTertiaryMacro,
-            _ => Command::TertiarySecondaryMacro, // tertiarydef
+            MacroDefOp::PrimaryDef => Command::SecondaryPrimaryMacro,
+            MacroDefOp::SecondaryDef => Command::ExpressionTertiaryMacro,
+            MacroDefOp::TertiaryDef => Command::TertiarySecondaryMacro,
+            _ => {
+                self.report_error(
+                    ErrorKind::UnexpectedToken,
+                    "Non-binary macro def used in binary macro handler",
+                );
+                Command::TertiarySecondaryMacro
+            }
         };
         self.symbols.set(
             op_sym,
@@ -982,9 +1018,9 @@ impl Interpreter {
 
     /// Convert a `ParamTypeOp` modifier to a delimited `ParamType`.
     const fn delimited_param_type(modifier: u16) -> ParamType {
-        match modifier {
-            x if x == ParamTypeOp::Suffix as u16 => ParamType::Suffix,
-            x if x == ParamTypeOp::Text as u16 => ParamType::Text,
+        match ParamTypeOp::from_modifier(modifier) {
+            Some(ParamTypeOp::Suffix) => ParamType::Suffix,
+            Some(ParamTypeOp::Text) => ParamType::Text,
             // primary/secondary/tertiary inside delimiters are treated as expr
             _ => ParamType::Expr,
         }
@@ -992,12 +1028,12 @@ impl Interpreter {
 
     /// Convert a `ParamTypeOp` modifier to an undelimited `ParamType`.
     const fn undelimited_param_type(modifier: u16) -> ParamType {
-        match modifier {
-            x if x == ParamTypeOp::Primary as u16 => ParamType::Primary,
-            x if x == ParamTypeOp::Secondary as u16 => ParamType::Secondary,
-            x if x == ParamTypeOp::Tertiary as u16 => ParamType::Tertiary,
-            x if x == ParamTypeOp::Suffix as u16 => ParamType::UndelimitedSuffix,
-            x if x == ParamTypeOp::Text as u16 => ParamType::UndelimitedText,
+        match ParamTypeOp::from_modifier(modifier) {
+            Some(ParamTypeOp::Primary) => ParamType::Primary,
+            Some(ParamTypeOp::Secondary) => ParamType::Secondary,
+            Some(ParamTypeOp::Tertiary) => ParamType::Tertiary,
+            Some(ParamTypeOp::Suffix) => ParamType::UndelimitedSuffix,
+            Some(ParamTypeOp::Text) => ParamType::UndelimitedText,
             _ => ParamType::UndelimitedExpr,
         }
     }
@@ -1087,7 +1123,10 @@ impl Interpreter {
                     self.store_current_token(&mut body);
                     self.get_next();
                 }
-                Command::MacroSpecial if self.cur.modifier == 0 => {
+                Command::MacroSpecial
+                    if MacroSpecialOp::from_modifier(self.cur.modifier)
+                        == Some(MacroSpecialOp::EndDef) =>
+                {
                     // `enddef` — modifier 0 on MacroSpecial
                     if depth == 0 {
                         // Our enddef — don't store it, stop
@@ -1193,7 +1232,10 @@ impl Interpreter {
                     depth += 1;
                     self.get_next();
                 }
-                Command::MacroSpecial if self.cur.modifier == 0 => {
+                Command::MacroSpecial
+                    if MacroSpecialOp::from_modifier(self.cur.modifier)
+                        == Some(MacroSpecialOp::EndDef) =>
+                {
                     if depth == 0 {
                         return;
                     }
@@ -1335,24 +1377,16 @@ impl Interpreter {
 
                     // --- Undelimited parameters ---
                     ParamType::Primary => {
-                        self.scan_primary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                        args.push(self.scan_undelimited_value_arg(Self::scan_primary));
                     }
                     ParamType::Secondary => {
-                        self.scan_secondary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                        args.push(self.scan_undelimited_value_arg(Self::scan_secondary));
                     }
                     ParamType::Tertiary => {
-                        self.scan_tertiary().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                        args.push(self.scan_undelimited_value_arg(Self::scan_tertiary));
                     }
                     ParamType::UndelimitedExpr => {
-                        self.scan_expression().ok();
-                        let val = self.take_cur_exp();
-                        args.push(value_to_stored_tokens(&val, &mut self.symbols));
+                        args.push(self.scan_undelimited_value_arg(Self::scan_expression));
                     }
                     ParamType::UndelimitedSuffix => {
                         args.push(self.scan_suffix_arg());
@@ -1415,6 +1449,23 @@ impl Interpreter {
             .push_token_list(expansion, args, "macro expansion".into());
 
         true
+    }
+
+    fn scan_undelimited_value_arg(
+        &mut self,
+        scanner: fn(&mut Self) -> InterpResult<()>,
+    ) -> TokenList {
+        match scanner(self) {
+            Ok(()) => {
+                let val = self.take_cur_exp();
+                value_to_stored_tokens(&val, &mut self.symbols)
+            }
+            Err(err) => {
+                self.errors.push(err);
+                let _ = self.take_cur_exp();
+                Vec::new()
+            }
+        }
     }
 
     /// Handle `input <filename>`.

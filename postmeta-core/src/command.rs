@@ -448,6 +448,17 @@ pub enum MacroDefOp {
     TertiaryDef = 4,
 }
 
+/// Operation codes for [`Command::MacroSpecial`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u16)]
+pub enum MacroSpecialOp {
+    EndDef = 0,
+    EndFor = 1,
+    MacroPrefix = 2,
+    MacroAt = 3,
+    MacroSuffix = 4,
+}
+
 /// Operation codes for [`Command::FiOrElse`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
@@ -521,6 +532,191 @@ pub enum TypeNameOp {
     Known = 9,
     Unknown = 10,
 }
+
+macro_rules! impl_from_modifier {
+    ($enum_name:ident { $($variant:ident),+ $(,)? }) => {
+        impl $enum_name {
+            #[must_use]
+            pub const fn from_modifier(modifier: u16) -> Option<Self> {
+                match modifier {
+                    $(x if x == Self::$variant as u16 => Some(Self::$variant),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+impl_from_modifier!(NullaryOp {
+    True,
+    False,
+    NullPicture,
+    NullPen,
+    JobName,
+    ReadString,
+    PenCircle,
+    NormalDeviate,
+});
+impl_from_modifier!(UnaryOp {
+    Not,
+    Sqrt,
+    MExp,
+    MLog,
+    SinD,
+    CosD,
+    Floor,
+    UniformDeviate,
+    CharExists,
+    FontSize,
+    LLCorner,
+    LRCorner,
+    ULCorner,
+    URCorner,
+    ArcLength,
+    Angle,
+    CycleOp,
+    FilledOp,
+    StrokedOp,
+    TextualOp,
+    ClippedOp,
+    BoundedOp,
+    MakePath,
+    MakePen,
+    Oct,
+    Hex,
+    ASCII,
+    Char,
+    Length,
+    TurningNumber,
+    XPart,
+    YPart,
+    XXPart,
+    XYPart,
+    YXPart,
+    YYPart,
+    RedPart,
+    GreenPart,
+    BluePart,
+    FontPart,
+    TextPart,
+    PathPart,
+    PenPart,
+    DashPart,
+    Decimal,
+    Reverse,
+});
+impl_from_modifier!(PrimaryBinaryOp {
+    PointOf,
+    PrecontrolOf,
+    PostcontrolOf,
+    PenOffsetOf,
+    DirectionOf,
+    SubpathOf,
+    DirectionTimeOf,
+    ArcTimeOf,
+    SubstringOf,
+});
+impl_from_modifier!(SecondaryBinaryOp {
+    Times,
+    Over,
+    Scaled,
+    Shifted,
+    Rotated,
+    XScaled,
+    YScaled,
+    Slanted,
+    ZScaled,
+    Transformed,
+    DotProd,
+    Infont,
+});
+impl_from_modifier!(TertiaryBinaryOp {
+    PythagAdd,
+    PythagSub,
+    Or,
+});
+impl_from_modifier!(ExpressionBinaryOp {
+    LessThan,
+    LessOrEqual,
+    GreaterThan,
+    GreaterOrEqual,
+    EqualTo,
+    UnequalTo,
+    Concatenate,
+    IntersectionTimes,
+});
+impl_from_modifier!(PlusMinusOp { Plus, Minus });
+impl_from_modifier!(ShowOp {
+    Show,
+    ShowToken,
+    ShowDependencies,
+    ShowVariable,
+    ShowStats,
+});
+impl_from_modifier!(ThingToAddOp {
+    Contour,
+    DoublePath,
+    Also,
+});
+impl_from_modifier!(WithOptionOp {
+    WithPen,
+    WithColor,
+    Dashed,
+});
+impl_from_modifier!(BoundsOp { Clip, SetBounds });
+impl_from_modifier!(MacroDefOp {
+    Def,
+    VarDef,
+    PrimaryDef,
+    SecondaryDef,
+    TertiaryDef,
+});
+impl_from_modifier!(MacroSpecialOp {
+    EndDef,
+    EndFor,
+    MacroPrefix,
+    MacroAt,
+    MacroSuffix,
+});
+impl_from_modifier!(FiOrElseOp { Fi, Else, ElseIf });
+impl_from_modifier!(IterationOp {
+    For,
+    ForSuffixes,
+    Forever,
+});
+impl_from_modifier!(MessageOp {
+    Message,
+    ErrMessage,
+    ErrHelp,
+});
+impl_from_modifier!(StrOpOp {
+    Str,
+    Char,
+    Decimal,
+    ReadFrom,
+});
+impl_from_modifier!(ParamTypeOp {
+    Expr,
+    Suffix,
+    Text,
+    Primary,
+    Secondary,
+    Tertiary,
+});
+impl_from_modifier!(IfTestOp { If, ElseIf });
+impl_from_modifier!(TypeNameOp {
+    Boolean,
+    String,
+    Pen,
+    Path,
+    Picture,
+    Transform,
+    Color,
+    Pair,
+    Numeric,
+    Known,
+    Unknown,
+});
 
 // ---------------------------------------------------------------------------
 // Primitive table
@@ -668,28 +864,28 @@ pub const PRIMITIVES: &[Primitive] = &[
     Primitive {
         name: "enddef",
         command: Command::MacroSpecial,
-        modifier: 0,
+        modifier: MacroSpecialOp::EndDef as u16,
     },
     Primitive {
         name: "endfor",
         command: Command::MacroSpecial,
-        modifier: 1,
+        modifier: MacroSpecialOp::EndFor as u16,
     },
     // Suffix parameter markers for vardef (mp.web §12615)
     Primitive {
         name: "#@",
         command: Command::MacroSpecial,
-        modifier: 2, // macro_prefix
+        modifier: MacroSpecialOp::MacroPrefix as u16,
     },
     Primitive {
         name: "@",
         command: Command::MacroSpecial,
-        modifier: 3, // macro_at
+        modifier: MacroSpecialOp::MacroAt as u16,
     },
     Primitive {
         name: "@#",
         command: Command::MacroSpecial,
-        modifier: 4, // macro_suffix
+        modifier: MacroSpecialOp::MacroSuffix as u16,
     },
     Primitive {
         name: "shipout",

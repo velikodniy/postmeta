@@ -16,7 +16,7 @@ use postmeta_graphics::types::{
 /// Tolerance for numeric equality in `MetaPost` language semantics.
 ///
 /// Two numeric values that differ by less than this are considered equal
-/// by `=`/`<>` comparisons, `values_equal`, and `Value::PartialEq`.
+/// by `=`/`<>` comparisons and `Value::PartialEq`.
 /// This matches `MetaPost`'s behavior where numeric precision is limited.
 pub const NUMERIC_TOLERANCE: Scalar = 1e-4;
 
@@ -265,6 +265,19 @@ impl PartialEq for Value {
             (Self::Pair(ax, ay), Self::Pair(bx, by)) => {
                 (ax - bx).abs() < NUMERIC_TOLERANCE && (ay - by).abs() < NUMERIC_TOLERANCE
             }
+            (Self::Color(a), Self::Color(b)) => {
+                (a.r - b.r).abs() < NUMERIC_TOLERANCE
+                    && (a.g - b.g).abs() < NUMERIC_TOLERANCE
+                    && (a.b - b.b).abs() < NUMERIC_TOLERANCE
+            }
+            (Self::Transform(a), Self::Transform(b)) => {
+                (a.tx - b.tx).abs() < NUMERIC_TOLERANCE
+                    && (a.ty - b.ty).abs() < NUMERIC_TOLERANCE
+                    && (a.txx - b.txx).abs() < NUMERIC_TOLERANCE
+                    && (a.txy - b.txy).abs() < NUMERIC_TOLERANCE
+                    && (a.tyx - b.tyx).abs() < NUMERIC_TOLERANCE
+                    && (a.tyy - b.tyy).abs() < NUMERIC_TOLERANCE
+            }
             (Self::String(a), Self::String(b)) => a == b,
             (Self::Path(a), Self::Path(b)) => a == b,
             _ => false,
@@ -388,8 +401,7 @@ mod tests {
         assert_eq!(format!("{}", Value::String(Arc::from("hi"))), "\"hi\"");
     }
 
-    // Both Value::PartialEq and the interpreter's values_equal use
-    // NUMERIC_TOLERANCE (1e-4).  These tests verify the unified behavior.
+    // Value::PartialEq uses NUMERIC_TOLERANCE (1e-4).
 
     #[test]
     fn value_eq_numeric_exact() {
@@ -430,5 +442,32 @@ mod tests {
         let a = Value::Pair(1.0, 2.0);
         let b = Value::Pair(1.001, 2.0);
         assert_ne!(a, b, "pair with 1e-3 x diff should NOT match");
+    }
+
+    #[test]
+    fn value_eq_color_within_tolerance() {
+        let a = Value::Color(Color::new(0.2, 0.4, 0.6));
+        let b = Value::Color(Color::new(0.2 + 5e-5, 0.4 - 5e-5, 0.6));
+        assert_eq!(
+            a, b,
+            "color components within NUMERIC_TOLERANCE should match"
+        );
+    }
+
+    #[test]
+    fn value_eq_transform_within_tolerance() {
+        let a = Value::Transform(Transform::IDENTITY);
+        let b = Value::Transform(Transform {
+            tx: 5e-5,
+            ty: -5e-5,
+            txx: 1.0,
+            txy: 0.0,
+            tyx: 0.0,
+            tyy: 1.0,
+        });
+        assert_eq!(
+            a, b,
+            "transform components within NUMERIC_TOLERANCE should match"
+        );
     }
 }

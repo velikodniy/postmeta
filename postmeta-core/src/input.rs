@@ -101,6 +101,8 @@ enum LevelAction {
     Token(ResolvedToken),
     /// The current level is exhausted; pop it.
     Pop,
+    /// Skip current stored token and continue reading same level.
+    Continue,
     /// A parameter expansion needs to be pushed.
     PushParam(TokenList, usize),
 }
@@ -226,6 +228,7 @@ impl InputSystem {
                 LevelAction::Pop => {
                     self.levels.pop();
                 }
+                LevelAction::Continue => {}
                 LevelAction::PushParam(param_tokens, idx) => {
                     self.levels.push(InputLevel::TokenList {
                         tokens: param_tokens,
@@ -329,8 +332,8 @@ impl InputSystem {
                             let param_tokens = params[idx].clone();
                             LevelAction::PushParam(param_tokens, idx)
                         } else {
-                            // Bad param ref — try again
-                            LevelAction::Pop
+                            // Bad param ref — skip it and continue this level.
+                            LevelAction::Continue
                         }
                     }
                 }
@@ -612,5 +615,36 @@ mod tests {
 
         let t3 = input.next_raw_token(&mut symbols);
         assert_eq!(t3.command, Command::FiOrElse);
+    }
+
+    #[test]
+    fn bad_param_ref_does_not_drop_token_list_level() {
+        let mut input = InputSystem::new();
+        let mut symbols = SymbolTable::new();
+
+        let x = symbols.lookup("x");
+        let y = symbols.lookup("y");
+
+        input.push_token_list(
+            vec![
+                StoredToken::Param(1),
+                StoredToken::Symbol(x),
+                StoredToken::Symbol(y),
+            ],
+            vec![vec![StoredToken::Numeric(7.0)]],
+            "bad param ref".into(),
+        );
+
+        // Invalid Param(1) should be skipped, not pop the whole level.
+        let t1 = input.next_raw_token(&mut symbols);
+        assert_eq!(t1.command, Command::TagToken);
+        assert_eq!(symbols.name(t1.sym.expect("symbol id")), "x");
+
+        let t2 = input.next_raw_token(&mut symbols);
+        assert_eq!(t2.command, Command::TagToken);
+        assert_eq!(symbols.name(t2.sym.expect("symbol id")), "y");
+
+        let t3 = input.next_raw_token(&mut symbols);
+        assert_eq!(t3.command, Command::Stop);
     }
 }
