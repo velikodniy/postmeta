@@ -9,7 +9,10 @@
 use std::fmt::Write;
 use std::sync::Arc;
 
-use crate::command::{Command, ExpressionBinaryOp, PlusMinusOp, StrOpOp};
+use crate::command::{
+    Command, ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
+    StrOpOp, TertiaryBinaryOp, TypeNameOp, UnaryOp,
+};
 use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
@@ -89,7 +92,12 @@ impl Interpreter {
             }
 
             Command::Nullary => {
-                let op = self.cur.modifier;
+                let Some(op) = NullaryOp::from_modifier(self.cur.modifier) else {
+                    return Err(InterpreterError::new(
+                        ErrorKind::UnexpectedToken,
+                        "Invalid nullary operator modifier",
+                    ));
+                };
                 self.get_x_next();
                 self.lhs_tracking.last_lhs_binding = None;
                 self.do_nullary(op)?;
@@ -102,7 +110,12 @@ impl Interpreter {
             }
 
             Command::Unary => {
-                let op = self.cur.modifier;
+                let Some(op) = UnaryOp::from_modifier(self.cur.modifier) else {
+                    return Err(InterpreterError::new(
+                        ErrorKind::UnexpectedToken,
+                        "Invalid unary operator modifier",
+                    ));
+                };
                 self.get_x_next();
                 self.scan_primary()?;
                 self.do_unary(op)?;
@@ -118,7 +131,8 @@ impl Interpreter {
 
             Command::PlusOrMinus => {
                 // Unary plus or minus
-                let is_minus = self.cur.modifier == PlusMinusOp::Minus as u16;
+                let is_minus = PlusMinusOp::from_modifier(self.cur.modifier)
+                    == Some(PlusMinusOp::Minus);
                 self.get_x_next();
                 self.scan_primary()?;
                 if is_minus {
@@ -249,6 +263,12 @@ impl Interpreter {
                 self.scan_primary()?;
                 self.lhs_tracking.last_lhs_binding = None;
                 self.cur_expr.dep = None;
+                let Some(op) = PrimaryBinaryOp::from_modifier(op) else {
+                    return Err(InterpreterError::new(
+                        ErrorKind::UnexpectedToken,
+                        "Invalid primary binary operator modifier",
+                    ));
+                };
                 self.do_primary_binary(op, &first)
             }
 
@@ -265,9 +285,9 @@ impl Interpreter {
             }
 
             Command::StrOp => {
-                let op = self.cur.modifier;
+                let op = StrOpOp::from_modifier(self.cur.modifier);
                 self.get_x_next();
-                if op == StrOpOp::Str as u16 {
+                if op == Some(StrOpOp::Str) {
                     // `str` <suffix> — converts suffix to string
                     let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
                     {
@@ -314,37 +334,36 @@ impl Interpreter {
                 // `transform`, `color`, `pair`.
                 //
                 // See mp.web §740: each type_name acts as a type_range test.
-                use crate::command::TypeNameOp;
-                let op = self.cur.modifier;
+                let op = TypeNameOp::from_modifier(self.cur.modifier);
                 self.get_x_next();
                 self.scan_primary()?;
                 let ty = self.cur_expr.ty;
                 let result = match op {
-                    x if x == TypeNameOp::Numeric as u16 => {
+                    Some(TypeNameOp::Numeric) => {
                         // numeric: type_range(known)(independent)
                         ty >= Type::Known && ty <= Type::Independent
                     }
-                    x if x == TypeNameOp::Boolean as u16 => {
+                    Some(TypeNameOp::Boolean) => {
                         ty == Type::Boolean || ty == Type::UnknownBoolean
                     }
-                    x if x == TypeNameOp::String as u16 => {
+                    Some(TypeNameOp::String) => {
                         ty == Type::String || ty == Type::UnknownString
                     }
-                    x if x == TypeNameOp::Pen as u16 => ty == Type::Pen || ty == Type::UnknownPen,
-                    x if x == TypeNameOp::Path as u16 => {
+                    Some(TypeNameOp::Pen) => ty == Type::Pen || ty == Type::UnknownPen,
+                    Some(TypeNameOp::Path) => {
                         ty == Type::Path || ty == Type::UnknownPath
                     }
-                    x if x == TypeNameOp::Picture as u16 => {
+                    Some(TypeNameOp::Picture) => {
                         ty == Type::Picture || ty == Type::UnknownPicture
                     }
-                    x if x == TypeNameOp::Transform as u16 => ty == Type::TransformType,
-                    x if x == TypeNameOp::Color as u16 => ty == Type::ColorType,
-                    x if x == TypeNameOp::Pair as u16 => ty == Type::PairType,
-                    x if x == TypeNameOp::Known as u16 => {
+                    Some(TypeNameOp::Transform) => ty == Type::TransformType,
+                    Some(TypeNameOp::Color) => ty == Type::ColorType,
+                    Some(TypeNameOp::Pair) => ty == Type::PairType,
+                    Some(TypeNameOp::Known) => {
                         // mp.web §746: known if cur_type < dependent
                         (ty as u8) < (Type::Dependent as u8)
                     }
-                    x if x == TypeNameOp::Unknown as u16 => {
+                    Some(TypeNameOp::Unknown) => {
                         // mp.web §746: unknown if cur_type >= dependent
                         (ty as u8) >= (Type::Dependent as u8)
                     }
@@ -666,9 +685,15 @@ impl Interpreter {
 
             match cmd {
                 Command::SecondaryBinary => {
+                    let Some(op) = SecondaryBinaryOp::from_modifier(op) else {
+                        return Err(InterpreterError::new(
+                            ErrorKind::UnexpectedToken,
+                            "Invalid secondary binary operator modifier",
+                        ));
+                    };
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_secondary_binary(op, &left)?;
-                    if op == crate::command::SecondaryBinaryOp::Times as u16 {
+                    if op == SecondaryBinaryOp::Times {
                         let left_const = left_dep.as_ref().and_then(constant_value);
                         let right_const = right_dep.as_ref().and_then(constant_value);
 
@@ -780,7 +805,7 @@ impl Interpreter {
                             });
 
                             self.cur_expr.pair_dep = base_dep.map(|(ldx, ldy)| {
-                                if op == crate::command::SecondaryBinaryOp::Transformed as u16
+                                if op == SecondaryBinaryOp::Transformed
                                     && let Some(LhsBinding::Variable { id, .. }) = right_binding.clone()
                                     && let VarValue::Transform {
                                         tx,
@@ -809,45 +834,47 @@ impl Interpreter {
                                 }
 
                                 let t = match op {
-                                    x if x == crate::command::SecondaryBinaryOp::Scaled as u16 => {
+                                    SecondaryBinaryOp::Scaled => {
                                         let f = value_to_scalar(&right_val).unwrap_or(1.0);
                                         postmeta_graphics::transform::scaled(f)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::Shifted as u16 => {
+                                    SecondaryBinaryOp::Shifted => {
                                         let (dx, dy) =
                                             value_to_pair(&right_val).unwrap_or((0.0, 0.0));
                                         postmeta_graphics::transform::shifted(dx, dy)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::Rotated as u16 => {
+                                    SecondaryBinaryOp::Rotated => {
                                         let a = value_to_scalar(&right_val).unwrap_or(0.0);
                                         postmeta_graphics::transform::rotated(a)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::XScaled as u16 => {
+                                    SecondaryBinaryOp::XScaled => {
                                         let f = value_to_scalar(&right_val).unwrap_or(1.0);
                                         postmeta_graphics::transform::xscaled(f)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::YScaled as u16 => {
+                                    SecondaryBinaryOp::YScaled => {
                                         let f = value_to_scalar(&right_val).unwrap_or(1.0);
                                         postmeta_graphics::transform::yscaled(f)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::Slanted as u16 => {
+                                    SecondaryBinaryOp::Slanted => {
                                         let f = value_to_scalar(&right_val).unwrap_or(0.0);
                                         postmeta_graphics::transform::slanted(f)
                                     }
-                                    x if x == crate::command::SecondaryBinaryOp::ZScaled as u16 => {
+                                    SecondaryBinaryOp::ZScaled => {
                                         let (a, b) =
                                             value_to_pair(&right_val).unwrap_or((1.0, 0.0));
                                         postmeta_graphics::transform::zscaled(a, b)
                                     }
-                                    x if x
-                                        == crate::command::SecondaryBinaryOp::Transformed
-                                            as u16 =>
-                                    {
+                                    SecondaryBinaryOp::Transformed => {
                                         value_to_transform(&right_val).unwrap_or(
                                             postmeta_graphics::types::Transform::IDENTITY,
                                         )
                                     }
-                                    _ => postmeta_graphics::types::Transform::IDENTITY,
+                                    SecondaryBinaryOp::Times
+                                    | SecondaryBinaryOp::Over
+                                    | SecondaryBinaryOp::DotProd
+                                    | SecondaryBinaryOp::Infont => {
+                                        postmeta_graphics::types::Transform::IDENTITY
+                                    }
                                 };
 
                                 let mut new_x = ldx.clone();
@@ -978,11 +1005,17 @@ impl Interpreter {
 
             match cmd {
                 Command::PlusOrMinus => {
+                    let Some(op) = PlusMinusOp::from_modifier(op) else {
+                        return Err(InterpreterError::new(
+                            ErrorKind::UnexpectedToken,
+                            "Invalid plus/minus modifier",
+                        ));
+                    };
                     let right_pair_dep_taken = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_plus_minus(op, &left, &right)?;
-                    let factor = if op == PlusMinusOp::Plus as u16 {
+                    let factor = if op == PlusMinusOp::Plus {
                         1.0
                     } else {
                         -1.0
@@ -1020,6 +1053,12 @@ impl Interpreter {
                     }
                 }
                 Command::TertiaryBinary => {
+                    let Some(op) = TertiaryBinaryOp::from_modifier(op) else {
+                        return Err(InterpreterError::new(
+                            ErrorKind::UnexpectedToken,
+                            "Invalid tertiary binary modifier",
+                        ));
+                    };
                     let _ = self.take_cur_pair_dep();
                     let right = self.take_cur_exp();
                     self.lhs_tracking.last_lhs_binding = None;
@@ -1060,10 +1099,7 @@ impl Interpreter {
                     self.get_x_next();
                     self.scan_tertiary()?;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_expression_binary(
-                        ExpressionBinaryOp::EqualTo as u16,
-                        &left,
-                    )?;
+                    self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left)?;
                     self.cur_expr.dep = None;
                     self.cur_expr.pair_dep = None;
                 }
@@ -1084,7 +1120,7 @@ impl Interpreter {
                         self.get_x_next();
                         self.scan_tertiary()?;
                         self.lhs_tracking.last_lhs_binding = None;
-                        self.do_expression_binary(ExpressionBinaryOp::Concatenate as u16, &left)?;
+                        self.do_expression_binary(ExpressionBinaryOp::Concatenate, &left)?;
                         self.cur_expr.dep = None;
                         self.cur_expr.pair_dep = None;
                     }
@@ -1099,6 +1135,12 @@ impl Interpreter {
                     break;
                 }
                 Command::ExpressionBinary => {
+                    let Some(op) = ExpressionBinaryOp::from_modifier(op) else {
+                        return Err(InterpreterError::new(
+                            ErrorKind::UnexpectedToken,
+                            "Invalid expression binary modifier",
+                        ));
+                    };
                     let left = self.take_cur_exp();
                     self.get_x_next();
                     self.scan_tertiary()?;

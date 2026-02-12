@@ -29,37 +29,37 @@ use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
     /// Execute a nullary operator.
-    pub(super) fn do_nullary(&mut self, op: u16) -> InterpResult<()> {
+    pub(super) fn do_nullary(&mut self, op: NullaryOp) -> InterpResult<()> {
         match op {
-            x if x == NullaryOp::True as u16 => {
+            NullaryOp::True => {
                 self.cur_expr.exp = Value::Boolean(true);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == NullaryOp::False as u16 => {
+            NullaryOp::False => {
                 self.cur_expr.exp = Value::Boolean(false);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == NullaryOp::NullPicture as u16 => {
+            NullaryOp::NullPicture => {
                 self.cur_expr.exp = Value::Picture(Picture::new());
                 self.cur_expr.ty = Type::Picture;
             }
-            x if x == NullaryOp::NullPen as u16 => {
+            NullaryOp::NullPen => {
                 self.cur_expr.exp = Value::Pen(Pen::null());
                 self.cur_expr.ty = Type::Pen;
             }
-            x if x == NullaryOp::PenCircle as u16 => {
+            NullaryOp::PenCircle => {
                 self.cur_expr.exp = Value::Pen(Pen::circle(1.0));
                 self.cur_expr.ty = Type::Pen;
             }
-            x if x == NullaryOp::NormalDeviate as u16 => {
+            NullaryOp::NormalDeviate => {
                 self.cur_expr.exp = Value::Numeric(math::normal_deviate(&mut self.random_seed));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == NullaryOp::JobName as u16 => {
+            NullaryOp::JobName => {
                 self.cur_expr.exp = Value::String(Arc::from(self.job_name.as_str()));
                 self.cur_expr.ty = Type::String;
             }
-            _ => {
+            NullaryOp::ReadString => {
                 self.cur_expr.exp = Value::Vacuous;
                 self.cur_expr.ty = Type::Vacuous;
             }
@@ -69,55 +69,55 @@ impl Interpreter {
 
     /// Execute a unary operator on `cur_exp`.
     #[expect(clippy::too_many_lines, reason = "matching all unary ops")]
-    pub(super) fn do_unary(&mut self, op: u16) -> InterpResult<()> {
+    pub(super) fn do_unary(&mut self, op: UnaryOp) -> InterpResult<()> {
         self.lhs_tracking.last_lhs_binding = None;
         match op {
-            x if x == UnaryOp::Not as u16 => {
+            UnaryOp::Not => {
                 let b = value_to_bool(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Boolean(!b);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == UnaryOp::Sqrt as u16 => {
+            UnaryOp::Sqrt => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(if v >= 0.0 { v.sqrt() } else { 0.0 });
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::SinD as u16 => {
+            UnaryOp::SinD => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::sind(v));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::CosD as u16 => {
+            UnaryOp::CosD => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::cosd(v));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::Floor as u16 => {
+            UnaryOp::Floor => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::floor(v));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::MExp as u16 => {
+            UnaryOp::MExp => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::mexp(v));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::MLog as u16 => {
+            UnaryOp::MLog => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::mlog(v));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::Angle as u16 => {
+            UnaryOp::Angle => {
                 let (px, py) = value_to_pair(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::angle(px, py));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::UniformDeviate as u16 => {
+            UnaryOp::UniformDeviate => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::Numeric(math::uniform_deviate(v, &mut self.random_seed));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::Length as u16 => {
+            UnaryOp::Length => {
                 match &self.cur_expr.exp {
                     Value::Path(p) => {
                         #[expect(clippy::cast_precision_loss, reason = "segment count fits in f64")]
@@ -145,12 +145,12 @@ impl Interpreter {
                 }
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == UnaryOp::Decimal as u16 => {
+            UnaryOp::Decimal => {
                 let v = value_to_scalar(&self.cur_expr.exp)?;
                 self.cur_expr.exp = Value::String(Arc::from(format!("{v}").as_str()));
                 self.cur_expr.ty = Type::String;
             }
-            x if x == UnaryOp::Reverse as u16 => {
+            UnaryOp::Reverse => {
                 if let Value::Path(ref p) = self.cur_expr.exp {
                     self.cur_expr.exp = Value::Path(path::reverse(p));
                     self.cur_expr.ty = Type::Path;
@@ -161,34 +161,34 @@ impl Interpreter {
                     ));
                 }
             }
-            x if x == UnaryOp::XPart as u16 => {
+            UnaryOp::XPart => {
                 self.extract_part(0)?;
             }
-            x if x == UnaryOp::YPart as u16 => {
+            UnaryOp::YPart => {
                 self.extract_part(1)?;
             }
-            x if x == UnaryOp::XXPart as u16 => {
+            UnaryOp::XXPart => {
                 self.extract_part(2)?;
             }
-            x if x == UnaryOp::XYPart as u16 => {
+            UnaryOp::XYPart => {
                 self.extract_part(3)?;
             }
-            x if x == UnaryOp::YXPart as u16 => {
+            UnaryOp::YXPart => {
                 self.extract_part(4)?;
             }
-            x if x == UnaryOp::YYPart as u16 => {
+            UnaryOp::YYPart => {
                 self.extract_part(5)?;
             }
-            x if x == UnaryOp::RedPart as u16 => {
+            UnaryOp::RedPart => {
                 self.extract_color_part(0)?;
             }
-            x if x == UnaryOp::GreenPart as u16 => {
+            UnaryOp::GreenPart => {
                 self.extract_color_part(1)?;
             }
-            x if x == UnaryOp::BluePart as u16 => {
+            UnaryOp::BluePart => {
                 self.extract_color_part(2)?;
             }
-            x if x == UnaryOp::MakePath as u16 => {
+            UnaryOp::MakePath => {
                 if let Value::Pen(ref p) = self.cur_expr.exp {
                     self.cur_expr.exp = Value::Path(pen::makepath(p));
                     self.cur_expr.ty = Type::Path;
@@ -199,7 +199,7 @@ impl Interpreter {
                     ));
                 }
             }
-            x if x == UnaryOp::MakePen as u16 => {
+            UnaryOp::MakePen => {
                 if let Value::Path(ref p) = self.cur_expr.exp {
                     let result = pen::makepen(p).map_err(|e| {
                         InterpreterError::new(ErrorKind::TypeError, format!("makepen: {e}"))
@@ -213,16 +213,12 @@ impl Interpreter {
                     ));
                 }
             }
-            x if x == UnaryOp::CycleOp as u16 => {
+            UnaryOp::CycleOp => {
                 let is_cyclic = matches!(&self.cur_expr.exp, Value::Path(p) if p.is_cyclic);
                 self.cur_expr.exp = Value::Boolean(is_cyclic);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == UnaryOp::LLCorner as u16
-                || x == UnaryOp::LRCorner as u16
-                || x == UnaryOp::ULCorner as u16
-                || x == UnaryOp::URCorner as u16 =>
-            {
+            UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 let bb = match &self.cur_expr.exp {
                     Value::Picture(pic) => bbox::picture_bbox(pic, false),
                     Value::Path(p) => bbox::path_bbox(p),
@@ -258,11 +254,12 @@ impl Interpreter {
                         ));
                     }
                 };
-                let (px, py) = match x {
-                    _ if x == UnaryOp::LLCorner as u16 => (bb.min_x, bb.min_y),
-                    _ if x == UnaryOp::LRCorner as u16 => (bb.max_x, bb.min_y),
-                    _ if x == UnaryOp::ULCorner as u16 => (bb.min_x, bb.max_y),
-                    _ => (bb.max_x, bb.max_y), // URCorner
+                let (px, py) = match op {
+                    UnaryOp::LLCorner => (bb.min_x, bb.min_y),
+                    UnaryOp::LRCorner => (bb.max_x, bb.min_y),
+                    UnaryOp::ULCorner => (bb.min_x, bb.max_y),
+                    UnaryOp::URCorner => (bb.max_x, bb.max_y),
+                    _ => (bb.max_x, bb.max_y),
                 };
                 self.cur_expr.exp = Value::Pair(px, py);
                 self.cur_expr.ty = Type::PairType;
@@ -275,52 +272,56 @@ impl Interpreter {
     }
 
     /// Execute an "X of Y" binary operator.
-    pub(super) fn do_primary_binary(&mut self, op: u16, first: &Value) -> InterpResult<()> {
+    pub(super) fn do_primary_binary(
+        &mut self,
+        op: PrimaryBinaryOp,
+        first: &Value,
+    ) -> InterpResult<()> {
         let second = &self.cur_expr.exp;
 
         match op {
-            x if x == PrimaryBinaryOp::PointOf as u16 => {
+            PrimaryBinaryOp::PointOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::point_of(p, t);
                 self.cur_expr.exp = Value::Pair(pt.x, pt.y);
                 self.cur_expr.ty = Type::PairType;
             }
-            x if x == PrimaryBinaryOp::DirectionOf as u16 => {
+            PrimaryBinaryOp::DirectionOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let dir = path::direction_of(p, t);
                 self.cur_expr.exp = Value::Pair(dir.x, dir.y);
                 self.cur_expr.ty = Type::PairType;
             }
-            x if x == PrimaryBinaryOp::PrecontrolOf as u16 => {
+            PrimaryBinaryOp::PrecontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::precontrol_of(p, t);
                 self.cur_expr.exp = Value::Pair(pt.x, pt.y);
                 self.cur_expr.ty = Type::PairType;
             }
-            x if x == PrimaryBinaryOp::PostcontrolOf as u16 => {
+            PrimaryBinaryOp::PostcontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
                 let pt = path::postcontrol_of(p, t);
                 self.cur_expr.exp = Value::Pair(pt.x, pt.y);
                 self.cur_expr.ty = Type::PairType;
             }
-            x if x == PrimaryBinaryOp::SubpathOf as u16 => {
+            PrimaryBinaryOp::SubpathOf => {
                 let (t1, t2) = value_to_pair(first)?;
                 let p = value_to_path(second)?;
                 self.cur_expr.exp = Value::Path(path::subpath(p, t1, t2));
                 self.cur_expr.ty = Type::Path;
             }
-            x if x == PrimaryBinaryOp::PenOffsetOf as u16 => {
+            PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
                 let p = value_to_pen(second)?;
                 let pt = pen::penoffset(p, Vec2::new(dx, dy));
                 self.cur_expr.exp = Value::Pair(pt.x, pt.y);
                 self.cur_expr.ty = Type::PairType;
             }
-            x if x == PrimaryBinaryOp::SubstringOf as u16 => {
+            PrimaryBinaryOp::SubstringOf => {
                 let (start, end) = value_to_pair(first)?;
                 let s = value_to_string(second)?;
 
@@ -356,7 +357,7 @@ impl Interpreter {
                 self.cur_expr.exp = Value::String(Arc::from(substr));
                 self.cur_expr.ty = Type::String;
             }
-            _ => {
+            PrimaryBinaryOp::DirectionTimeOf | PrimaryBinaryOp::ArcTimeOf => {
                 self.report_error(ErrorKind::InvalidExpression, "Unimplemented primary binary");
             }
         }
@@ -364,11 +365,15 @@ impl Interpreter {
     }
 
     /// Execute a secondary binary operator.
-    pub(super) fn do_secondary_binary(&mut self, op: u16, left: &Value) -> InterpResult<()> {
+    pub(super) fn do_secondary_binary(
+        &mut self,
+        op: SecondaryBinaryOp,
+        left: &Value,
+    ) -> InterpResult<()> {
         let right = self.take_cur_exp();
 
         match op {
-            x if x == SecondaryBinaryOp::Times as u16 => {
+            SecondaryBinaryOp::Times => {
                 // Scalar * scalar, or scalar * pair, or pair * scalar
                 match (left, &right) {
                     (Value::Numeric(a), Value::Numeric(b)) => {
@@ -391,45 +396,45 @@ impl Interpreter {
                     }
                 }
             }
-            x if x == SecondaryBinaryOp::Scaled as u16 => {
+            SecondaryBinaryOp::Scaled => {
                 let factor = value_to_scalar(&right)?;
                 self.apply_transform(left, &transform::scaled(factor))?;
             }
-            x if x == SecondaryBinaryOp::Shifted as u16 => {
+            SecondaryBinaryOp::Shifted => {
                 let (dx, dy) = value_to_pair(&right)?;
                 self.apply_transform(left, &transform::shifted(dx, dy))?;
             }
-            x if x == SecondaryBinaryOp::Rotated as u16 => {
+            SecondaryBinaryOp::Rotated => {
                 let angle = value_to_scalar(&right)?;
                 self.apply_transform(left, &transform::rotated(angle))?;
             }
-            x if x == SecondaryBinaryOp::XScaled as u16 => {
+            SecondaryBinaryOp::XScaled => {
                 let factor = value_to_scalar(&right)?;
                 self.apply_transform(left, &transform::xscaled(factor))?;
             }
-            x if x == SecondaryBinaryOp::YScaled as u16 => {
+            SecondaryBinaryOp::YScaled => {
                 let factor = value_to_scalar(&right)?;
                 self.apply_transform(left, &transform::yscaled(factor))?;
             }
-            x if x == SecondaryBinaryOp::Slanted as u16 => {
+            SecondaryBinaryOp::Slanted => {
                 let factor = value_to_scalar(&right)?;
                 self.apply_transform(left, &transform::slanted(factor))?;
             }
-            x if x == SecondaryBinaryOp::ZScaled as u16 => {
+            SecondaryBinaryOp::ZScaled => {
                 let (a, b) = value_to_pair(&right)?;
                 self.apply_transform(left, &transform::zscaled(a, b))?;
             }
-            x if x == SecondaryBinaryOp::Transformed as u16 => {
+            SecondaryBinaryOp::Transformed => {
                 let t = value_to_transform(&right)?;
                 self.apply_transform(left, &t)?;
             }
-            x if x == SecondaryBinaryOp::DotProd as u16 => {
+            SecondaryBinaryOp::DotProd => {
                 let (ax, ay) = value_to_pair(left)?;
                 let (bx, by) = value_to_pair(&right)?;
                 self.cur_expr.exp = Value::Numeric(ax.mul_add(bx, ay * by));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == SecondaryBinaryOp::Infont as u16 => {
+            SecondaryBinaryOp::Infont => {
                 let text = value_to_string(left)?;
                 let font_name = value_to_string(&right)?;
                 // Default font size — MetaPost uses 10pt for design size.
@@ -447,7 +452,7 @@ impl Interpreter {
                 self.cur_expr.exp = Value::Picture(pic);
                 self.cur_expr.ty = Type::Picture;
             }
-            _ => {
+            SecondaryBinaryOp::Over => {
                 self.report_error(
                     ErrorKind::InvalidExpression,
                     "Unimplemented secondary binary",
@@ -495,11 +500,11 @@ impl Interpreter {
     /// Execute plus or minus on two operands.
     pub(super) fn do_plus_minus(
         &mut self,
-        op: u16,
+        op: PlusMinusOp,
         left: &Value,
         right: &Value,
     ) -> InterpResult<()> {
-        let is_plus = op == PlusMinusOp::Plus as u16;
+        let is_plus = op == PlusMinusOp::Plus;
 
         match (left, right) {
             (Value::Numeric(a), Value::Numeric(b)) => {
@@ -576,42 +581,43 @@ impl Interpreter {
     /// Execute a tertiary binary operator.
     pub(super) fn do_tertiary_binary(
         &mut self,
-        op: u16,
+        op: TertiaryBinaryOp,
         left: &Value,
         right: &Value,
     ) -> InterpResult<()> {
         match op {
-            x if x == TertiaryBinaryOp::PythagAdd as u16 => {
+            TertiaryBinaryOp::PythagAdd => {
                 let a = value_to_scalar(left)?;
                 let b = value_to_scalar(right)?;
                 self.cur_expr.exp = Value::Numeric(math::pyth_add(a, b));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == TertiaryBinaryOp::PythagSub as u16 => {
+            TertiaryBinaryOp::PythagSub => {
                 let a = value_to_scalar(left)?;
                 let b = value_to_scalar(right)?;
                 self.cur_expr.exp = Value::Numeric(math::pyth_sub(a, b));
                 self.cur_expr.ty = Type::Known;
             }
-            x if x == TertiaryBinaryOp::Or as u16 => {
+            TertiaryBinaryOp::Or => {
                 let a = value_to_bool(left)?;
                 let b = value_to_bool(right)?;
                 self.cur_expr.exp = Value::Boolean(a || b);
                 self.cur_expr.ty = Type::Boolean;
-            }
-            _ => {
-                self.report_error(ErrorKind::InvalidExpression, "Unknown tertiary binary");
             }
         }
         Ok(())
     }
 
     /// Execute an expression binary operator.
-    pub(super) fn do_expression_binary(&mut self, op: u16, left: &Value) -> InterpResult<()> {
+    pub(super) fn do_expression_binary(
+        &mut self,
+        op: ExpressionBinaryOp,
+        left: &Value,
+    ) -> InterpResult<()> {
         let right = self.take_cur_exp();
 
         match op {
-            x if x == ExpressionBinaryOp::LessThan as u16 => {
+            ExpressionBinaryOp::LessThan => {
                 let result = match (left, &right) {
                     (Value::String(a), Value::String(b)) => a < b,
                     _ => value_to_scalar(left)? < value_to_scalar(&right)?,
@@ -619,7 +625,7 @@ impl Interpreter {
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::LessOrEqual as u16 => {
+            ExpressionBinaryOp::LessOrEqual => {
                 let result = match (left, &right) {
                     (Value::String(a), Value::String(b)) => a <= b,
                     _ => value_to_scalar(left)? <= value_to_scalar(&right)?,
@@ -627,7 +633,7 @@ impl Interpreter {
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::GreaterThan as u16 => {
+            ExpressionBinaryOp::GreaterThan => {
                 let result = match (left, &right) {
                     (Value::String(a), Value::String(b)) => a > b,
                     _ => value_to_scalar(left)? > value_to_scalar(&right)?,
@@ -635,7 +641,7 @@ impl Interpreter {
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::GreaterOrEqual as u16 => {
+            ExpressionBinaryOp::GreaterOrEqual => {
                 let result = match (left, &right) {
                     (Value::String(a), Value::String(b)) => a >= b,
                     _ => value_to_scalar(left)? >= value_to_scalar(&right)?,
@@ -643,24 +649,24 @@ impl Interpreter {
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::EqualTo as u16 => {
+            ExpressionBinaryOp::EqualTo => {
                 let result = left == &right;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::UnequalTo as u16 => {
+            ExpressionBinaryOp::UnequalTo => {
                 let result = left != &right;
                 self.cur_expr.exp = Value::Boolean(result);
                 self.cur_expr.ty = Type::Boolean;
             }
-            x if x == ExpressionBinaryOp::Concatenate as u16 => {
+            ExpressionBinaryOp::Concatenate => {
                 let a = value_to_string(left)?;
                 let b = value_to_string(&right)?;
                 let result = format!("{a}{b}");
                 self.cur_expr.exp = Value::String(Arc::from(result.as_str()));
                 self.cur_expr.ty = Type::String;
             }
-            x if x == ExpressionBinaryOp::IntersectionTimes as u16 => {
+            ExpressionBinaryOp::IntersectionTimes => {
                 let p1 = value_to_path(left)?;
                 let p2 = value_to_path(&right)?;
                 let result = postmeta_graphics::intersection::intersection_times(p1, p2);
@@ -673,9 +679,6 @@ impl Interpreter {
                     }
                 }
                 self.cur_expr.ty = Type::PairType;
-            }
-            _ => {
-                self.report_error(ErrorKind::InvalidExpression, "Unknown expression binary");
             }
         }
         Ok(())
