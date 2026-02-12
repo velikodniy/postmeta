@@ -68,16 +68,19 @@ impl Interpreter {
                     let factor = factor_result.exp;
                     self.scan_primary()?;
                     self.lhs_tracking.last_lhs_binding = None;
-                    self.do_implicit_mul(&factor)?;
+                    let right_result = self.take_cur_result();
+                    let (val, ty) = Self::do_implicit_mul(&factor, &right_result.exp)?;
+                    self.cur_expr.exp = val;
+                    self.cur_expr.ty = ty;
                     let factor_val = factor_dep
                         .as_ref()
                         .and_then(constant_value)
                         .unwrap_or_else(|| value_to_scalar(&factor).unwrap_or(1.0));
-                    self.cur_expr.dep = self.cur_expr.dep.clone().map(|mut d| {
+                    self.cur_expr.dep = right_result.dep.map(|mut d| {
                         dep_scale(&mut d, factor_val);
                         d
                     });
-                    if let Some((mut dx, mut dy)) = self.cur_expr.pair_dep.take() {
+                    if let Some((mut dx, mut dy)) = right_result.pair_dep {
                         dep_scale(&mut dx, factor_val);
                         dep_scale(&mut dy, factor_val);
                         self.cur_expr.pair_dep = Some((dx, dy));

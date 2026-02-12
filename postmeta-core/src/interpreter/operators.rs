@@ -471,29 +471,20 @@ impl Interpreter {
     ///
     /// The `factor` is the numeric value on the left; `cur_exp`/`cur_type`
     /// hold the right operand (the result of the recursive `scan_primary`).
-    pub(super) fn do_implicit_mul(&mut self, factor: &Value) -> InterpResult<()> {
+    pub(super) fn do_implicit_mul(factor: &Value, right: &Value) -> InterpResult<(Value, Type)> {
         let a = value_to_scalar(factor)?;
-        match &self.cur_expr.exp {
-            Value::Numeric(b) => {
-                self.cur_expr.exp = Value::Numeric(a * b);
-                self.cur_expr.ty = Type::Known;
-            }
-            Value::Pair(bx, by) => {
-                self.cur_expr.exp = Value::Pair(a * bx, a * by);
-                self.cur_expr.ty = Type::PairType;
-            }
-            Value::Color(c) => {
-                self.cur_expr.exp = Value::Color(Color::new(a * c.r, a * c.g, a * c.b));
-                self.cur_expr.ty = Type::ColorType;
-            }
-            _ => {
-                return Err(InterpreterError::new(
-                    ErrorKind::TypeError,
-                    format!("Cannot multiply numeric by {}", self.cur_expr.ty),
-                ));
-            }
+        match right {
+            Value::Numeric(b) => Ok((Value::Numeric(a * b), Type::Known)),
+            Value::Pair(bx, by) => Ok((Value::Pair(a * bx, a * by), Type::PairType)),
+            Value::Color(c) => Ok((
+                Value::Color(Color::new(a * c.r, a * c.g, a * c.b)),
+                Type::ColorType,
+            )),
+            _ => Err(InterpreterError::new(
+                ErrorKind::TypeError,
+                format!("Cannot multiply numeric by {}", right.ty()),
+            )),
         }
-        Ok(())
     }
 
     /// Execute a tertiary binary operator.
