@@ -686,14 +686,16 @@ impl Interpreter {
             }
 
             let op = self.cur.modifier;
-            let left_dep = self.take_cur_dep();
-            let left_pair_dep = self.take_cur_pair_dep();
-            let left = self.take_cur_exp();
+            let left_result = self.take_cur_result();
+            let left_dep = left_result.dep.clone();
+            let left_pair_dep = left_result.pair_dep.clone();
+            let left = left_result.exp;
             self.get_x_next();
             self.scan_primary()?;
-            let right_val = self.cur_expr.exp.clone();
-            let right_dep = self.cur_expr.dep.clone();
-            let right_pair_dep = self.cur_expr.pair_dep.clone();
+            let right_result = self.cur_expr.snapshot();
+            let right_val = right_result.exp.clone();
+            let right_dep = right_result.dep.clone();
+            let right_pair_dep = right_result.pair_dep.clone();
             let right_binding = self.lhs_tracking.last_lhs_binding.clone();
 
             match cmd {
@@ -1011,13 +1013,15 @@ impl Interpreter {
             }
 
             let op = self.cur.modifier;
-            let left_dep = self.take_cur_dep();
-            let left_pair_dep = self.take_cur_pair_dep();
-            let left = self.take_cur_exp();
+            let left_result = self.take_cur_result();
+            let left_dep = left_result.dep.clone();
+            let left_pair_dep = left_result.pair_dep.clone();
+            let left = left_result.exp;
             self.get_x_next();
             self.scan_secondary()?;
-            let right_dep = self.cur_expr.dep.clone();
-            let right_pair_dep = self.cur_expr.pair_dep.clone();
+            let right_result = self.cur_expr.snapshot();
+            let right_dep = right_result.dep.clone();
+            let right_pair_dep = right_result.pair_dep.clone();
 
             match cmd {
                 Command::PlusOrMinus => {
