@@ -676,16 +676,29 @@ impl Interpreter {
         self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
-    fn scan_rhs_for_infix_bp(&mut self, bp: u8) -> InterpResult<()> {
-        match bp {
-            Command::BP_SECONDARY => self.scan_primary(),
-            Command::BP_TERTIARY => self.scan_secondary(),
-            Command::BP_EXPRESSION => self.scan_tertiary(),
-            _ => Err(InterpreterError::new(
+    fn scan_rhs_tighter_than_bp(&mut self, bp: u8) -> InterpResult<()> {
+        if bp >= Command::BP_SECONDARY {
+            self.scan_primary()
+        } else if bp >= Command::BP_TERTIARY {
+            self.scan_secondary()
+        } else if bp >= Command::BP_EXPRESSION {
+            self.scan_tertiary()
+        } else {
+            Err(InterpreterError::new(
                 ErrorKind::UnexpectedToken,
                 "Unsupported infix binding power",
-            )),
+            ))
         }
+    }
+
+    fn scan_rhs_for_infix_command(&mut self, cmd: Command) -> InterpResult<()> {
+        let Some(bp) = cmd.infix_binding_power() else {
+            return Err(InterpreterError::new(
+                ErrorKind::UnexpectedToken,
+                "Expected infix command",
+            ));
+        };
+        self.scan_rhs_tighter_than_bp(bp)
     }
 
     /// Parse and evaluate a secondary expression.
@@ -708,7 +721,7 @@ impl Interpreter {
             let left_pair_dep = left_result.pair_dep.clone();
             let left = left_result.exp;
             self.get_x_next();
-            self.scan_rhs_for_infix_bp(Command::BP_SECONDARY)?;
+            self.scan_rhs_for_infix_command(cmd)?;
             let right_result = self.cur_expr.snapshot();
             let right_val = right_result.exp.clone();
             let right_dep = right_result.dep.clone();
@@ -1035,7 +1048,7 @@ impl Interpreter {
             let left_pair_dep = left_result.pair_dep.clone();
             let left = left_result.exp;
             self.get_x_next();
-            self.scan_rhs_for_infix_bp(Command::BP_TERTIARY)?;
+            self.scan_rhs_for_infix_command(cmd)?;
             let right_result = self.take_cur_result();
             let right_dep = right_result.dep.clone();
             let right_pair_dep = right_result.pair_dep.clone();
@@ -1131,7 +1144,7 @@ impl Interpreter {
                     // equality comparison producing a boolean.
                     let left = self.take_cur_result().exp;
                     self.get_x_next();
-                    self.scan_rhs_for_infix_bp(Command::BP_EXPRESSION)?;
+                    self.scan_rhs_for_infix_command(cmd)?;
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_expression_binary(ExpressionBinaryOp::EqualTo, &left)?;
                     self.cur_expr.dep = None;
@@ -1152,7 +1165,7 @@ impl Interpreter {
                         // String concatenation
                         let left = self.take_cur_result().exp;
                         self.get_x_next();
-                        self.scan_rhs_for_infix_bp(Command::BP_EXPRESSION)?;
+                        self.scan_rhs_for_infix_command(cmd)?;
                         self.lhs_tracking.last_lhs_binding = None;
                         self.do_expression_binary(ExpressionBinaryOp::Concatenate, &left)?;
                         self.cur_expr.dep = None;
@@ -1177,7 +1190,7 @@ impl Interpreter {
                     };
                     let left = self.take_cur_result().exp;
                     self.get_x_next();
-                    self.scan_rhs_for_infix_bp(Command::BP_EXPRESSION)?;
+                    self.scan_rhs_for_infix_command(cmd)?;
                     self.lhs_tracking.last_lhs_binding = None;
                     self.do_expression_binary(op, &left)?;
                     self.cur_expr.dep = None;

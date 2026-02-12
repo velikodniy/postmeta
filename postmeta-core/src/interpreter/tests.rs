@@ -158,6 +158,23 @@ fn eval_left_associative_infix_ops() {
 }
 
 #[test]
+fn eval_expression_rhs_parses_tighter_precedence() {
+    let mut interp = Interpreter::new();
+    interp.run("show 1 = 1 + 0; show 1 < 2 + 3 * 4;").unwrap();
+    assert_eq!(interp.errors.len(), 2);
+    assert!(
+        interp.errors[0].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[0].message
+    );
+    assert!(
+        interp.errors[1].message.contains("true"),
+        "expected true in: {}",
+        interp.errors[1].message
+    );
+}
+
+#[test]
 fn eval_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\" & \" world\";").unwrap();
