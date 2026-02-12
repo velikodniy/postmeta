@@ -676,13 +676,21 @@ impl Interpreter {
         self.resolve_variable(root_sym, &name, &suffix_segs)
     }
 
+    const fn tighter_infix_bp(bp: u8) -> Option<u8> {
+        if bp == Command::BP_EXPRESSION {
+            Some(Command::BP_TERTIARY)
+        } else if bp == Command::BP_TERTIARY {
+            Some(Command::BP_SECONDARY)
+        } else {
+            None
+        }
+    }
+
     fn scan_rhs_tighter_than_bp(&mut self, bp: u8) -> InterpResult<()> {
-        if bp >= Command::BP_SECONDARY {
+        if let Some(tighter_bp) = Self::tighter_infix_bp(bp) {
+            self.scan_infix_bp(tighter_bp, false)
+        } else if bp == Command::BP_SECONDARY {
             self.scan_primary()
-        } else if bp >= Command::BP_TERTIARY {
-            self.scan_secondary()
-        } else if bp >= Command::BP_EXPRESSION {
-            self.scan_tertiary()
         } else {
             Err(InterpreterError::new(
                 ErrorKind::UnexpectedToken,
