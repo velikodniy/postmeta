@@ -2,7 +2,7 @@ use postmeta_core::error::{InterpreterError, Severity};
 use postmeta_core::filesystem::FileSystem;
 use postmeta_core::internals::InternalId;
 use postmeta_core::interpreter::Interpreter;
-use postmeta_svg::{render_with_options, RenderOptions};
+use postmeta_svg::{RenderOptions, render_with_options};
 use wasm_bindgen::prelude::*;
 
 const PLAIN_MP: &str = include_str!("../../lib/plain.mp");
