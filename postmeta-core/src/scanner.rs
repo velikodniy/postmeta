@@ -143,10 +143,9 @@ impl Scanner {
             self.skip_whitespace_and_comments();
 
             if self.pos >= self.src.len() {
-                let pos = u32_pos(self.pos);
                 return Token {
                     kind: TokenKind::Eof,
-                    span: Span::at(pos),
+                    span: Span::at(self.pos),
                 };
             }
 
@@ -169,7 +168,7 @@ impl Scanner {
                     self.errors.push(ScanError {
                         kind: ScanErrorKind::InvalidCharacter,
                         message: format!("invalid character: {c:#04x}"),
-                        span: Span::new(u32_pos(start), u32_pos(self.pos)),
+                        span: Span::new(start, self.pos),
                     });
                 }
                 _ => return self.scan_symbolic(start, class),
@@ -257,7 +256,7 @@ impl Scanner {
 
         Token {
             kind: TokenKind::Numeric(value),
-            span: Span::new(u32_pos(start), u32_pos(self.pos)),
+            span: Span::new(start, self.pos),
         }
     }
 
@@ -292,7 +291,7 @@ impl Scanner {
                 let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap_or("..");
                 return Some(Token {
                     kind: TokenKind::Symbolic(text.to_owned()),
-                    span: Span::new(u32_pos(start), u32_pos(self.pos)),
+                    span: Span::new(start, self.pos),
                 });
             }
         }
@@ -315,7 +314,7 @@ impl Scanner {
 
         Token {
             kind: TokenKind::Numeric(value),
-            span: Span::new(u32_pos(start), u32_pos(self.pos)),
+            span: Span::new(start, self.pos),
         }
     }
 
@@ -339,14 +338,14 @@ impl Scanner {
             self.errors.push(ScanError {
                 kind: ScanErrorKind::UnterminatedString,
                 message: "unterminated string literal".into(),
-                span: Span::new(u32_pos(start), u32_pos(self.pos)),
+                span: Span::new(start, self.pos),
             });
         }
 
         let text = String::from_utf8_lossy(content).into_owned();
         Token {
             kind: TokenKind::StringLit(text),
-            span: Span::new(u32_pos(start), u32_pos(self.pos)),
+            span: Span::new(start, self.pos),
         }
     }
 
@@ -359,7 +358,7 @@ impl Scanner {
             let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap_or("?");
             return Token {
                 kind: TokenKind::Symbolic(text.to_owned()),
-                span: Span::new(u32_pos(start), u32_pos(self.pos)),
+                span: Span::new(start, self.pos),
             };
         }
 
@@ -371,24 +370,8 @@ impl Scanner {
         let text = std::str::from_utf8(&self.src[start..self.pos]).unwrap_or("?");
         Token {
             kind: TokenKind::Symbolic(text.to_owned()),
-            span: Span::new(u32_pos(start), u32_pos(self.pos)),
+            span: Span::new(start, self.pos),
         }
-    }
-}
-
-/// Convert a `usize` position to `u32` for [`Span`].
-///
-/// Clamps to `u32::MAX` for sources larger than 4 GiB (unreachable in
-/// practice for `MetaPost` programs).
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "explicitly clamped to u32::MAX before cast"
-)]
-const fn u32_pos(pos: usize) -> u32 {
-    if pos > u32::MAX as usize {
-        u32::MAX
-    } else {
-        pos as u32
     }
 }
 

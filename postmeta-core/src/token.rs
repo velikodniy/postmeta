@@ -19,21 +19,19 @@ use postmeta_graphics::types::Scalar;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Span {
     /// Start byte offset (inclusive).
-    pub start: u32,
+    pub start: usize,
     /// End byte offset (exclusive).
-    pub end: u32,
+    pub end: usize,
 }
 
 impl Span {
     /// Create a new span.
-    #[must_use]
-    pub const fn new(start: u32, end: u32) -> Self {
+    pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
     /// A zero-length span at the given position.
-    #[must_use]
-    pub const fn at(pos: u32) -> Self {
+    pub const fn at(pos: usize) -> Self {
         Self {
             start: pos,
             end: pos,
@@ -41,13 +39,11 @@ impl Span {
     }
 
     /// Length in bytes.
-    #[must_use]
-    pub const fn len(&self) -> u32 {
+    pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
     /// Whether the span is empty.
-    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
