@@ -15,8 +15,8 @@
 
 use crate::pen::convex_hull;
 use crate::types::{
-    FillObject, GraphicsObject, Knot, KnotDirection, Path, Pen, Picture, Point, Scalar,
-    StrokeObject, TextObject, Transform, Vec2, NEAR_ZERO,
+    FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Path, Pen, Picture, Point, Scalar,
+    StrokeObject, TextObject, Transform, Vec2,
 };
 
 // ---------------------------------------------------------------------------

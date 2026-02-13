@@ -22,7 +22,7 @@
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
-use crate::types::{KnotDirection, Path, Point, Scalar, Vec2, ANGLE_TOLERANCE, EPSILON, NEAR_ZERO};
+use crate::types::{ANGLE_TOLERANCE, EPSILON, KnotDirection, NEAR_ZERO, Path, Point, Scalar, Vec2};
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
@@ -909,7 +909,7 @@ fn turning_angle(a: Vec2, b: Vec2) -> Scalar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Knot, EPSILON};
+    use crate::types::{EPSILON, Knot};
 
     /// Helper: create a simple path through given points with Open constraints.
     fn make_open_path(points: &[Point]) -> Path {

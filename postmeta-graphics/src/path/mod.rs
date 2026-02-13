@@ -9,7 +9,7 @@ pub mod hobby;
 
 use crate::bezier::CubicSegment;
 use crate::types::{
-    index_to_scalar, scalar_to_index, Knot, KnotDirection, Path, Point, Scalar, Vec2, EPSILON,
+    EPSILON, Knot, KnotDirection, Path, Point, Scalar, Vec2, index_to_scalar, scalar_to_index,
 };
 
 // ---------------------------------------------------------------------------
@@ -146,11 +146,7 @@ pub fn subpath(path: &Path, t1: Scalar, t2: Scalar) -> Path {
     };
 
     let result = subpath_normalized(path, a, b, n);
-    if reversed {
-        reverse(&result)
-    } else {
-        result
-    }
+    if reversed { reverse(&result) } else { result }
 }
 
 /// Core subpath extraction with `0 <= a` and `a <= b`.

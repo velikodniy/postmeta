@@ -26,7 +26,7 @@ use std::sync::Arc;
 use postmeta_graphics::types::{Color, Path, Pen, Picture, Transform};
 
 use crate::command::Command;
-use crate::equation::{const_dep, single_dep, DepList, VarId};
+use crate::equation::{DepList, VarId, const_dep, single_dep};
 use crate::error::{ErrorKind, InterpResult, InterpreterError, Severity};
 use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, TokenList};
@@ -114,8 +114,13 @@ impl ExprResultValue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
-    Variable { id: VarId, negated: bool },
-    Internal { idx: u16 },
+    Variable {
+        id: VarId,
+        negated: bool,
+    },
+    Internal {
+        idx: u16,
+    },
     Pair {
         x: Option<Box<Self>>,
         y: Option<Box<Self>>,
@@ -386,7 +391,9 @@ impl Interpreter {
     fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
         match self.variables.get(id).clone() {
             VarValue::NumericVar(NumericState::Known(v)) => const_dep(v),
-            VarValue::NumericVar(NumericState::Independent { .. }) => crate::equation::single_dep(id),
+            VarValue::NumericVar(NumericState::Independent { .. }) => {
+                crate::equation::single_dep(id)
+            }
             VarValue::NumericVar(NumericState::Dependent(dep)) => dep,
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
@@ -549,7 +556,8 @@ impl Interpreter {
     ) {
         let needs_init = matches!(
             self.variables.get(var_id),
-            VarValue::Undefined | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
+            VarValue::Undefined
+                | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
         );
         if !needs_init {
             return;
@@ -621,10 +629,7 @@ impl Interpreter {
                     exp: Value::Pair(xv, yv),
                     ty: Type::PairType,
                     dep: None,
-                    pair_dep: Some((
-                        self.numeric_dep_for_var(x),
-                        self.numeric_dep_for_var(y),
-                    )),
+                    pair_dep: Some((self.numeric_dep_for_var(x), self.numeric_dep_for_var(y))),
                 }
             }
             VarValue::Color { r, g, b } => {
@@ -701,7 +706,6 @@ impl Interpreter {
     pub const fn current_picture(&self) -> &Picture {
         &self.state.picture_state.current_picture
     }
-
 }
 
 impl std::ops::Deref for Interpreter {

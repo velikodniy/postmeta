@@ -7,7 +7,7 @@ use std::process;
 
 use postmeta_core::filesystem::FileSystem;
 use postmeta_core::interpreter::Interpreter;
-use postmeta_svg::{render_with_options, RenderOptions};
+use postmeta_svg::{RenderOptions, render_with_options};
 
 /// Filesystem implementation that reads from disk.
 ///

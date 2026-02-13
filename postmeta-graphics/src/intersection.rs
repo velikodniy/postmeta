@@ -7,7 +7,7 @@
 //! overlap, stopping when the sub-curves are small enough.
 
 use crate::bezier::CubicSegment;
-use crate::types::{index_to_scalar, Path, Point, Scalar};
+use crate::types::{Path, Point, Scalar, index_to_scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]

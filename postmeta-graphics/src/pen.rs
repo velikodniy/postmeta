@@ -11,9 +11,7 @@
 //! - `penoffset` — find the pen offset in a given direction
 
 use crate::error::GraphicsError;
-use crate::types::{
-    Knot, NEAR_ZERO, Path, Pen, Point, Scalar, Transform, Vec2, index_to_scalar,
-};
+use crate::types::{Knot, NEAR_ZERO, Path, Pen, Point, Scalar, Transform, Vec2, index_to_scalar};
 
 // ---------------------------------------------------------------------------
 // makepen — path to pen

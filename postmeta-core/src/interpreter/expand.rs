@@ -244,7 +244,7 @@ impl Interpreter {
                             *state = IfState::Active;
                         }
                         self.get_next(); // consume `else`
-                                         // consume the `:` after `else`
+                        // consume the `:` after `else`
                         if self.cur.command == Command::Colon {
                             self.get_next();
                         }

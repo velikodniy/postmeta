@@ -4,7 +4,7 @@
 //! and `:=` explicit assignments.
 
 use crate::equation::{
-    const_dep, dep_add_scaled, dep_substitute, solve_equation, DepList, SolveResult,
+    DepList, SolveResult, const_dep, dep_add_scaled, dep_substitute, solve_equation,
 };
 use crate::error::{ErrorKind, InterpResult};
 use crate::types::Value;

@@ -424,9 +424,11 @@ mod tests {
         assert_eq!(Value::Pair(1.0, 2.0).as_pair(), Some((1.0, 2.0)));
         assert!(Value::Pen(Pen::null()).as_pen().is_some());
         assert!(Value::Color(Color::new(1.0, 0.0, 0.0)).as_color().is_some());
-        assert!(Value::Transform(Transform::IDENTITY)
-            .as_transform()
-            .is_some());
+        assert!(
+            Value::Transform(Transform::IDENTITY)
+                .as_transform()
+                .is_some()
+        );
         assert!(Value::Numeric(5.0).as_boolean().is_none());
     }
 

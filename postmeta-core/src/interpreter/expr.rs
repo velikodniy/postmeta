@@ -16,7 +16,7 @@ use crate::command::{
     Command, ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
     StrOpOp, TertiaryBinaryOp, TypeNameOp, UnaryOp,
 };
-use crate::equation::{const_dep, constant_value, dep_add_scaled, dep_scale, DepList};
+use crate::equation::{DepList, const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
@@ -87,8 +87,8 @@ impl Interpreter {
 
             Command::PlusOrMinus => {
                 // Unary plus or minus
-                let is_minus = PlusMinusOp::from_modifier(self.cur.modifier)
-                    == Some(PlusMinusOp::Minus);
+                let is_minus =
+                    PlusMinusOp::from_modifier(self.cur.modifier) == Some(PlusMinusOp::Minus);
                 self.get_x_next();
                 let mut result = self.scan_primary()?;
                 if is_minus {
@@ -200,31 +200,17 @@ impl Interpreter {
                 let primary_result = self.scan_primary()?;
                 let ty = primary_result.ty;
                 let result = match op {
-                    Some(TypeNameOp::Numeric) => {
-                        ty >= Type::Known && ty <= Type::Independent
-                    }
-                    Some(TypeNameOp::Boolean) => {
-                        ty == Type::Boolean || ty == Type::UnknownBoolean
-                    }
-                    Some(TypeNameOp::String) => {
-                        ty == Type::String || ty == Type::UnknownString
-                    }
+                    Some(TypeNameOp::Numeric) => ty >= Type::Known && ty <= Type::Independent,
+                    Some(TypeNameOp::Boolean) => ty == Type::Boolean || ty == Type::UnknownBoolean,
+                    Some(TypeNameOp::String) => ty == Type::String || ty == Type::UnknownString,
                     Some(TypeNameOp::Pen) => ty == Type::Pen || ty == Type::UnknownPen,
-                    Some(TypeNameOp::Path) => {
-                        ty == Type::Path || ty == Type::UnknownPath
-                    }
-                    Some(TypeNameOp::Picture) => {
-                        ty == Type::Picture || ty == Type::UnknownPicture
-                    }
+                    Some(TypeNameOp::Path) => ty == Type::Path || ty == Type::UnknownPath,
+                    Some(TypeNameOp::Picture) => ty == Type::Picture || ty == Type::UnknownPicture,
                     Some(TypeNameOp::Transform) => ty == Type::TransformType,
                     Some(TypeNameOp::Color) => ty == Type::ColorType,
                     Some(TypeNameOp::Pair) => ty == Type::PairType,
-                    Some(TypeNameOp::Known) => {
-                        (ty as u8) < (Type::Dependent as u8)
-                    }
-                    Some(TypeNameOp::Unknown) => {
-                        (ty as u8) >= (Type::Dependent as u8)
-                    }
+                    Some(TypeNameOp::Known) => (ty as u8) < (Type::Dependent as u8),
+                    Some(TypeNameOp::Unknown) => (ty as u8) >= (Type::Dependent as u8),
                     _ => false,
                 };
                 self.lhs_tracking.last_lhs_binding = None;
@@ -348,9 +334,7 @@ impl Interpreter {
                 } else {
                     None
                 };
-                ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(
-                    r, g, b,
-                )))
+                ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(r, g, b)))
             } else {
                 // Pair: (x, y)
                 let x = value_to_scalar(&first)?;
@@ -380,9 +364,7 @@ impl Interpreter {
         };
 
         // Expect closing delimiter
-        if self.cur.command == Command::RightDelimiter
-            && self.cur.modifier == expected_delimiter
-        {
+        if self.cur.command == Command::RightDelimiter && self.cur.modifier == expected_delimiter {
             self.get_x_next();
         } else {
             let message = if expected_delimiter == 0 {
@@ -504,23 +486,23 @@ impl Interpreter {
                     pair_dep,
                 }
             }
-            (Value::Color(bc), Value::Color(cc)) => ExprResultValue::plain(Value::Color(
-                postmeta_graphics::types::Color::new(
+            (Value::Color(bc), Value::Color(cc)) => {
+                ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(
                     one_minus_a * bc.r + a * cc.r,
                     one_minus_a * bc.g + a * cc.g,
                     one_minus_a * bc.b + a * cc.b,
-                ),
-            )),
-            (Value::Transform(bt), Value::Transform(ct)) => ExprResultValue::plain(
-                Value::Transform(postmeta_graphics::types::Transform {
+                )))
+            }
+            (Value::Transform(bt), Value::Transform(ct)) => {
+                ExprResultValue::plain(Value::Transform(postmeta_graphics::types::Transform {
                     tx: one_minus_a * bt.tx + a * ct.tx,
                     ty: one_minus_a * bt.ty + a * ct.ty,
                     txx: one_minus_a * bt.txx + a * ct.txx,
                     txy: one_minus_a * bt.txy + a * ct.txy,
                     tyx: one_minus_a * bt.tyx + a * ct.tyx,
                     tyy: one_minus_a * bt.tyy + a * ct.tyy,
-                }),
-            ),
+                }))
+            }
             (bv, cv) => {
                 return Err(InterpreterError::new(
                     ErrorKind::TypeError,
@@ -548,7 +530,8 @@ impl Interpreter {
         let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
         // Check early if this is a standalone vardef macro.
-        let is_root_vardef = root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
+        let is_root_vardef =
+            root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
 
         self.get_x_next();
 
@@ -640,7 +623,8 @@ impl Interpreter {
         self.get_x_next();
 
         loop {
-            if self.cur.command == Command::TagToken || self.cur.command == Command::InternalQuantity
+            if self.cur.command == Command::TagToken
+                || self.cur.command == Command::InternalQuantity
             {
                 if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
                     name.push('.');
@@ -805,9 +789,9 @@ impl Interpreter {
                 let a = value_to_bool(&left_val)?;
                 let b = value_to_bool(&right.exp)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                Ok(InfixAction::Continue(ExprResultValue::plain(Value::Boolean(
-                    a && b,
-                ))))
+                Ok(InfixAction::Continue(ExprResultValue::plain(
+                    Value::Boolean(a && b),
+                )))
             }
 
             // ----- Tertiary level: +, -, ++, +-+ -----
@@ -825,11 +809,7 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_plus_minus(op, &left_val, &right.exp)?;
-                let factor = if op == PlusMinusOp::Plus {
-                    1.0
-                } else {
-                    -1.0
-                };
+                let factor = if op == PlusMinusOp::Plus { 1.0 } else { -1.0 };
                 let result =
                     Self::add_sub_deps(val, ty, factor, &left_val, left_dep, left_pair_dep, &right);
                 Ok(InfixAction::Continue(result))
@@ -941,8 +921,13 @@ impl Interpreter {
                         });
                         // Both operands are non-constant dependents: nonlinear
                         if result.is_none()
-                            && left_dep.as_ref().is_some_and(|d| constant_value(d).is_none())
-                            && right.dep.as_ref().is_some_and(|d| constant_value(d).is_none())
+                            && left_dep
+                                .as_ref()
+                                .is_some_and(|d| constant_value(d).is_none())
+                            && right
+                                .dep
+                                .as_ref()
+                                .is_some_and(|d| constant_value(d).is_none())
                         {
                             self.report_error(
                                 ErrorKind::IncompatibleTypes,
@@ -968,8 +953,9 @@ impl Interpreter {
             Value::Pair(_, _) => {
                 let pair_deps = match (left_val, &right.exp) {
                     (Value::Numeric(_), Value::Pair(rx, ry)) => {
-                        let left_linear =
-                            left_dep.as_ref().is_some_and(|d| constant_value(d).is_none());
+                        let left_linear = left_dep
+                            .as_ref()
+                            .is_some_and(|d| constant_value(d).is_none());
                         let right_linear = right.pair_dep.as_ref().is_some_and(|(dx, dy)| {
                             constant_value(dx).is_none() || constant_value(dy).is_none()
                         });
@@ -1022,8 +1008,8 @@ impl Interpreter {
                         } else {
                             let scalar = right_const
                                 .unwrap_or_else(|| value_to_scalar(&right.exp).unwrap_or(0.0));
-                            let (mut dx, mut dy) = left_pair_dep
-                                .unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
+                            let (mut dx, mut dy) =
+                                left_pair_dep.unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
                             dep_scale(&mut dx, scalar);
                             dep_scale(&mut dy, scalar);
                             Some((dx, dy))
@@ -1267,8 +1253,9 @@ impl Interpreter {
                 let (a, b) = value_to_pair(right).unwrap_or((1.0, 0.0));
                 postmeta_graphics::transform::zscaled(a, b)
             }
-            SecondaryBinaryOp::Transformed => value_to_transform(right)
-                .unwrap_or(postmeta_graphics::types::Transform::IDENTITY),
+            SecondaryBinaryOp::Transformed => {
+                value_to_transform(right).unwrap_or(postmeta_graphics::types::Transform::IDENTITY)
+            }
             SecondaryBinaryOp::Times
             | SecondaryBinaryOp::Over
             | SecondaryBinaryOp::DotProd

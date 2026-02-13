@@ -11,8 +11,8 @@ use crate::command::Command;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::Value;
 
-use super::helpers::{value_to_pair, value_to_scalar};
 use super::Interpreter;
+use super::helpers::{value_to_pair, value_to_scalar};
 
 // ---------------------------------------------------------------------------
 // Path join pending state
@@ -48,7 +48,10 @@ impl Interpreter {
             other => {
                 return Err(InterpreterError::new(
                     ErrorKind::TypeError,
-                    format!("Expected pair or path in path construction, got {}", other.ty()),
+                    format!(
+                        "Expected pair or path in path construction, got {}",
+                        other.ty()
+                    ),
                 ));
             }
         };
@@ -144,7 +147,10 @@ impl Interpreter {
                     other => {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
-                            format!("`&` requires a path or pair on the right, got {}", other.ty()),
+                            format!(
+                                "`&` requires a path or pair on the right, got {}",
+                                other.ty()
+                            ),
                         ));
                     }
                 };
@@ -266,11 +272,7 @@ impl Interpreter {
                         self.get_x_next();
                     }
                     let t_val = value_to_scalar(&self.scan_primary()?.exp)?;
-                    if at_least2 {
-                        -t_val.abs()
-                    } else {
-                        t_val
-                    }
+                    if at_least2 { -t_val.abs() } else { t_val }
                 } else {
                     t1
                 };
@@ -353,7 +355,10 @@ impl Interpreter {
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {
-                self.report_error(ErrorKind::MissingToken, "Expected `}` after `curl` direction");
+                self.report_error(
+                    ErrorKind::MissingToken,
+                    "Expected `}` after `curl` direction",
+                );
             }
             Ok(KnotDirection::Curl(curl_val))
         } else {
@@ -363,7 +368,10 @@ impl Interpreter {
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {
-                self.report_error(ErrorKind::MissingToken, "Expected `}` after direction expression");
+                self.report_error(
+                    ErrorKind::MissingToken,
+                    "Expected `}` after direction expression",
+                );
             }
             Self::value_to_direction(&dir)
         }

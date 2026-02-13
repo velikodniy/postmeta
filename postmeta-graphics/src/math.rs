@@ -52,11 +52,7 @@ pub fn pyth_add(a: Scalar, b: Scalar) -> Scalar {
 /// Returns 0 if `a² < b²`.
 pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
     let sq = a.mul_add(a, -(b * b));
-    if sq <= 0.0 {
-        0.0
-    } else {
-        sq.sqrt()
-    }
+    if sq <= 0.0 { 0.0 } else { sq.sqrt() }
 }
 
 /// Floor function (`MetaPost`'s `floor`).

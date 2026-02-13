@@ -15,7 +15,7 @@ use std::collections::{HashMap, HashSet};
 
 use postmeta_graphics::types::Scalar;
 
-use crate::equation::{constant_value, dep_substitute, DepList, VarId};
+use crate::equation::{DepList, VarId, constant_value, dep_substitute};
 use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 
@@ -821,7 +821,7 @@ mod tests {
 
     #[test]
     fn apply_linear_solution_updates_referenced_dependent_only() {
-        use crate::equation::{const_dep, DepTerm};
+        use crate::equation::{DepTerm, const_dep};
 
         let mut vars = Variables::new();
         let x = vars.alloc();
@@ -861,7 +861,7 @@ mod tests {
 
     #[test]
     fn apply_linear_solution_chain_substitution() {
-        use crate::equation::{const_dep, DepTerm};
+        use crate::equation::{DepTerm, const_dep};
 
         let mut vars = Variables::new();
         let x = vars.alloc(); // VarId(0)

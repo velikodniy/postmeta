@@ -234,7 +234,7 @@ impl Interpreter {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
                             "length requires path, string, or pair",
-                        ))
+                        ));
                     }
                 };
                 Ok((Value::Numeric(n), Type::Known))
@@ -318,7 +318,7 @@ impl Interpreter {
                                 "corner operators require a picture or path, got {}",
                                 input.ty()
                             ),
-                        ))
+                        ));
                     }
                 };
                 let (px, py) = match op {
@@ -610,7 +610,7 @@ impl Interpreter {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
                             "Pair only has xpart and ypart",
-                        ))
+                        ));
                     }
                 };
                 // Propagate the component's dependency so equations work.
@@ -656,7 +656,7 @@ impl Interpreter {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
                             "Invalid transform part",
-                        ))
+                        ));
                     }
                 };
                 Ok(super::ExprResultValue::numeric_known(v))
@@ -679,7 +679,7 @@ impl Interpreter {
                     return Err(InterpreterError::new(
                         ErrorKind::TypeError,
                         "Invalid color part",
-                    ))
+                    ));
                 }
             };
             Ok((Value::Numeric(v), Type::Known))
