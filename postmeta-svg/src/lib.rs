@@ -177,7 +177,7 @@ fn render_fill(fill: &FillObject, opts: &RenderOptions) -> svg::node::element::P
 
     // If there is a pen, this is a "filldraw" — also stroke the outline.
     if let Some(ref pen) = fill.pen {
-        let (width, _) = pen_stroke_attrs(pen);
+        let width = pen_stroke_width(pen);
         el = el
             .set("stroke", color_to_svg(fill.color))
             .set("stroke-width", fmt_scalar(width, opts.precision))
@@ -196,7 +196,7 @@ fn render_fill(fill: &FillObject, opts: &RenderOptions) -> svg::node::element::P
 /// Render a stroked path to an SVG `<path>` element.
 fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::element::Path {
     let d = path_to_d(&stroke.path, opts.precision);
-    let (width, _) = pen_stroke_attrs(&stroke.pen);
+    let width = pen_stroke_width(&stroke.pen);
 
     let mut el = svg::node::element::Path::new()
         .set("d", d)
@@ -338,22 +338,21 @@ fn color_to_svg(c: Color) -> String {
 /// returns the maximum vertex distance from the origin (approximation).
 ///
 /// Returns `(width, is_elliptical)`.
-fn pen_stroke_attrs(pen: &Pen) -> (Scalar, bool) {
+fn pen_stroke_width(pen: &Pen) -> Scalar {
     match pen {
         Pen::Elliptical(t) => {
             // The two column vectors of the 2×2 matrix part
             let len1 = t.txx.hypot(t.tyx);
             let len2 = t.txy.hypot(t.tyy);
             // Diameter = 2 * geometric mean of semi-axes
-            let width = 2.0 * (len1 * len2).sqrt();
-            (width, true)
+            2.0 * (len1 * len2).sqrt()
         }
         Pen::Polygonal(vertices) => {
             let max_r = vertices
                 .iter()
                 .map(|v| Vec2::from(*v).length())
                 .fold(0.0, Scalar::max);
-            (2.0 * max_r, false)
+            2.0 * max_r
         }
     }
 }
@@ -589,18 +588,17 @@ mod tests {
     // -- pen_stroke_attrs tests --
 
     #[test]
-    fn test_pen_stroke_attrs_circle() {
+    fn test_pen_stroke_width_circle() {
         let pen = Pen::circle(2.0); // diameter 2 → radius 1
-        let (width, is_ell) = pen_stroke_attrs(&pen);
-        assert!(is_ell);
+        let width = pen_stroke_width(&pen);
         // scale(1) → len1=1, len2=1 → width = 2*sqrt(1*1) = 2
         assert!((width - 2.0).abs() < 0.01, "width = {width}");
     }
 
     #[test]
-    fn test_pen_stroke_attrs_nullpen() {
+    fn test_pen_stroke_width_nullpen() {
         let pen = Pen::Elliptical(Transform::ZERO);
-        let (width, _) = pen_stroke_attrs(&pen);
+        let width = pen_stroke_width(&pen);
         assert!(width.abs() < 0.001);
     }
 
