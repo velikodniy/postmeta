@@ -19,7 +19,7 @@ use svg::Document;
 use postmeta_graphics::bbox::{picture_bbox, BoundingBox};
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, KnotDirection, LineCap, LineJoin, Path, Pen,
-    Picture, Scalar, StrokeObject, TextObject,
+    Picture, Scalar, StrokeObject, TextObject, Vec2,
 };
 
 // ---------------------------------------------------------------------------
@@ -351,7 +351,7 @@ fn pen_stroke_attrs(pen: &Pen) -> (Scalar, bool) {
         Pen::Polygonal(vertices) => {
             let max_r = vertices
                 .iter()
-                .map(|v| v.to_vec2().length())
+                .map(|v| Vec2::from(*v).length())
                 .fold(0.0, Scalar::max);
             (2.0 * max_r, false)
         }

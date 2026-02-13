@@ -1064,9 +1064,20 @@ mod tests {
     #[test]
     fn test_given_direction() {
         // {up} .. {right} — direction constrained at both ends
-        let k0 =
-            Knot::new(Point::new(0.0, 0.0)).with_right(KnotDirection::Given(90.0_f64.to_radians()));
-        let k1 = Knot::new(Point::new(10.0, 5.0)).with_left(KnotDirection::Given(0.0));
+        let k0 = Knot {
+            point: Point::new(0.0, 0.0),
+            left: KnotDirection::Open,
+            right: KnotDirection::Given(90.0_f64.to_radians()),
+            left_tension: 0.0,
+            right_tension: 0.0,
+        };
+        let k1 = Knot {
+            point: Point::new(10.0, 5.0),
+            left: KnotDirection::Given(0.0),
+            right: KnotDirection::Open,
+            left_tension: 0.0,
+            right_tension: 0.0,
+        };
         let mut path = Path::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
@@ -1083,8 +1094,20 @@ mod tests {
         let mut path1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 10.0)]);
         make_choices(&mut path1);
 
-        let k0 = Knot::new(Point::new(0.0, 0.0)).with_right_tension(4.0);
-        let k1 = Knot::new(Point::new(10.0, 10.0)).with_left_tension(4.0);
+        let k0 = Knot {
+            point: Point::new(0.0, 0.0),
+            left: KnotDirection::Open,
+            right: KnotDirection::Open,
+            left_tension: 0.0,
+            right_tension: 4.0,
+        };
+        let k1 = Knot {
+            point: Point::new(10.0, 10.0),
+            left: KnotDirection::Open,
+            right: KnotDirection::Open,
+            left_tension: 4.0,
+            right_tension: 0.0,
+        };
         let mut path2 = Path::from_knots(vec![k0, k1], false);
         make_choices(&mut path2);
 

@@ -406,7 +406,7 @@ impl Interpreter {
                 let pic_val = self.scan_expression()?.exp;
                 if let Value::Picture(p) = pic_val {
                     let target = self.get_target_picture(&pic_name);
-                    target.merge_from(p);
+                    target.merge(p);
                 } else {
                     self.report_error(
                         ErrorKind::TypeError,
@@ -431,11 +431,11 @@ impl Interpreter {
     /// Scan `withpen`, `withcolor`, `dashed` options.
     fn scan_with_options(&mut self) -> InterpResult<(DrawingState, bool)> {
         let mut ds = DrawingState {
-            pen: Pen::default_pen(),
+            pen: Pen::default(),
             color: Color::BLACK,
             dash: None,
-            line_cap: LineCap::from_f64(self.internals.get_id(InternalId::LineCap)),
-            line_join: LineJoin::from_f64(self.internals.get_id(InternalId::LineJoin)),
+            line_cap: LineCap::from(self.internals.get_id(InternalId::LineCap)),
+            line_join: LineJoin::from(self.internals.get_id(InternalId::LineJoin)),
             miter_limit: self.internals.get_id(InternalId::MiterLimit),
         };
         let mut pen_specified = false;

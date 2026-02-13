@@ -37,7 +37,7 @@ pub trait Transformable {
 impl Transformable for Point {
     #[inline]
     fn transformed(&self, t: &Transform) -> Self {
-        t.apply_to_point(*self)
+        t.apply(*self)
     }
 }
 

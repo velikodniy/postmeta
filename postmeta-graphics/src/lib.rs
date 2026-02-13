@@ -2,6 +2,7 @@ pub mod types;
 
 pub mod bbox;
 pub mod bezier;
+pub mod error;
 pub mod intersection;
 pub mod math;
 pub mod path;

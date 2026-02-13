@@ -10,8 +10,9 @@
 //! - `makepath` — convert a pen back to a path
 //! - `penoffset` — find the pen offset in a given direction
 
+use crate::error::GraphicsError;
 use crate::types::{
-    index_to_scalar, GraphicsError, Knot, Path, Pen, Point, Scalar, Transform, Vec2, NEAR_ZERO,
+    Knot, NEAR_ZERO, Path, Pen, Point, Scalar, Transform, Vec2, index_to_scalar,
 };
 
 // ---------------------------------------------------------------------------
@@ -97,9 +98,9 @@ fn make_ellipse_path(t: &Transform) -> Path {
             let p = Point::new(cos_a, sin_a);
             let tangent = Vec2::new(-sin_a, cos_a);
 
-            let on_curve = t.apply_to_point(p);
-            let right_cp = t.apply_to_point(p + tangent * KAPPA);
-            let left_cp = t.apply_to_point(p - tangent * KAPPA);
+            let on_curve = t.apply(p);
+            let right_cp = t.apply(p + tangent * KAPPA);
+            let left_cp = t.apply(p - tangent * KAPPA);
 
             Knot::with_controls(on_curve, left_cp, right_cp)
         })
@@ -254,7 +255,7 @@ mod tests {
         let pen = Pen::circle(2.0); // radius = 1.0
         let path = makepath(&pen);
         for knot in &path.knots {
-            let r = knot.point.to_vec2().length();
+            let r = Vec2::from(knot.point).length();
             assert!(
                 (r - 1.0).abs() < 0.01,
                 "point {:?} not on unit circle: r = {r}",

@@ -295,10 +295,10 @@ impl Interpreter {
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
                                 for pt in [
-                                    t.apply_to_point(Point::new(1.0, 0.0)),
-                                    t.apply_to_point(Point::new(-1.0, 0.0)),
-                                    t.apply_to_point(Point::new(0.0, 1.0)),
-                                    t.apply_to_point(Point::new(0.0, -1.0)),
+                                    t.apply(Point::new(1.0, 0.0)),
+                                    t.apply(Point::new(-1.0, 0.0)),
+                                    t.apply(Point::new(0.0, 1.0)),
+                                    t.apply(Point::new(0.0, -1.0)),
                                 ] {
                                     bb.include_point(pt);
                                 }

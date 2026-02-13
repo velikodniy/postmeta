@@ -146,7 +146,7 @@ mod tests {
         let mut pic2 = Picture::new();
         pic2.push(GraphicsObject::SetBoundsEnd);
 
-        pic1.merge(&pic2);
+        pic1.merge(pic2);
         assert_eq!(pic1.objects.len(), 2);
     }
 

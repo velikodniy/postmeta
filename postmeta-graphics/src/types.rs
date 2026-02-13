@@ -1,11 +1,53 @@
 //! Core types shared across the `PostMeta` system.
-//!
-//! These types define the fundamental data structures for the `MetaPost`
-//! graphics model: paths, pens, pictures, transforms, and colors.
 
 use std::fmt;
 use std::ops;
 use std::sync::Arc;
+
+// ---------------------------------------------------------------------------
+// Scalar
+// ---------------------------------------------------------------------------
+
+/// Convenience alias. `MetaPost` historically used 16.16 fixed-point;
+/// we use f64 for compatibility and WASM support.
+pub type Scalar = f64;
+
+/// Tolerance for floating-point comparisons.
+pub const EPSILON: Scalar = 1.0 / 65536.0;
+
+/// Near-zero guard for avoiding division by zero or singularity.
+///
+/// Used as a denominator check / vector-length check where we want to
+/// detect degenerate transforms, zero-length vectors, etc.
+pub const NEAR_ZERO: Scalar = 1e-30;
+
+/// Tolerance for floating-point angle comparisons near multiples of pi.
+pub const ANGLE_TOLERANCE: Scalar = 1e-12;
+
+/// Convert a segment index to a path time parameter.
+///
+/// Path operations use `f64` time parameters where integer values correspond
+/// to knot indices. Segment counts in any practical path are far below 2^52,
+/// so no precision is lost.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "path segment counts are far below 2^52"
+)]
+pub const fn index_to_scalar(i: usize) -> Scalar {
+    i as Scalar
+}
+
+/// Convert a non-negative path time parameter to a segment index.
+///
+/// The caller must ensure `t >= 0.0`. Values are floored before conversion.
+#[expect(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "path time parameters are non-negative and small"
+)]
+pub fn scalar_to_index(t: Scalar) -> usize {
+    t.floor() as usize
+}
 
 // ---------------------------------------------------------------------------
 // Point
@@ -13,7 +55,6 @@ use std::sync::Arc;
 
 /// A 2D point.
 ///
-/// This is the fundamental position type used throughout `PostMeta`.
 /// Points represent locations; for displacements use [`Vec2`].
 #[derive(Clone, Copy, Default, PartialEq)]
 pub struct Point {
@@ -26,27 +67,13 @@ impl Point {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
     /// Create a new point.
-    #[inline]
-    #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
-    }
-
-    /// Convert this point to a [`Vec2`] (displacement from the origin).
-    #[inline]
-    #[must_use]
-    pub const fn to_vec2(self) -> Vec2 {
-        Vec2 {
-            x: self.x,
-            y: self.y,
-        }
     }
 
     /// Linearly interpolate between `self` and `other`.
     ///
     /// `t = 0` returns `self`, `t = 1` returns `other`.
-    #[inline]
-    #[must_use]
     pub fn lerp(self, other: Self, t: Scalar) -> Self {
         Self::new(
             t.mul_add(other.x - self.x, self.x),
@@ -65,7 +92,6 @@ impl fmt::Debug for Point {
 impl ops::Add<Vec2> for Point {
     type Output = Self;
 
-    #[inline]
     fn add(self, rhs: Vec2) -> Self {
         Self {
             x: self.x + rhs.x,
@@ -78,7 +104,6 @@ impl ops::Add<Vec2> for Point {
 impl ops::Sub<Vec2> for Point {
     type Output = Self;
 
-    #[inline]
     fn sub(self, rhs: Vec2) -> Self {
         Self {
             x: self.x - rhs.x,
@@ -91,7 +116,6 @@ impl ops::Sub<Vec2> for Point {
 impl ops::Sub for Point {
     type Output = Vec2;
 
-    #[inline]
     fn sub(self, rhs: Self) -> Vec2 {
         Vec2 {
             x: self.x - rhs.x,
@@ -106,8 +130,7 @@ impl ops::Sub for Point {
 
 /// A 2D vector (displacement).
 ///
-/// Unlike [`Point`], a `Vec2` represents a direction and magnitude,
-/// not a location. `Point - Point` yields a `Vec2`.
+/// `Vec2` represents a direction and magnitude, not a location.
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Vec2 {
     pub x: f64,
@@ -119,17 +142,20 @@ impl Vec2 {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
     /// Create a new vector.
-    #[inline]
-    #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
     /// Euclidean length (magnitude).
-    #[inline]
-    #[must_use]
     pub fn length(self) -> f64 {
         self.x.hypot(self.y)
+    }
+}
+
+/// Convert a point to a [`Vec2`] (displacement from the origin).
+impl From<Point> for Vec2 {
+    fn from(p: Point) -> Vec2 {
+        Vec2 { x: p.x, y: p.y }
     }
 }
 
@@ -137,7 +163,6 @@ impl Vec2 {
 impl ops::Add for Vec2 {
     type Output = Self;
 
-    #[inline]
     fn add(self, rhs: Self) -> Self {
         Self {
             x: self.x + rhs.x,
@@ -150,7 +175,6 @@ impl ops::Add for Vec2 {
 impl ops::Sub for Vec2 {
     type Output = Self;
 
-    #[inline]
     fn sub(self, rhs: Self) -> Self {
         Self {
             x: self.x - rhs.x,
@@ -163,7 +187,6 @@ impl ops::Sub for Vec2 {
 impl ops::Neg for Vec2 {
     type Output = Self;
 
-    #[inline]
     fn neg(self) -> Self {
         Self {
             x: -self.x,
@@ -176,7 +199,6 @@ impl ops::Neg for Vec2 {
 impl ops::Mul<Scalar> for Vec2 {
     type Output = Self;
 
-    #[inline]
     fn mul(self, rhs: Scalar) -> Self {
         Self {
             x: self.x * rhs,
@@ -189,86 +211,12 @@ impl ops::Mul<Scalar> for Vec2 {
 impl ops::Mul<Vec2> for Scalar {
     type Output = Vec2;
 
-    #[inline]
     fn mul(self, rhs: Vec2) -> Vec2 {
         Vec2 {
             x: self * rhs.x,
             y: self * rhs.y,
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Error
-// ---------------------------------------------------------------------------
-
-/// Errors returned by graphics operations.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GraphicsError {
-    /// `makepen` was called with an invalid path.
-    InvalidPen(&'static str),
-}
-
-impl fmt::Display for GraphicsError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::InvalidPen(msg) => write!(f, "invalid pen: {msg}"),
-        }
-    }
-}
-
-impl std::error::Error for GraphicsError {}
-
-// ---------------------------------------------------------------------------
-// Scalar
-// ---------------------------------------------------------------------------
-
-/// Convenience alias. `MetaPost` historically used 16.16 fixed-point;
-/// we use f64 for modern compatibility and WASM support.
-pub type Scalar = f64;
-
-/// Tolerance for floating-point comparisons.
-pub const EPSILON: Scalar = 1.0 / 65536.0;
-
-/// Near-zero guard for avoiding division by zero or singularity.
-///
-/// Used as a denominator check / vector-length check where we want to
-/// detect degenerate transforms, zero-length vectors, etc.
-pub const NEAR_ZERO: Scalar = 1e-30;
-
-/// Tolerance for floating-point angle comparisons near multiples of pi.
-pub const ANGLE_TOLERANCE: Scalar = 1e-12;
-
-/// Maximum coordinate value (matches `MetaPost`'s `infinity`).
-pub const INFINITY_VAL: Scalar = 4_095.999_98;
-
-/// Convert a segment index to a path time parameter.
-///
-/// Path operations use `f64` time parameters where integer values correspond
-/// to knot indices. Segment counts in any practical path are far below 2^52,
-/// so no precision is lost.
-#[inline]
-#[must_use]
-#[expect(
-    clippy::cast_precision_loss,
-    reason = "path segment counts are far below 2^52"
-)]
-pub const fn index_to_scalar(i: usize) -> Scalar {
-    i as Scalar
-}
-
-/// Convert a non-negative path time parameter to a segment index.
-///
-/// The caller must ensure `t >= 0.0`. Values are floored before conversion.
-#[inline]
-#[must_use]
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "path time parameters are non-negative and small"
-)]
-pub fn scalar_to_index(t: Scalar) -> usize {
-    t.floor() as usize
 }
 
 // ---------------------------------------------------------------------------
@@ -295,16 +243,8 @@ impl Color {
         b: 1.0,
     };
 
-    #[inline]
-    #[must_use]
     pub const fn new(r: Scalar, g: Scalar, b: Scalar) -> Self {
         Self { r, g, b }
-    }
-}
-
-impl Default for Color {
-    fn default() -> Self {
-        Self::BLACK
     }
 }
 
@@ -312,7 +252,7 @@ impl Default for Color {
 // LineCap / LineJoin
 // ---------------------------------------------------------------------------
 
-/// Stroke line-cap styles (matches SVG / PostScript).
+/// Stroke line-cap styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineCap {
     Butt = 0,
@@ -321,13 +261,13 @@ pub enum LineCap {
     Square = 2,
 }
 
-impl LineCap {
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "linecap/linejoin values are small integers (0, 1, 2)"
-    )]
-    #[must_use]
-    pub const fn from_f64(v: Scalar) -> Self {
+/// Convert a `Scalar` to a `LineCap` by interpreting it as an integer code.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "linecap/linejoin values are small integers (0, 1, 2)"
+)]
+impl From<Scalar> for LineCap {
+    fn from(v: Scalar) -> Self {
         match v as i32 {
             0 => Self::Butt,
             2 => Self::Square,
@@ -336,7 +276,7 @@ impl LineCap {
     }
 }
 
-/// Stroke line-join styles (matches SVG / PostScript).
+/// Stroke line-join styles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineJoin {
     Miter = 0,
@@ -345,13 +285,12 @@ pub enum LineJoin {
     Bevel = 2,
 }
 
-impl LineJoin {
+impl From<Scalar> for LineJoin {
     #[expect(
         clippy::cast_possible_truncation,
         reason = "linecap/linejoin values are small integers (0, 1, 2)"
     )]
-    #[must_use]
-    pub const fn from_f64(v: Scalar) -> Self {
+    fn from(v: Scalar) -> Self {
         match v as i32 {
             0 => Self::Miter,
             2 => Self::Bevel,
@@ -384,7 +323,7 @@ pub enum KnotDirection {
     Explicit(Point),
     /// A specific direction angle in **radians**.
     ///
-    /// Note: `MetaPost` uses degrees externally, but angles are converted to
+    /// Note: degrees are used externally, but angles are converted to
     /// radians at parse time. All internal computations use radians.
     Given(Scalar),
     /// Curl parameter (default 1.0 at open-path endpoints).
@@ -398,7 +337,7 @@ pub enum KnotDirection {
 // Knot
 // ---------------------------------------------------------------------------
 
-/// A single knot in a `MetaPost` path.
+/// A single knot in a path.
 ///
 /// Each knot has a point plus left (incoming) and right (outgoing)
 /// direction constraints and tension values.
@@ -418,7 +357,6 @@ pub struct Knot {
 
 impl Knot {
     /// Create a new knot at the given point with default (open) constraints.
-    #[must_use]
     pub const fn new(point: Point) -> Self {
         Self {
             point,
@@ -430,7 +368,6 @@ impl Knot {
     }
 
     /// Create a knot with explicit Bezier control points already computed.
-    #[must_use]
     pub const fn with_controls(point: Point, left_cp: Point, right_cp: Point) -> Self {
         Self {
             point,
@@ -440,41 +377,13 @@ impl Knot {
             right_tension: 1.0,
         }
     }
-
-    /// Set the left (incoming) direction constraint.
-    #[must_use]
-    pub const fn with_left(mut self, dir: KnotDirection) -> Self {
-        self.left = dir;
-        self
-    }
-
-    /// Set the right (outgoing) direction constraint.
-    #[must_use]
-    pub const fn with_right(mut self, dir: KnotDirection) -> Self {
-        self.right = dir;
-        self
-    }
-
-    /// Set the left (incoming) tension.
-    #[must_use]
-    pub const fn with_left_tension(mut self, t: Scalar) -> Self {
-        self.left_tension = t;
-        self
-    }
-
-    /// Set the right (outgoing) tension.
-    #[must_use]
-    pub const fn with_right_tension(mut self, t: Scalar) -> Self {
-        self.right_tension = t;
-        self
-    }
 }
 
 // ---------------------------------------------------------------------------
 // Path
 // ---------------------------------------------------------------------------
 
-/// A `MetaPost` path: a sequence of knots, optionally cyclic.
+/// A path: a sequence of knots, optionally cyclic.
 ///
 /// After Hobby's algorithm runs, all `KnotDirection` values will be
 /// `Explicit` (computed Bezier control points).
@@ -486,7 +395,6 @@ pub struct Path {
 
 impl Path {
     /// Create an empty open path.
-    #[must_use]
     pub const fn new() -> Self {
         Self {
             knots: Vec::new(),
@@ -495,7 +403,6 @@ impl Path {
     }
 
     /// Create a path from knots.
-    #[must_use]
     pub const fn from_knots(knots: Vec<Knot>, is_cyclic: bool) -> Self {
         Self { knots, is_cyclic }
     }
@@ -503,7 +410,6 @@ impl Path {
     /// Number of segments in the path.
     /// For a cyclic path with N knots, there are N segments.
     /// For an open path with N knots, there are N-1 segments.
-    #[must_use]
     pub fn num_segments(&self) -> usize {
         if self.knots.is_empty() {
             return 0;
@@ -526,7 +432,7 @@ impl Default for Path {
 // Pen
 // ---------------------------------------------------------------------------
 
-/// A `MetaPost` pen: either elliptical (common) or polygonal.
+/// A pen: either elliptical (common) or polygonal.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pen {
     /// An elliptical pen defined by an affine transform of the unit circle.
@@ -539,7 +445,6 @@ pub enum Pen {
 
 impl Pen {
     /// Create a circular pen with the given diameter centered at origin.
-    #[must_use]
     pub const fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
         Self::Elliptical(Transform {
@@ -550,23 +455,23 @@ impl Pen {
     }
 
     /// The null pen: a single point at the origin.
-    #[must_use]
     pub const fn null() -> Self {
         Self::Elliptical(Transform::ZERO)
     }
+}
 
-    /// The default pen: a circle of diameter 0.5bp.
-    #[must_use]
-    pub const fn default_pen() -> Self {
+impl Default for Pen {
+    /// The default pen is a circle with diameter 0.5.
+    fn default() -> Self {
         Self::circle(0.5)
     }
 }
 
 // ---------------------------------------------------------------------------
-// Transform (MetaPost-level, 6-component)
+// Transform
 // ---------------------------------------------------------------------------
 
-/// A `MetaPost` transform with named components.
+/// A transform with named components.
 ///
 /// Maps point (x, y) to:
 ///   (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
@@ -603,8 +508,6 @@ impl Transform {
     /// Compose two transforms: `self` applied first, then `other`.
     ///
     /// Equivalent to matrix multiplication `other * self`.
-    #[inline]
-    #[must_use]
     pub fn then(&self, other: &Self) -> Self {
         Self {
             txx: other.txx.mul_add(self.txx, other.txy * self.tyx),
@@ -621,37 +524,11 @@ impl Transform {
     }
 
     /// Apply this transform to a point.
-    #[inline]
-    #[must_use]
-    pub fn apply_to_point(&self, p: Point) -> Point {
+    pub fn apply(&self, p: Point) -> Point {
         Point::new(
             self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
             self.tyy.mul_add(p.y, self.tyx.mul_add(p.x, self.ty)),
         )
-    }
-
-    /// Extract the six coefficients in row-major order:
-    /// `[txx, txy, tyx, tyy, tx, ty]`.
-    #[inline]
-    #[must_use]
-    pub const fn as_coeffs(&self) -> [Scalar; 6] {
-        [self.txx, self.txy, self.tyx, self.tyy, self.tx, self.ty]
-    }
-}
-
-/// `Transform * Transform` composes transforms (apply left, then right).
-impl ops::Mul for Transform {
-    type Output = Self;
-
-    #[inline]
-    fn mul(self, rhs: Self) -> Self {
-        self.then(&rhs)
-    }
-}
-
-impl Default for Transform {
-    fn default() -> Self {
-        Self::IDENTITY
     }
 }
 
@@ -718,7 +595,6 @@ pub struct Picture {
 }
 
 impl Picture {
-    #[must_use]
     pub const fn new() -> Self {
         Self {
             objects: Vec::new(),
@@ -729,13 +605,8 @@ impl Picture {
         self.objects.push(obj);
     }
 
-    /// Append all objects from another picture (cloning).
-    pub fn merge(&mut self, other: &Self) {
-        self.objects.extend(other.objects.iter().cloned());
-    }
-
-    /// Append all objects from another picture (consuming).
-    pub fn merge_from(&mut self, other: Self) {
+    /// Append all objects from another picture.
+    pub fn merge(&mut self, other: Self) {
         self.objects.extend(other.objects);
     }
 }
@@ -753,24 +624,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn color_defaults() {
-        assert_eq!(Color::default(), Color::BLACK);
-        assert_eq!(Color::WHITE, Color::new(1.0, 1.0, 1.0));
+    fn linecap_from_scalar() {
+        assert_eq!(LineCap::from(0.0), LineCap::Butt);
+        assert_eq!(LineCap::from(1.0), LineCap::Round);
+        assert_eq!(LineCap::from(2.0), LineCap::Square);
+        assert_eq!(LineCap::from(99.0), LineCap::Round);
     }
 
     #[test]
-    fn linecap_from_f64() {
-        assert_eq!(LineCap::from_f64(0.0), LineCap::Butt);
-        assert_eq!(LineCap::from_f64(1.0), LineCap::Round);
-        assert_eq!(LineCap::from_f64(2.0), LineCap::Square);
-        assert_eq!(LineCap::from_f64(99.0), LineCap::Round);
-    }
-
-    #[test]
-    fn linejoin_from_f64() {
-        assert_eq!(LineJoin::from_f64(0.0), LineJoin::Miter);
-        assert_eq!(LineJoin::from_f64(1.0), LineJoin::Round);
-        assert_eq!(LineJoin::from_f64(2.0), LineJoin::Bevel);
+    fn linejoin_from_scalar() {
+        assert_eq!(LineJoin::from(0.0), LineJoin::Miter);
+        assert_eq!(LineJoin::from(1.0), LineJoin::Round);
+        assert_eq!(LineJoin::from(2.0), LineJoin::Bevel);
     }
 
     #[test]
@@ -839,7 +704,7 @@ mod tests {
             tyx: 0.0,
             tyy: 3.0,
         };
-        let p = t.apply_to_point(Point::new(1.0, 1.0));
+        let p = t.apply(Point::new(1.0, 1.0));
         assert!((p.x - 12.0).abs() < EPSILON);
         assert!((p.y - 23.0).abs() < EPSILON);
     }
@@ -864,7 +729,7 @@ mod tests {
         p1.push(GraphicsObject::ClipEnd);
         let mut p2 = Picture::new();
         p2.push(GraphicsObject::SetBoundsEnd);
-        p1.merge(&p2);
+        p1.merge(p2);
         assert_eq!(p1.objects.len(), 2);
     }
 }

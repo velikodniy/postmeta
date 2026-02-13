@@ -3,7 +3,9 @@
 //! Provides [`BoundingBox`] and helpers for computing bounds of paths,
 //! pens, and pictures.
 
-use crate::types::{GraphicsObject, KnotDirection, Path, Pen, Picture, Point, Scalar, TextObject};
+use crate::types::{
+    GraphicsObject, KnotDirection, Path, Pen, Picture, Point, Scalar, TextObject, Vec2,
+};
 
 // ---------------------------------------------------------------------------
 // Text bounding box heuristic constants
@@ -152,7 +154,7 @@ pub fn pen_max_extent(pen: &Pen) -> Scalar {
         }
         Pen::Polygonal(verts) => verts
             .iter()
-            .map(|v| v.to_vec2().length())
+            .map(|v| Vec2::from(*v).length())
             .fold(0.0, Scalar::max),
     }
 }
@@ -224,7 +226,7 @@ fn text_bbox(text: &TextObject, bb: &mut BoundingBox) {
         Point::new(0.0, ascender),
     ];
     for corner in &corners {
-        let pt = text.transform.apply_to_point(*corner);
+        let pt = text.transform.apply(*corner);
         bb.include_point(pt);
     }
 }
@@ -240,7 +242,7 @@ fn text_bbox(text: &TextObject, bb: &mut BoundingBox) {
 )]
 mod tests {
     use super::*;
-    use crate::types::{Color, Knot, Transform, EPSILON};
+    use crate::types::{Color, EPSILON, Knot, Transform};
     use std::sync::Arc;
 
     fn make_unit_square() -> Path {

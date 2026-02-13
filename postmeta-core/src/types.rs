@@ -363,7 +363,7 @@ pub struct DrawingState {
 impl Default for DrawingState {
     fn default() -> Self {
         Self {
-            pen: Pen::default_pen(),
+            pen: Pen::default(),
             color: Color::BLACK,
             dash: None,
             line_cap: LineCap::Round,
