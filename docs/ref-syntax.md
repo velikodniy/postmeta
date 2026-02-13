@@ -243,14 +243,14 @@ Characters on the same row merge into a single symbolic token:
 
 ```
 Row 1: A-Z _ a-z         (letters + underscore)
-Row 2: : < = >           
-Row 3: # & @ $            
-Row 4: / * \              
-Row 5: + -                
-Row 6: ! ?                
-Row 7: ' `                
-Row 8: ^ ~                
-Row 9: { }                
+Row 2: : < = >
+Row 3: # & @ $
+Row 4: / * \
+Row 5: + -
+Row 6: ! ?
+Row 7: ' `
+Row 8: ^ ~
+Row 9: { }
 Row 10: [                 (self only)
 Row 11: ]                 (self only)
 ```
