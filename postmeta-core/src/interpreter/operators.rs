@@ -139,7 +139,7 @@ impl Interpreter {
             }
             UnaryOp::Floor => {
                 let v = value_to_scalar(input)?;
-                Ok((Value::Numeric(math::floor(v)), Type::Known))
+                Ok((Value::Numeric(v.floor()), Type::Known))
             }
             UnaryOp::MExp => {
                 let v = value_to_scalar(input)?;

@@ -55,11 +55,6 @@ pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
     if sq <= 0.0 { 0.0 } else { sq.sqrt() }
 }
 
-/// Floor function (`MetaPost`'s `floor`).
-pub fn floor(x: Scalar) -> Scalar {
-    x.floor()
-}
-
 /// Uniform random deviate in [0, x).
 ///
 /// Uses a simple xorshift for reproducibility. The `seed` is mutated.
@@ -177,13 +172,6 @@ mod tests {
         assert!((pyth_sub(5.0, 4.0) - 3.0).abs() < EPSILON);
         // When a < b, returns 0
         assert_eq!(pyth_sub(3.0, 5.0), 0.0);
-    }
-
-    #[test]
-    fn test_floor() {
-        assert_eq!(floor(3.7), 3.0);
-        assert_eq!(floor(-1.2), -2.0);
-        assert_eq!(floor(5.0), 5.0);
     }
 
     #[test]
