@@ -22,7 +22,7 @@
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
-use crate::types::{ANGLE_TOLERANCE, EPSILON, KnotDirection, NEAR_ZERO, Path, Point, Scalar, Vec2};
+use crate::{math, types::{EPSILON, KnotDirection, NEAR_ZERO, Path, Point, Scalar, Vec2}};
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
@@ -195,7 +195,7 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for li in 1..(seg_len - 1) {
-        psi[li] = turning_angle(delta[indices[li - 1]], delta[indices[li]]);
+        psi[li] = delta[indices[li - 1]].angle_to(delta[indices[li]]);
     }
 
     let mut theta = vec![0.0; seg_len];
@@ -209,7 +209,7 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 
     match path.knots[gi].right {
         KnotDirection::Given(angle) => {
-            let th = normalize_angle(angle - angle_of(delta[gi]));
+            let th = math::normalize_angle(angle - delta[gi].direction());
             theta[0] = th;
             uu[0] = 0.0;
             vv[0] = th;
@@ -294,8 +294,8 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 
     match path.knots[ge].left {
         KnotDirection::Given(angle) => {
-            theta[last] = normalize_angle(
-                angle - angle_of(delta[ge_prev]) - psi.get(last).copied().unwrap_or(0.0),
+            theta[last] = math::normalize_angle(
+                angle - delta[ge_prev].direction() - psi.get(last).copied().unwrap_or(0.0),
             );
         }
         KnotDirection::Curl(gamma) => {
@@ -415,7 +415,7 @@ fn infer_right_from_left(path: &mut Path, idx: usize) {
             if d.length() < EPSILON {
                 Some(KnotDirection::Curl(1.0))
             } else {
-                Some(KnotDirection::Given(angle_of(d)))
+                Some(KnotDirection::Given(d.direction()))
             }
         }
         KnotDirection::Open => None,
@@ -441,7 +441,7 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
             if d.length() < EPSILON {
                 Some(KnotDirection::Curl(1.0))
             } else {
-                Some(KnotDirection::Given(angle_of(d)))
+                Some(KnotDirection::Given(d.direction()))
             }
         }
         KnotDirection::Open => None,
@@ -471,18 +471,18 @@ fn solve_two_knots_range(
 
     let seg = i.min(full_delta.len() - 1);
     let d = full_delta[seg];
-    let chord_angle = angle_of(d);
+    let chord_angle = d.direction();
 
     match (&path.knots[i].right, &path.knots[j].left) {
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
-            let theta = normalize_angle(*a1 - chord_angle);
-            let phi = normalize_angle(-(*a2 - chord_angle));
+            let theta = math::normalize_angle(*a1 - chord_angle);
+            let phi = math::normalize_angle(-(*a2 - chord_angle));
             set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
             // Given start, curl end: theta from direction, phi via curl ratio.
-            let theta = normalize_angle(*a1 - chord_angle);
+            let theta = math::normalize_angle(*a1 - chord_angle);
             let lt_j = path.knots[j].left_tension.abs();
             let rt_i = path.knots[i].right_tension.abs();
             let ff = curl_ratio(*gamma, lt_j, rt_i);
@@ -492,7 +492,7 @@ fn solve_two_knots_range(
         }
         (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
             // Curl start, given end: phi from direction, theta via curl ratio.
-            let phi = normalize_angle(-(*a2 - chord_angle));
+            let phi = math::normalize_angle(-(*a2 - chord_angle));
             let rt_i = path.knots[i].right_tension.abs();
             let lt_j = path.knots[j].left_tension.abs();
             let ff = curl_ratio(*gamma, rt_i, lt_j);
@@ -547,7 +547,7 @@ fn solve_choices_cyclic(path: &mut Path) {
     // Turning angles: psi[k] = angle between chord k-1 and chord k.
     // For cyclic paths, psi[0] uses delta[n-1] and delta[0].
     let psi: Vec<Scalar> = (0..n)
-        .map(|k| turning_angle(delta[(k + n - 1) % n], delta[k]))
+        .map(|k| delta[(k + n - 1) % n].angle_to(delta[k]))
         .collect();
 
     // Forward sweep: compute uu[k], vv[k], ww[k] for k=1..n.
@@ -888,37 +888,6 @@ const fn tension_val(t: Scalar) -> Scalar {
     t.abs().max(MIN_TENSION)
 }
 
-/// Reduce an angle to the range [-π, π].
-fn normalize_angle(a: Scalar) -> Scalar {
-    // Normalize to [0, 2π).
-    let normalized = a.rem_euclid(std::f64::consts::TAU);
-    // Shift to [-π, π].
-    if normalized > std::f64::consts::PI {
-        normalized - std::f64::consts::TAU
-    } else {
-        normalized
-    }
-}
-
-/// Compute the angle (in radians) of a 2D vector.
-fn angle_of(v: Vec2) -> Scalar {
-    v.y.atan2(v.x)
-}
-
-/// Compute the signed turning angle (in radians) from vector `a` to vector `b`.
-fn turning_angle(a: Vec2, b: Vec2) -> Scalar {
-    let ang_a = angle_of(a);
-    let ang_b = angle_of(b);
-    let diff = ang_b - ang_a;
-    // Normalize for robustness.
-    let t = normalize_angle(diff);
-    if (t + std::f64::consts::PI).abs() < ANGLE_TOLERANCE {
-        std::f64::consts::PI
-    } else {
-        t
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1156,24 +1125,6 @@ mod tests {
         // curl=1, alpha=1, beta=1 should give 1.0
         let cr = curl_ratio(1.0, 1.0, 1.0);
         assert!((cr - 1.0).abs() < EPSILON, "curl_ratio(1,1,1) = {cr}");
-    }
-
-    #[test]
-    fn test_turning_angle() {
-        let a = Vec2::new(1.0, 0.0);
-        let b = Vec2::new(0.0, 1.0);
-        let ta = turning_angle(a, b);
-        assert!((ta - std::f64::consts::FRAC_PI_2).abs() < EPSILON);
-
-        let ta2 = turning_angle(b, a);
-        assert!((ta2 + std::f64::consts::FRAC_PI_2).abs() < EPSILON);
-    }
-
-    #[test]
-    fn test_turning_angle_straight() {
-        let a = Vec2::new(1.0, 0.0);
-        let ta = turning_angle(a, a);
-        assert!(ta.abs() < EPSILON);
     }
 
     #[test]

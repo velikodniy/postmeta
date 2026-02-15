@@ -4,6 +4,8 @@ use std::fmt;
 use std::ops;
 use std::sync::Arc;
 
+use crate::math;
+
 // ---------------------------------------------------------------------------
 // Scalar
 // ---------------------------------------------------------------------------
@@ -149,6 +151,22 @@ impl Vec2 {
     /// Euclidean length (magnitude).
     pub fn length(self) -> f64 {
         self.x.hypot(self.y)
+    }
+
+    /// Angle in radians, measured counter-clockwise from the positive x-axis.
+    pub fn direction(self) -> Scalar {
+        self.y.atan2(self.x)
+    }
+
+    pub fn angle_to(self, other: Self) -> Scalar {
+        let diff = other.direction() - self.direction();
+        // Normalize for robustness.
+        let t = math::normalize_angle(diff);
+        if (t + std::f64::consts::PI).abs() < ANGLE_TOLERANCE {
+            std::f64::consts::PI
+        } else {
+            t
+        }
     }
 }
 
@@ -636,6 +654,25 @@ mod tests {
         assert_eq!(LineJoin::from(0.0), LineJoin::Miter);
         assert_eq!(LineJoin::from(1.0), LineJoin::Round);
         assert_eq!(LineJoin::from(2.0), LineJoin::Bevel);
+        assert_eq!(LineJoin::from(99.0), LineJoin::Round);
+    }
+
+    #[test]
+    fn test_vec2_angle_to() {
+        let a = Vec2::new(1.0, 0.0);
+        let b = Vec2::new(0.0, 1.0);
+        let ta = a.angle_to(b);
+        assert!((ta - std::f64::consts::FRAC_PI_2).abs() < EPSILON);
+
+        let ta2 = b.angle_to(a);
+        assert!((ta2 + std::f64::consts::FRAC_PI_2).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_vec2_angle_to_straight() {
+        let a = Vec2::new(1.0, 0.0);
+        let ta = a.angle_to(a);
+        assert!(ta.abs() < EPSILON);
     }
 
     #[test]

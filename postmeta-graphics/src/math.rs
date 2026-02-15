@@ -68,6 +68,18 @@ pub fn normal_deviate(seed: &mut u64) -> Scalar {
     (-2.0 * u1.ln()).sqrt() * (2.0 * core::f64::consts::PI * u2).cos()
 }
 
+/// Reduce an angle to the range [-π, π].
+pub fn normalize_angle(a: Scalar) -> Scalar {
+    // Normalize to [0, 2π).
+    let normalized = a.rem_euclid(std::f64::consts::TAU);
+    // Shift to [-π, π].
+    if normalized > std::f64::consts::PI {
+        normalized - std::f64::consts::TAU
+    } else {
+        normalized
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
