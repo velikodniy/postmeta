@@ -209,7 +209,7 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 
     match path.knots[gi].right {
         KnotDirection::Given(angle) => {
-            let th = reduce_angle(angle - angle_of(delta[gi]));
+            let th = normalize_angle(angle - angle_of(delta[gi]));
             theta[0] = th;
             uu[0] = 0.0;
             vv[0] = th;
@@ -294,7 +294,7 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 
     match path.knots[ge].left {
         KnotDirection::Given(angle) => {
-            theta[last] = reduce_angle(
+            theta[last] = normalize_angle(
                 angle - angle_of(delta[ge_prev]) - psi.get(last).copied().unwrap_or(0.0),
             );
         }
@@ -475,14 +475,14 @@ fn solve_two_knots_range(
 
     match (&path.knots[i].right, &path.knots[j].left) {
         (KnotDirection::Given(a1), KnotDirection::Given(a2)) => {
-            let theta = reduce_angle(*a1 - chord_angle);
-            let phi = reduce_angle(-(*a2 - chord_angle));
+            let theta = normalize_angle(*a1 - chord_angle);
+            let phi = normalize_angle(-(*a2 - chord_angle));
             set_controls_for_segment(path, i, j, full_delta, full_dist, theta, phi);
             return;
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
             // Given start, curl end: theta from direction, phi via curl ratio.
-            let theta = reduce_angle(*a1 - chord_angle);
+            let theta = normalize_angle(*a1 - chord_angle);
             let lt_j = path.knots[j].left_tension.abs();
             let rt_i = path.knots[i].right_tension.abs();
             let ff = curl_ratio(*gamma, lt_j, rt_i);
@@ -492,7 +492,7 @@ fn solve_two_knots_range(
         }
         (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
             // Curl start, given end: phi from direction, theta via curl ratio.
-            let phi = reduce_angle(-(*a2 - chord_angle));
+            let phi = normalize_angle(-(*a2 - chord_angle));
             let rt_i = path.knots[i].right_tension.abs();
             let lt_j = path.knots[j].left_tension.abs();
             let ff = curl_ratio(*gamma, rt_i, lt_j);
@@ -889,8 +889,15 @@ const fn tension_val(t: Scalar) -> Scalar {
 }
 
 /// Reduce an angle to the range [-π, π].
-fn reduce_angle(a: Scalar) -> Scalar {
-    a.sin().atan2(a.cos())
+fn normalize_angle(a: Scalar) -> Scalar {
+    // Normalize to [0, 2π).
+    let normalized = a.rem_euclid(std::f64::consts::TAU);
+    // Shift to [-π, π].
+    if normalized > std::f64::consts::PI {
+        normalized - std::f64::consts::TAU
+    } else {
+        normalized
+    }
 }
 
 /// Compute the angle (in radians) of a 2D vector.
@@ -903,9 +910,8 @@ fn turning_angle(a: Vec2, b: Vec2) -> Scalar {
     let ang_a = angle_of(a);
     let ang_b = angle_of(b);
     let diff = ang_b - ang_a;
-    // Normalize using atan2 for robustness. Canonicalize -π to +π to match
-    // MetaPost's angle convention for 180-degree turns.
-    let t = diff.sin().atan2(diff.cos());
+    // Normalize for robustness.
+    let t = normalize_angle(diff);
     if (t + std::f64::consts::PI).abs() < ANGLE_TOLERANCE {
         std::f64::consts::PI
     } else {
