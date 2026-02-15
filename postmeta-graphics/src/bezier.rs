@@ -91,7 +91,7 @@ impl CubicSegment {
         reason = "standard Bezier math variable names (a, b, c, s, t)"
     )]
     #[must_use]
-    pub fn eval_deriv(&self, t: Scalar) -> Vec2 {
+    pub fn direction_at(&self, t: Scalar) -> Vec2 {
         let s = 1.0 - t;
         let a = 3.0 * s * s;
         let b = 6.0 * s * t;
@@ -219,7 +219,7 @@ mod tests {
             Point::new(20.0 / 3.0, 0.0),
             Point::new(10.0, 0.0),
         );
-        let d = seg.eval_deriv(0.5);
+        let d = seg.direction_at(0.5);
         assert!(d.x > 0.0);
         assert!(d.y.abs() < EPSILON);
     }

@@ -68,6 +68,17 @@ impl Path {
         let (seg, frac) = time_to_seg_frac(t, self.num_segments());
         CubicSegment::from_path(self, seg).point_at(frac)
     }
+
+    pub fn direction_at(&self, t: Scalar) -> Vec2 {
+        if self.knots.is_empty() {
+            return Vec2::ZERO;
+        }
+        let Some(t) = normalize_time(self, t) else {
+            return Vec2::ZERO;
+        };
+        let (seg, frac) = time_to_seg_frac(t, self.num_segments());
+        CubicSegment::from_path(self, seg).direction_at(frac)
+    }
 }
 
 impl Default for Path {
@@ -109,19 +120,6 @@ fn time_to_seg_frac(t: Scalar, n: usize) -> (usize, Scalar) {
 // ---------------------------------------------------------------------------
 // Path query operations
 // ---------------------------------------------------------------------------
-
-/// Get the direction (tangent vector) at time `t` on the path.
-#[must_use]
-pub fn direction_of(path: &Path, t: Scalar) -> Vec2 {
-    if path.knots.is_empty() {
-        return Vec2::ZERO;
-    }
-    let Some(t) = normalize_time(path, t) else {
-        return Vec2::ZERO;
-    };
-    let (seg, frac) = time_to_seg_frac(t, path.num_segments());
-    CubicSegment::from_path(path, seg).eval_deriv(frac)
-}
 
 /// Get the precontrol point at time `t`.
 #[must_use]
@@ -362,7 +360,7 @@ mod tests {
     #[test]
     fn test_direction_of_line() {
         let path = make_line_path();
-        let d = direction_of(&path, 0.5);
+        let d = path.direction_at(0.5);
         // Direction should be roughly (10, 0) (positive x)
         assert!(d.x > 0.0);
         assert!(d.y.abs() < EPSILON);

@@ -356,7 +356,7 @@ impl Interpreter {
             PrimaryBinaryOp::DirectionOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
-                let dir = path::direction_of(p, t);
+                let dir = p.direction_at(t);
                 Ok((Value::Pair(dir.x, dir.y), Type::PairType))
             }
             PrimaryBinaryOp::PrecontrolOf => {
