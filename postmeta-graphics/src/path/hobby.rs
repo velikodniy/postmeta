@@ -405,24 +405,13 @@ fn infer_right_from_left(path: &mut Path, idx: usize) {
         return;
     }
 
-    let point = path.knots[idx].point;
-    let left = path.knots[idx].left;
-    let inferred = match left {
-        KnotDirection::Given(angle) => Some(KnotDirection::Given(angle)),
-        KnotDirection::Curl(curl) => Some(KnotDirection::Curl(curl)),
-        KnotDirection::Explicit(cp) => {
-            let d = point - cp;
-            if d.length() < EPSILON {
-                Some(KnotDirection::Curl(1.0))
+    if let KnotDirection::Explicit(point) = path.knots[idx].left {
+        let d = path.knots[idx].point - point;
+        if d.length() < EPSILON {
+                path.knots[idx].right = KnotDirection::Curl(1.0);
             } else {
-                Some(KnotDirection::Given(d.direction()))
+                path.knots[idx].right = KnotDirection::Given(d.direction());
             }
-        }
-        KnotDirection::Open => None,
-    };
-
-    if let Some(dir) = inferred {
-        path.knots[idx].right = dir;
     }
 }
 
@@ -431,24 +420,13 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
         return;
     }
 
-    let point = path.knots[idx].point;
-    let right = path.knots[idx].right;
-    let inferred = match right {
-        KnotDirection::Given(angle) => Some(KnotDirection::Given(angle)),
-        KnotDirection::Curl(curl) => Some(KnotDirection::Curl(curl)),
-        KnotDirection::Explicit(cp) => {
-            let d = cp - point;
-            if d.length() < EPSILON {
-                Some(KnotDirection::Curl(1.0))
+    if let KnotDirection::Explicit(point) = path.knots[idx].right {
+        let d = point - path.knots[idx].point;
+        if d.length() < EPSILON {
+                path.knots[idx].left = KnotDirection::Curl(1.0);
             } else {
-                Some(KnotDirection::Given(d.direction()))
+                path.knots[idx].left = KnotDirection::Given(d.direction());
             }
-        }
-        KnotDirection::Open => None,
-    };
-
-    if let Some(dir) = inferred {
-        path.knots[idx].left = dir;
     }
 }
 
