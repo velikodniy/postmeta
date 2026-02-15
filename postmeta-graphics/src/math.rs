@@ -42,11 +42,6 @@ pub fn mlog(x: Scalar) -> Scalar {
     256.0 * x.log2()
 }
 
-/// Pythagorean addition: `a ++ b = sqrt(a² + b²)`.
-pub fn pyth_add(a: Scalar, b: Scalar) -> Scalar {
-    a.hypot(b)
-}
-
 /// Pythagorean subtraction: `a +-+ b = sqrt(a² - b²)`.
 ///
 /// Returns 0 if `a² < b²`.
@@ -157,13 +152,6 @@ mod tests {
     fn test_mlog_nonpositive() {
         assert_eq!(mlog(0.0), 0.0);
         assert_eq!(mlog(-1.0), 0.0);
-    }
-
-    #[test]
-    fn test_pyth_add() {
-        assert!((pyth_add(3.0, 4.0) - 5.0).abs() < EPSILON);
-        assert!((pyth_add(0.0, 5.0) - 5.0).abs() < EPSILON);
-        assert!((pyth_add(1.0, 0.0) - 1.0).abs() < EPSILON);
     }
 
     #[test]

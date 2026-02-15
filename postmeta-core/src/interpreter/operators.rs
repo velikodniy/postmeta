@@ -738,10 +738,11 @@ fn tertiary_binary_value(
     right: &Value,
 ) -> InterpResult<(Value, Type)> {
     match op {
+        // Pythagorean addition: `a ++ b = sqrt(a² + b²)`.
         TertiaryBinaryOp::PythagAdd => {
             let a = value_to_scalar(left)?;
             let b = value_to_scalar(right)?;
-            Ok((Value::Numeric(math::pyth_add(a, b)), Type::Known))
+            Ok((Value::Numeric(a.hypot(b)), Type::Known))
         }
         TertiaryBinaryOp::PythagSub => {
             let a = value_to_scalar(left)?;
