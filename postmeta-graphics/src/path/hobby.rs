@@ -971,7 +971,7 @@ mod tests {
         assert_all_explicit(&path);
 
         // The curve should pass through the middle knot
-        let mid = crate::path::point_of(&path, 1.0);
+        let mid = path.point_at(1.0);
         assert!((mid.x - 5.0).abs() < EPSILON);
         assert!((mid.y - 5.0).abs() < EPSILON);
     }
@@ -990,7 +990,7 @@ mod tests {
         // The curve should pass through all knots
         for i in 0..4 {
             #[expect(clippy::cast_precision_loss, reason = "test index fits in f64")]
-            let p = crate::path::point_of(&path, i as Scalar);
+            let p = path.point_at(i as Scalar);
             assert!(
                 (p.x - path.knots[i].point.x).abs() < EPSILON
                     && (p.y - path.knots[i].point.y).abs() < EPSILON,
@@ -1301,7 +1301,7 @@ mod tests {
         assert_all_explicit(&path);
 
         // The curve should still pass through the middle knot exactly.
-        let mid = crate::path::point_of(&path, 1.0);
+        let mid = path.point_at(1.0);
         assert!(
             (mid.x - 5.0).abs() < EPSILON && (mid.y - 5.0).abs() < EPSILON,
             "middle knot not hit: {mid:?}"
@@ -1310,7 +1310,7 @@ mod tests {
         // With higher tension, the curve should be tighter (closer to straight lines
         // between knots). Check that the midpoint of segment 0 is closer to the
         // chord midpoint than with default tension.
-        let seg0_mid = crate::path::point_of(&path, 0.5);
+        let seg0_mid = path.point_at(0.5);
         let chord_mid = Point::new(2.5, 2.5);
         let dev = (seg0_mid - chord_mid).length();
         assert!(

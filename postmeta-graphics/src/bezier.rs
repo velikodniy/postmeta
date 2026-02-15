@@ -67,7 +67,7 @@ impl CubicSegment {
         reason = "standard Bezier math variable names (a, b, c, d, s, t)"
     )]
     #[must_use]
-    pub fn eval(&self, t: Scalar) -> Point {
+    pub fn point_at(&self, t: Scalar) -> Point {
         let s = 1.0 - t;
         let a = s * s * s;
         let b = 3.0 * s * s * t;
@@ -171,10 +171,10 @@ mod tests {
             Point::new(3.0, 2.0),
             Point::new(4.0, 0.0),
         );
-        let p0 = seg.eval(0.0);
+        let p0 = seg.point_at(0.0);
         assert!((p0.x).abs() < EPSILON);
         assert!((p0.y).abs() < EPSILON);
-        let p1 = seg.eval(1.0);
+        let p1 = seg.point_at(1.0);
         assert!((p1.x - 4.0).abs() < EPSILON);
         assert!((p1.y).abs() < EPSILON);
     }
@@ -188,7 +188,7 @@ mod tests {
             Point::new(20.0 / 3.0, 0.0),
             Point::new(10.0, 0.0),
         );
-        let mid = seg.eval(0.5);
+        let mid = seg.point_at(0.5);
         assert!((mid.x - 5.0).abs() < EPSILON);
         assert!((mid.y).abs() < EPSILON);
     }

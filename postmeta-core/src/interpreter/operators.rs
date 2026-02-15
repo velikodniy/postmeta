@@ -350,7 +350,7 @@ impl Interpreter {
             PrimaryBinaryOp::PointOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
-                let pt = path::point_of(p, t);
+                let pt = p.point_at(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::DirectionOf => {

@@ -53,6 +53,21 @@ impl Path {
             self.knots.len() - 1
         }
     }
+
+    /// Get the point at time `t` on the path.
+    ///
+    /// `t` ranges from 0 to `path.num_segments()`. Integer values correspond
+    /// to knot points. Fractional values interpolate along the cubic segment.
+    pub fn point_at(&self, t: Scalar) -> Point {
+        if self.knots.is_empty() {
+            return Point::ZERO;
+        }
+        let Some(t) = normalize_time(self, t) else {
+            return self.knots[0].point;
+        };
+        let (seg, frac) = time_to_seg_frac(t, self.num_segments());
+        CubicSegment::from_path(self, seg).point_at(frac)
+    }
 }
 
 impl Default for Path {
@@ -94,22 +109,6 @@ fn time_to_seg_frac(t: Scalar, n: usize) -> (usize, Scalar) {
 // ---------------------------------------------------------------------------
 // Path query operations
 // ---------------------------------------------------------------------------
-
-/// Get the point at time `t` on the path.
-///
-/// `t` ranges from 0 to `path.num_segments()`. Integer values correspond
-/// to knot points. Fractional values interpolate along the cubic segment.
-#[must_use]
-pub fn point_of(path: &Path, t: Scalar) -> Point {
-    if path.knots.is_empty() {
-        return Point::ZERO;
-    }
-    let Some(t) = normalize_time(path, t) else {
-        return path.knots[0].point;
-    };
-    let (seg, frac) = time_to_seg_frac(t, path.num_segments());
-    CubicSegment::from_path(path, seg).eval(frac)
-}
 
 /// Get the direction (tangent vector) at time `t` on the path.
 #[must_use]
@@ -224,7 +223,7 @@ fn subpath_normalized(path: &Path, start: Scalar, end: Scalar, num_segs: usize) 
     let seg1_wrapped = seg1 % num_segs;
     let cubic_first = CubicSegment::from_path(path, seg1_wrapped);
     let (_, right_part) = cubic_first.split(frac1);
-    let start_pt = cubic_first.eval(frac1);
+    let start_pt = cubic_first.point_at(frac1);
     knots.push(Knot::with_controls(start_pt, start_pt, right_part.p1));
 
     // End of first partial segment
@@ -244,7 +243,7 @@ fn subpath_normalized(path: &Path, start: Scalar, end: Scalar, num_segs: usize) 
         let seg2_wrapped = seg2_raw % num_segs;
         let cubic_last = CubicSegment::from_path(path, seg2_wrapped);
         let (left_part, _) = cubic_last.split(frac2);
-        let end_pt = cubic_last.eval(frac2);
+        let end_pt = cubic_last.point_at(frac2);
 
         if let Some(last) = knots.last_mut() {
             last.right = KnotDirection::Explicit(left_part.p1);
@@ -265,8 +264,8 @@ fn subpath_single_segment(path: &Path, seg: usize, frac1: Scalar, frac2: Scalar)
         (frac2 - frac1) / (1.0 - frac1)
     };
     let (sub, _) = right.split(t_inner);
-    let p0 = cubic.eval(frac1);
-    let p1 = cubic.eval(frac2);
+    let p0 = cubic.point_at(frac1);
+    let p1 = cubic.point_at(frac2);
     Path::from_knots(
         vec![
             Knot::with_controls(p0, p0, sub.p1),
@@ -339,24 +338,24 @@ mod tests {
     #[test]
     fn test_point_of_line() {
         let path = make_line_path();
-        let p0 = point_of(&path, 0.0);
+        let p0 = path.point_at(0.0);
         assert!((p0.x).abs() < EPSILON);
         assert!((p0.y).abs() < EPSILON);
 
-        let p1 = point_of(&path, 1.0);
+        let p1 = path.point_at(1.0);
         assert!((p1.x - 10.0).abs() < EPSILON);
 
-        let pmid = point_of(&path, 0.5);
+        let pmid = path.point_at(0.5);
         assert!((pmid.x - 5.0).abs() < EPSILON);
     }
 
     #[test]
     fn test_point_of_clamps_open() {
         let path = make_line_path();
-        let p_neg = point_of(&path, -1.0);
+        let p_neg = path.point_at(-1.0);
         assert!((p_neg.x).abs() < EPSILON);
 
-        let p_over = point_of(&path, 5.0);
+        let p_over = path.point_at(5.0);
         assert!((p_over.x - 10.0).abs() < EPSILON);
     }
 
@@ -389,7 +388,7 @@ mod tests {
     #[test]
     fn test_point_of_empty() {
         let path = Path::new();
-        assert_eq!(point_of(&path, 0.0), Point::ZERO);
+        assert_eq!(path.point_at(0.0), Point::ZERO);
     }
 
     #[test]
@@ -397,8 +396,8 @@ mod tests {
         let path = make_line_path();
         let sub = subpath(&path, 0.0, 1.0);
         assert_eq!(sub.knots.len(), 2);
-        let p0 = point_of(&sub, 0.0);
-        let p1 = point_of(&sub, 1.0);
+        let p0 = sub.point_at(0.0);
+        let p1 = sub.point_at(1.0);
         assert!((p0.x).abs() < EPSILON);
         assert!((p1.x - 10.0).abs() < EPSILON);
     }
@@ -407,7 +406,7 @@ mod tests {
     fn test_subpath_half() {
         let path = make_line_path();
         let sub = subpath(&path, 0.0, 0.5);
-        let end = point_of(&sub, index_to_scalar(sub.num_segments()));
+        let end = sub.point_at(index_to_scalar(sub.num_segments()));
         assert!((end.x - 5.0).abs() < 0.1);
     }
 
@@ -424,11 +423,11 @@ mod tests {
         // The result should have endpoints near the midpoints of segments 2 and 0.
         let sub = subpath(&tri, 2.5, 0.5);
         assert!(!sub.knots.is_empty());
-        let p_start = point_of(&sub, 0.0);
-        let p_end = point_of(&sub, index_to_scalar(sub.num_segments()));
+        let p_start = sub.point_at(0.0);
+        let p_end = sub.point_at(index_to_scalar(sub.num_segments()));
 
         // Start should be at time 2.5 on the triangle (midpoint of seg 2: (5,10)→(0,0))
-        let expected_start = point_of(&tri, 2.5);
+        let expected_start = tri.point_at(2.5);
         assert!(
             (p_start.x - expected_start.x).abs() < 0.1
                 && (p_start.y - expected_start.y).abs() < 0.1,
@@ -436,7 +435,7 @@ mod tests {
         );
 
         // End should be at time 0.5 on the triangle (midpoint of seg 0: (0,0)→(10,0))
-        let expected_end = point_of(&tri, 0.5);
+        let expected_end = tri.point_at(0.5);
         assert!(
             (p_end.x - expected_end.x).abs() < 0.1 && (p_end.y - expected_end.y).abs() < 0.1,
             "end: {p_end:?}, expected: {expected_end:?}"
@@ -452,10 +451,10 @@ mod tests {
         let sub = subpath(&tri, 2.5, 4.5);
         assert!(sub.knots.len() >= 3, "should span multiple segments");
 
-        let p_start = point_of(&sub, 0.0);
-        let p_end = point_of(&sub, index_to_scalar(sub.num_segments()));
+        let p_start = sub.point_at(0.0);
+        let p_end = sub.point_at(index_to_scalar(sub.num_segments()));
 
-        let expected_start = point_of(&tri, 2.5);
+        let expected_start = tri.point_at(2.5);
         assert!(
             (p_start.x - expected_start.x).abs() < 0.1
                 && (p_start.y - expected_start.y).abs() < 0.1,
@@ -463,7 +462,7 @@ mod tests {
         );
 
         // End should be at time 1.5 on the triangle
-        let expected_end = point_of(&tri, 1.5);
+        let expected_end = tri.point_at(1.5);
         assert!(
             (p_end.x - expected_end.x).abs() < 0.1 && (p_end.y - expected_end.y).abs() < 0.1,
             "end: {p_end:?}, expected: {expected_end:?}"
