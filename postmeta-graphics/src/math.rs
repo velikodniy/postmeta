@@ -7,16 +7,6 @@
 
 use crate::types::Scalar;
 
-/// Sine of an angle in degrees.
-pub fn sind(degrees: Scalar) -> Scalar {
-    degrees.to_radians().sin()
-}
-
-/// Cosine of an angle in degrees.
-pub fn cosd(degrees: Scalar) -> Scalar {
-    degrees.to_radians().cos()
-}
-
 /// Angle of the vector (x, y) in degrees, in the range (-180, 180].
 ///
 /// Returns 0 for the zero vector (`MetaPost` would error).
@@ -90,31 +80,6 @@ pub fn normal_deviate(seed: &mut u64) -> Scalar {
 mod tests {
     use super::*;
     use crate::types::EPSILON;
-
-    #[test]
-    fn test_sind_cosd_basic() {
-        assert!((sind(0.0)).abs() < EPSILON);
-        assert!((sind(90.0) - 1.0).abs() < EPSILON);
-        assert!((sind(180.0)).abs() < EPSILON);
-        assert!((sind(270.0) + 1.0).abs() < EPSILON);
-
-        assert!((cosd(0.0) - 1.0).abs() < EPSILON);
-        assert!((cosd(90.0)).abs() < EPSILON);
-        assert!((cosd(180.0) + 1.0).abs() < EPSILON);
-    }
-
-    #[test]
-    fn test_sind_cosd_identity() {
-        // sin²(x) + cos²(x) = 1
-        for deg in [0.0, 30.0, 45.0, 60.0, 90.0, 135.0, 210.0, 330.0] {
-            let s = sind(deg);
-            let c = cosd(deg);
-            assert!(
-                (s.mul_add(s, c * c) - 1.0).abs() < 1e-12,
-                "failed for {deg}°"
-            );
-        }
-    }
 
     #[test]
     fn test_angle() {

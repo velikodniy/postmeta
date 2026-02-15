@@ -129,13 +129,15 @@ impl Interpreter {
                     Type::Known,
                 ))
             }
+            // Sine of an angle in degrees
             UnaryOp::SinD => {
                 let v = value_to_scalar(input)?;
-                Ok((Value::Numeric(math::sind(v)), Type::Known))
+                Ok((Value::Numeric(v.to_radians().sin()), Type::Known))
             }
+            // Cosine of an angle in degrees
             UnaryOp::CosD => {
                 let v = value_to_scalar(input)?;
-                Ok((Value::Numeric(math::cosd(v)), Type::Known))
+                Ok((Value::Numeric(v.to_radians().cos()), Type::Known))
             }
             UnaryOp::Floor => {
                 let v = value_to_scalar(input)?;
