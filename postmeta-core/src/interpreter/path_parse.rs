@@ -3,7 +3,6 @@
 //! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}`
 //! brace directions, and `cycle`.
 
-use postmeta_graphics::math;
 use postmeta_graphics::path::hobby;
 use postmeta_graphics::types::{Knot, KnotDirection, Path, Point, Scalar};
 
@@ -383,7 +382,7 @@ impl Interpreter {
     /// Numeric inputs are interpreted as degrees per `MetaPost` syntax.
     fn value_to_direction(val: &Value) -> InterpResult<KnotDirection> {
         match val {
-            Value::Pair(x, y) => Ok(KnotDirection::Given(math::angle(*x, *y).to_radians())),
+            Value::Pair(x, y) => Ok(KnotDirection::Given(y.atan2(*x))),
             Value::Numeric(v) => Ok(KnotDirection::Given(v.to_radians())),
             _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
