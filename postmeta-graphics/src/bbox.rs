@@ -3,9 +3,8 @@
 //! Provides [`BoundingBox`] and helpers for computing bounds of paths,
 //! pens, and pictures.
 
-use crate::types::{
-    GraphicsObject, KnotDirection, Path, Pen, Picture, Point, Scalar, TextObject, Vec2,
-};
+use crate::path::Path;
+use crate::types::{GraphicsObject, KnotDirection, Pen, Picture, Point, Scalar, TextObject, Vec2};
 
 // ---------------------------------------------------------------------------
 // Text bounding box heuristic constants

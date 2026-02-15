@@ -2,7 +2,8 @@
 //!
 //! Free functions used across all interpreter submodules.
 
-use postmeta_graphics::types::{Path, Pen, Scalar, Transform};
+use postmeta_graphics::path::Path;
+use postmeta_graphics::types::{Pen, Scalar, Transform};
 
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{CapsulePayload, StoredToken, TokenList};

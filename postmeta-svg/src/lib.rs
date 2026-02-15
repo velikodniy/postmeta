@@ -13,13 +13,14 @@
 //! - `SetBounds` regions are transparent in SVG (they only affect
 //!   bounding-box computation at the `MetaPost` level).
 
+use postmeta_graphics::path::Path;
 use svg::Document;
 use svg::node::element::{ClipPath, Definitions, Group, Text as SvgText};
 
 use postmeta_graphics::bbox::{BoundingBox, picture_bbox};
 use postmeta_graphics::types::{
-    Color, DashPattern, FillObject, GraphicsObject, KnotDirection, LineCap, LineJoin, Path, Pen,
-    Picture, Scalar, StrokeObject, TextObject, Vec2,
+    Color, DashPattern, FillObject, GraphicsObject, KnotDirection, LineCap, LineJoin, Pen, Picture,
+    Scalar, StrokeObject, TextObject, Vec2,
 };
 
 // ---------------------------------------------------------------------------

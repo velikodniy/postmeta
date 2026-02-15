@@ -5,6 +5,7 @@ use std::ops;
 use std::sync::Arc;
 
 use crate::math;
+use crate::path::Path;
 
 // ---------------------------------------------------------------------------
 // Scalar
@@ -394,55 +395,6 @@ impl Knot {
             left_tension: 1.0,
             right_tension: 1.0,
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Path
-// ---------------------------------------------------------------------------
-
-/// A path: a sequence of knots, optionally cyclic.
-///
-/// After Hobby's algorithm runs, all `KnotDirection` values will be
-/// `Explicit` (computed Bezier control points).
-#[derive(Debug, Clone, PartialEq)]
-pub struct Path {
-    pub knots: Vec<Knot>,
-    pub is_cyclic: bool,
-}
-
-impl Path {
-    /// Create an empty open path.
-    pub const fn new() -> Self {
-        Self {
-            knots: Vec::new(),
-            is_cyclic: false,
-        }
-    }
-
-    /// Create a path from knots.
-    pub const fn from_knots(knots: Vec<Knot>, is_cyclic: bool) -> Self {
-        Self { knots, is_cyclic }
-    }
-
-    /// Number of segments in the path.
-    /// For a cyclic path with N knots, there are N segments.
-    /// For an open path with N knots, there are N-1 segments.
-    pub fn num_segments(&self) -> usize {
-        if self.knots.is_empty() {
-            return 0;
-        }
-        if self.is_cyclic {
-            self.knots.len()
-        } else {
-            self.knots.len() - 1
-        }
-    }
-}
-
-impl Default for Path {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

@@ -9,7 +9,8 @@
 //! - `clip <pic> to <path>` — clip to a region
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
-use crate::types::{FillObject, GraphicsObject, Path, Picture, StrokeObject};
+use crate::path::Path;
+use crate::types::{FillObject, GraphicsObject, Picture, StrokeObject};
 
 // ---------------------------------------------------------------------------
 // addto operations
@@ -65,7 +66,8 @@ pub fn setbounds(pic: &mut Picture, bounds_path: Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Color, Knot, KnotDirection, LineCap, LineJoin, Path, Pen, Point};
+    use crate::path::Path;
+    use crate::types::{Color, Knot, KnotDirection, LineCap, LineJoin, Pen, Point};
 
     fn make_unit_square() -> Path {
         // A cyclic square path with explicit controls (straight lines)

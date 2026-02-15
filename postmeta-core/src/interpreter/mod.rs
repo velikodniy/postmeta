@@ -23,7 +23,8 @@ mod statement;
 
 use std::sync::Arc;
 
-use postmeta_graphics::types::{Color, Path, Pen, Picture, Transform};
+use postmeta_graphics::path::Path;
+use postmeta_graphics::types::{Color, Pen, Picture, Transform};
 
 use crate::command::Command;
 use crate::equation::{DepList, VarId, const_dep, single_dep};

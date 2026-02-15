@@ -22,7 +22,11 @@
 //! 4. Compute Bezier control points from the solved angles using the
 //!    velocity function.
 
-use crate::{math, types::{EPSILON, KnotDirection, NEAR_ZERO, Path, Point, Scalar, Vec2}};
+use crate::{
+    math,
+    path::Path,
+    types::{EPSILON, KnotDirection, NEAR_ZERO, Point, Scalar, Vec2},
+};
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
@@ -403,10 +407,10 @@ fn infer_right_from_left(path: &mut Path, idx: usize) {
     if let KnotDirection::Explicit(point) = path.knots[idx].left {
         let d = path.knots[idx].point - point;
         if d.length() < EPSILON {
-                path.knots[idx].right = KnotDirection::Curl(1.0);
-            } else {
-                path.knots[idx].right = KnotDirection::Given(d.direction());
-            }
+            path.knots[idx].right = KnotDirection::Curl(1.0);
+        } else {
+            path.knots[idx].right = KnotDirection::Given(d.direction());
+        }
     }
 }
 
@@ -418,10 +422,10 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
     if let KnotDirection::Explicit(point) = path.knots[idx].right {
         let d = point - path.knots[idx].point;
         if d.length() < EPSILON {
-                path.knots[idx].left = KnotDirection::Curl(1.0);
-            } else {
-                path.knots[idx].left = KnotDirection::Given(d.direction());
-            }
+            path.knots[idx].left = KnotDirection::Curl(1.0);
+        } else {
+            path.knots[idx].left = KnotDirection::Given(d.direction());
+        }
     }
 }
 

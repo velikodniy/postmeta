@@ -4,7 +4,8 @@
 //! across the crate: de Casteljau evaluation, splitting, derivative
 //! computation, and bounding boxes.
 
-use crate::types::{KnotDirection, Path, Point, Scalar, Vec2};
+use crate::path::Path;
+use crate::types::{KnotDirection, Point, Scalar, Vec2};
 
 /// Four control points of a cubic Bezier segment.
 #[derive(Debug, Clone, Copy)]

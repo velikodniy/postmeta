@@ -3,8 +3,9 @@
 //! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}`
 //! brace directions, and `cycle`.
 
+use postmeta_graphics::path::Path;
 use postmeta_graphics::path::hobby;
-use postmeta_graphics::types::{Knot, KnotDirection, Path, Point, Scalar};
+use postmeta_graphics::types::{Knot, KnotDirection, Point, Scalar};
 
 use crate::command::Command;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};

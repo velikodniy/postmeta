@@ -9,8 +9,9 @@
 
 use std::sync::Arc;
 
+use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{
-    Color, DashPattern, LineCap, LineJoin, Path, Pen, Picture, Scalar, Transform,
+    Color, DashPattern, LineCap, LineJoin, Pen, Picture, Scalar, Transform,
 };
 
 /// Tolerance for numeric equality in `MetaPost` language semantics.
