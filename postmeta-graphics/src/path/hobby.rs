@@ -181,8 +181,10 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
         return;
     }
 
-    // Infer missing boundary constraints from the opposite side.
-    infer_open_boundary_constraints(path, indices[0], indices[seg_len - 1]);
+    // Infer missing boundary constraints at segment endpoints from the
+    // opposite side when possible.
+    infer_right_from_left(path, indices[0]);
+    infer_left_from_right(path, indices[seg_len - 1]);
 
     // For two knots, use the two-knot special case.
     if seg_len == 2 {
@@ -391,13 +393,6 @@ fn mirror_one_sided_direction_constraints(path: &mut Path) {
             }
         }
     }
-}
-
-/// Infer missing `open` boundary constraints at segment endpoints from the
-/// opposite side when possible, mirroring mp.web breakpoint handling.
-fn infer_open_boundary_constraints(path: &mut Path, start: usize, end: usize) {
-    infer_right_from_left(path, start);
-    infer_left_from_right(path, end);
 }
 
 fn infer_right_from_left(path: &mut Path, idx: usize) {
