@@ -1,4 +1,4 @@
-//! Hobby's spline algorithm for `MetaPost`.
+//! Hobby's spline algorithm
 //!
 //! Given a sequence of knots with optional direction, curl, and tension
 //! constraints, this computes cubic Bezier control points that produce
@@ -32,55 +32,66 @@ const MIN_TENSION: Scalar = 0.75;
 /// After this call, all `KnotDirection` values in the path will be
 /// `Explicit` (computed Bezier control points).
 pub fn make_choices(path: &mut Path) {
-    let n = path.knots.len();
-    if n < 2 {
+    if path.knots.len() < 2 {
         // A single knot: set controls to the knot itself.
-        if n == 1 {
-            let p = path.knots[0].point;
-            path.knots[0].left = KnotDirection::Explicit(p);
-            path.knots[0].right = KnotDirection::Explicit(p);
-        }
+        path.knots.first_mut().map(|knot| {
+            knot.left = KnotDirection::Explicit(knot.point);
+            knot.right = KnotDirection::Explicit(knot.point);
+        });
         return;
-    }
-
-    // Ensure default curl at open-path endpoints
-    if !path.is_cyclic {
-        if matches!(path.knots[0].right, KnotDirection::Open) {
-            path.knots[0].right = KnotDirection::Curl(1.0);
-        }
-        if matches!(path.knots[n - 1].left, KnotDirection::Open) {
-            path.knots[n - 1].left = KnotDirection::Curl(1.0);
-        }
     }
 
     // Process the path in segments between breakpoints
     if path.is_cyclic {
-        // Find the first breakpoint on the cycle: a knot where either
-        // left or right is not Open.  Following mp.web's make_choices,
-        // we iterate around the cycle looking for such a knot.
-        let first_bp = (0..n).find(|&k| {
-            is_breakpoint_dir(&path.knots[k].left) || is_breakpoint_dir(&path.knots[k].right)
-        });
-
-        if let Some(bp) = first_bp {
-            // Decompose the cycle into open segments between breakpoints
-            // and solve each independently, just like the open-path case.
-            solve_cyclic_with_breakpoints(path, bp);
-        } else {
-            // No breakpoints: pure smooth cycle (all Open directions).
-            solve_choices_cyclic(path);
-        }
+        make_choices_cyclic(path);
     } else {
-        solve_choices_open(path);
-
-        // For open paths, the first knot's left and last knot's right
-        // are not part of any segment — set them to the knot point.
-        let first_pt = path.knots[0].point;
-        path.knots[0].left = KnotDirection::Explicit(first_pt);
-        let last_idx = path.knots.len() - 1;
-        let last_pt = path.knots[last_idx].point;
-        path.knots[last_idx].right = KnotDirection::Explicit(last_pt);
+        make_choices_open(path);
     }
+}
+
+fn make_choices_cyclic(path: &mut Path) {
+    let n = path.knots.len();
+
+    // Find the first breakpoint on the cycle: a knot where either
+    // left or right is not Open.  Following mp.web's make_choices,
+    // we iterate around the cycle looking for such a knot.
+    let first_bp = (0..n).find(|&k| {
+        is_breakpoint_dir(&path.knots[k].left) || is_breakpoint_dir(&path.knots[k].right)
+    });
+
+    if let Some(bp) = first_bp {
+        // Decompose the cycle into open segments between breakpoints
+        // and solve each independently, just like the open-path case.
+        solve_cyclic_with_breakpoints(path, bp);
+    } else {
+        // No breakpoints: pure smooth cycle (all Open directions).
+        solve_choices_cyclic(path);
+    }
+}
+
+fn make_choices_open(path: &mut Path) {
+    // Ensure default curl of 1.0 at open-path endpoints
+    path.knots.first_mut().map(|knot| {
+        if let KnotDirection::Open = knot.right {
+            knot.right = KnotDirection::Curl(1.0);
+        }
+    });
+    path.knots.last_mut().map(|knot| {
+        if let KnotDirection::Open = knot.left {
+            knot.left = KnotDirection::Curl(1.0);
+        }
+    });
+
+    solve_choices_open(path);
+
+    // For open paths, the first knot's left and last knot's right
+    // are not part of any segment — set them to the knot point.
+    path.knots.first_mut().map(|knot| {
+        knot.left = KnotDirection::Explicit(knot.point);
+    });
+    path.knots.last_mut().map(|knot| {
+        knot.right = KnotDirection::Explicit(knot.point);
+    });
 }
 
 // ---------------------------------------------------------------------------
