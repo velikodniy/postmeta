@@ -5,9 +5,26 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
+use clap::Parser;
+
 use postmeta_core::filesystem::FileSystem;
 use postmeta_core::interpreter::Interpreter;
 use postmeta_svg::{RenderOptions, render_with_options};
+
+#[derive(Parser)]
+#[command(version, about = "PostMeta \u{2014} MetaPost reimplementation in Rust")]
+struct Cli {
+    /// Input file to run
+    file: Option<String>,
+
+    /// Evaluate an expression instead of reading a file
+    #[arg(short = 'e', long = "eval")]
+    eval: Option<String>,
+
+    /// Output directory for SVG files
+    #[arg(short, long, default_value = ".")]
+    output: String,
+}
 
 /// Filesystem implementation that reads from disk.
 ///
@@ -41,22 +58,14 @@ impl FileSystem for OsFileSystem {
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-
-    if args.len() < 2 {
-        eprintln!("Usage: postmeta <file.mp> [--output <dir>]");
-        eprintln!("       postmeta -e <expression>");
-        process::exit(1);
-    }
-
-    let config = parse_args(&args);
+    let cli = Cli::parse();
     let mut interp = Interpreter::new();
 
     // Build search directories for input files
     let mut search_dirs = Vec::new();
 
     // Add the directory containing the input file
-    if let Some(ref file) = config.input_file {
+    if let Some(ref file) = cli.file {
         let stem = Path::new(file)
             .file_stem()
             .and_then(|s| s.to_str())
@@ -88,64 +97,15 @@ fn main() {
 
     interp.set_filesystem(Box::new(OsFileSystem::new(search_dirs)));
 
-    let source = read_source(&config);
-    run_and_output(&mut interp, &source, &config.output_dir);
+    let source = read_source(&cli);
+    run_and_output(&mut interp, &source, &cli.output);
 }
 
-struct Config {
-    output_dir: String,
-    input_file: Option<String>,
-    eval_expr: Option<String>,
-}
-
-fn parse_args(args: &[String]) -> Config {
-    let mut output_dir = String::from(".");
-    let mut input_file = None;
-    let mut eval_expr = None;
-
-    let mut i = 1;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--output" | "-o" => {
-                i += 1;
-                if i < args.len() {
-                    output_dir.clone_from(&args[i]);
-                }
-            }
-            "-e" | "--eval" => {
-                i += 1;
-                if i < args.len() {
-                    eval_expr = Some(args[i].clone());
-                }
-            }
-            "--help" | "-h" => {
-                println!("PostMeta — MetaPost reimplementation in Rust");
-                println!();
-                println!("Usage:");
-                println!("  postmeta <file.mp>           Run a MetaPost file, output SVG");
-                println!("  postmeta -e <expression>     Evaluate an expression");
-                println!("  postmeta -o <dir> <file.mp>  Set output directory");
-                process::exit(0);
-            }
-            _ => {
-                input_file = Some(args[i].clone());
-            }
-        }
-        i += 1;
-    }
-
-    Config {
-        output_dir,
-        input_file,
-        eval_expr,
-    }
-}
-
-fn read_source(config: &Config) -> String {
-    if let Some(ref expr) = config.eval_expr {
+fn read_source(cli: &Cli) -> String {
+    if let Some(ref expr) = cli.eval {
         return expr.clone();
     }
-    if let Some(ref file) = config.input_file {
+    if let Some(ref file) = cli.file {
         match fs::read_to_string(file) {
             Ok(s) => return s,
             Err(e) => {
