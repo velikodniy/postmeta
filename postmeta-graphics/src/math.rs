@@ -7,13 +7,6 @@
 
 use crate::types::Scalar;
 
-/// Angle of the vector (x, y) in degrees, in the range (-180, 180].
-///
-/// Returns 0 for the zero vector (`MetaPost` would error).
-pub fn angle(x: Scalar, y: Scalar) -> Scalar {
-    y.atan2(x).to_degrees()
-}
-
 /// `MetaPost`'s `mexp`: `mexp(x) = 2^(x/256)`.
 ///
 /// `MetaPost`'s internal exponential function. The base is `2^(1/256)`.
@@ -92,11 +85,6 @@ pub fn normalize_angle(a: Scalar) -> Scalar {
 mod tests {
     use super::*;
     use crate::types::EPSILON;
-
-    #[test]
-    fn test_angle_zero_vector() {
-        assert_eq!(angle(0.0, 0.0), 0.0);
-    }
 
     #[test]
     fn test_mexp_mlog() {
