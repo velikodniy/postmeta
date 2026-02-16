@@ -1830,6 +1830,34 @@ fn pair_equation_assigns_components() {
     );
 }
 
+#[test]
+fn pair_equation_preserves_dep_when_length_minus_unknown() {
+    let mut interp = Interpreter::new();
+    interp.set_filesystem(Box::new(PlainMpFs));
+    interp
+        .run(
+            "input plain;
+             path p;
+             p := fullcircle;
+             numeric t, u;
+             (t, length p - u) = (1, 2);
+             show u;",
+        )
+        .unwrap();
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+
+    assert!(
+        infos.iter().any(|m| m.contains('6')),
+        "expected u=6 in info messages: {infos:?}"
+    );
+}
+
 // -----------------------------------------------------------------------
 // plain.mp loads without hard error
 // -----------------------------------------------------------------------

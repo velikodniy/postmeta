@@ -875,7 +875,21 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_expression_binary(op, &left_val, &right.exp)?;
-                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
+                let result = if op == ExpressionBinaryOp::IntersectionTimes {
+                    if let Value::Pair(x, y) = val {
+                        ExprResultValue {
+                            exp: Value::Pair(x, y),
+                            ty,
+                            dep: None,
+                            pair_dep: Some((const_dep(x), const_dep(y))),
+                        }
+                    } else {
+                        ExprResultValue::typed(val, ty)
+                    }
+                } else {
+                    ExprResultValue::typed(val, ty)
+                };
+                Ok(InfixAction::Continue(result))
             }
 
             // ----- Path construction and & -----
@@ -1150,9 +1164,26 @@ impl Interpreter {
                 )),
             }
         } else {
-            let dep = match (left_dep.as_ref(), right.dep.as_ref()) {
-                (Some(ld), Some(rd)) => Some(dep_add_scaled(ld, rd, factor)),
-                _ => None,
+            let dep = if matches!((left_dep.as_ref(), right.dep.as_ref()), (None, None)) {
+                None
+            } else {
+                let left_numeric = if let Value::Numeric(v) = left_val {
+                    *v
+                } else {
+                    0.0
+                };
+                let right_numeric = if let Value::Numeric(v) = &right.exp {
+                    *v
+                } else {
+                    0.0
+                };
+
+                let left_dep = left_dep.unwrap_or_else(|| const_dep(left_numeric));
+                let right_dep = right
+                    .dep
+                    .clone()
+                    .unwrap_or_else(|| const_dep(right_numeric));
+                Some(dep_add_scaled(&left_dep, &right_dep, factor))
             };
             ExprResultValue {
                 exp: val,
