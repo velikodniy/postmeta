@@ -33,6 +33,7 @@ pub const NEAR_ZERO: Scalar = 1e-30;
     clippy::cast_precision_loss,
     reason = "path segment counts are far below 2^52"
 )]
+#[must_use]
 pub const fn index_to_scalar(i: usize) -> Scalar {
     i as Scalar
 }
@@ -45,6 +46,7 @@ pub const fn index_to_scalar(i: usize) -> Scalar {
     clippy::cast_sign_loss,
     reason = "path time parameters are non-negative and small"
 )]
+#[must_use]
 pub fn scalar_to_index(t: Scalar) -> usize {
     t.floor() as usize
 }
@@ -67,6 +69,7 @@ impl Point {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
     /// Create a new point.
+    #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
@@ -74,6 +77,7 @@ impl Point {
     /// Linearly interpolate between `self` and `other`.
     ///
     /// `t = 0` returns `self`, `t = 1` returns `other`.
+    #[must_use]
     pub fn lerp(self, other: Self, t: Scalar) -> Self {
         Self::new(
             t.mul_add(other.x - self.x, self.x),
@@ -142,16 +146,19 @@ impl Vec2 {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
     /// Create a new vector.
+    #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
     /// Euclidean length (magnitude).
+    #[must_use]
     pub fn length(self) -> f64 {
         self.x.hypot(self.y)
     }
 
     /// Angle in radians, measured counter-clockwise from the positive x-axis.
+    #[must_use]
     pub fn direction(self) -> Scalar {
         let angle = self.y.atan2(self.x);
         // Normalize to (-pi, pi]
@@ -159,6 +166,7 @@ impl Vec2 {
     }
 
     // Angle from `self` to `other`, in the range (-pi, pi].
+    #[must_use]
     pub fn angle_to(self, other: Self) -> Scalar {
         let diff = other.direction() - self.direction();
         math::normalize_angle(diff)
@@ -167,8 +175,8 @@ impl Vec2 {
 
 /// Convert a point to a [`Vec2`] (displacement from the origin).
 impl From<Point> for Vec2 {
-    fn from(p: Point) -> Vec2 {
-        Vec2 { x: p.x, y: p.y }
+    fn from(p: Point) -> Self {
+        Self { x: p.x, y: p.y }
     }
 }
 
@@ -256,6 +264,7 @@ impl Color {
         b: 1.0,
     };
 
+    #[must_use]
     pub const fn new(r: Scalar, g: Scalar, b: Scalar) -> Self {
         Self { r, g, b }
     }
@@ -370,6 +379,7 @@ pub struct Knot {
 
 impl Knot {
     /// Create a new knot at the given point with default (open) constraints.
+    #[must_use]
     pub const fn new(point: Point) -> Self {
         Self {
             point,
@@ -381,6 +391,7 @@ impl Knot {
     }
 
     /// Create a knot with explicit Bezier control points already computed.
+    #[must_use]
     pub const fn with_controls(point: Point, left_cp: Point, right_cp: Point) -> Self {
         Self {
             point,
@@ -409,6 +420,7 @@ pub enum Pen {
 
 impl Pen {
     /// Create a circular pen with the given diameter centered at origin.
+    #[must_use]
     pub const fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
         Self::Elliptical(Transform {
@@ -419,6 +431,7 @@ impl Pen {
     }
 
     /// The null pen: a single point at the origin.
+    #[must_use]
     pub const fn null() -> Self {
         Self::Elliptical(Transform::ZERO)
     }
@@ -472,6 +485,7 @@ impl Transform {
     /// Compose two transforms: `self` applied first, then `other`.
     ///
     /// Equivalent to matrix multiplication `other * self`.
+    #[must_use]
     pub fn then(&self, other: &Self) -> Self {
         Self {
             txx: other.txx.mul_add(self.txx, other.txy * self.tyx),
@@ -488,6 +502,7 @@ impl Transform {
     }
 
     /// Apply this transform to a point.
+    #[must_use]
     pub fn apply(&self, p: Point) -> Point {
         Point::new(
             self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
@@ -559,6 +574,7 @@ pub struct Picture {
 }
 
 impl Picture {
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             objects: Vec::new(),

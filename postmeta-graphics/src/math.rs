@@ -11,6 +11,7 @@ use crate::types::Scalar;
 ///
 /// `MetaPost`'s internal exponential function. The base is `2^(1/256)`.
 /// It maps 0 → 1, 256 → 2, 512 → 4, etc.
+#[must_use]
 pub fn mexp(x: Scalar) -> Scalar {
     (x / 256.0 * core::f64::consts::LN_2).exp()
 }
@@ -18,6 +19,7 @@ pub fn mexp(x: Scalar) -> Scalar {
 /// `MetaPost`'s `mlog`: inverse of `mexp`, so `mlog(x) = 256 * log2(x)`.
 ///
 /// Returns 0 for non-positive input (`MetaPost` would error).
+#[must_use]
 pub fn mlog(x: Scalar) -> Scalar {
     if x <= 0.0 {
         return 0.0;
@@ -28,6 +30,7 @@ pub fn mlog(x: Scalar) -> Scalar {
 /// Pythagorean subtraction: `a +-+ b = sqrt(a² - b²)`.
 ///
 /// Returns 0 if `a² < b²`.
+#[must_use]
 pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
     let sq = a.mul_add(a, -(b * b));
     if sq <= 0.0 { 0.0 } else { sq.sqrt() }
@@ -62,6 +65,7 @@ pub fn normal_deviate(seed: &mut u64) -> Scalar {
 }
 
 /// Reduce an angle to the range (-π, π].
+#[must_use]
 pub fn normalize_angle(a: Scalar) -> Scalar {
     // Normalize to [0, 2π).
     let normalized = a.rem_euclid(std::f64::consts::TAU);

@@ -38,10 +38,10 @@ const MIN_TENSION: Scalar = 0.75;
 pub fn make_choices(path: &mut Path) {
     if path.knots.len() < 2 {
         // A single knot: set controls to the knot itself.
-        path.knots.first_mut().map(|knot| {
+        if let Some(knot) = path.knots.first_mut() {
             knot.left = KnotDirection::Explicit(knot.point);
             knot.right = KnotDirection::Explicit(knot.point);
-        });
+        }
         return;
     }
 
@@ -75,27 +75,27 @@ fn make_choices_cyclic(path: &mut Path) {
 
 fn make_choices_open(path: &mut Path) {
     // Ensure default curl of 1.0 at open-path endpoints
-    path.knots.first_mut().map(|knot| {
-        if let KnotDirection::Open = knot.right {
+    if let Some(knot) = path.knots.first_mut() {
+        if knot.right == KnotDirection::Open {
             knot.right = KnotDirection::Curl(1.0);
         }
-    });
-    path.knots.last_mut().map(|knot| {
-        if let KnotDirection::Open = knot.left {
+    }
+    if let Some(knot) = path.knots.last_mut() {
+        if knot.left == KnotDirection::Open {
             knot.left = KnotDirection::Curl(1.0);
         }
-    });
+    }
 
     solve_choices_open(path);
 
     // For open paths, the first knot's left and last knot's right
     // are not part of any segment — set them to the knot point.
-    path.knots.first_mut().map(|knot| {
+    if let Some(knot) = path.knots.first_mut() {
         knot.left = KnotDirection::Explicit(knot.point);
-    });
-    path.knots.last_mut().map(|knot| {
+    }
+    if let Some(knot) = path.knots.last_mut() {
         knot.right = KnotDirection::Explicit(knot.point);
-    });
+    }
 }
 
 // ---------------------------------------------------------------------------

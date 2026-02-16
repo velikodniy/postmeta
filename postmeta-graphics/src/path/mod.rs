@@ -28,6 +28,7 @@ pub struct Path {
 
 impl Path {
     /// Create an empty open path.
+    #[must_use]
     pub const fn new() -> Self {
         Self {
             knots: Vec::new(),
@@ -36,6 +37,7 @@ impl Path {
     }
 
     /// Create a path from knots.
+    #[must_use]
     pub const fn from_knots(knots: Vec<Knot>, is_cyclic: bool) -> Self {
         Self { knots, is_cyclic }
     }
@@ -43,6 +45,7 @@ impl Path {
     /// Number of segments in the path.
     /// For a cyclic path with N knots, there are N segments.
     /// For an open path with N knots, there are N-1 segments.
+    #[must_use]
     pub fn num_segments(&self) -> usize {
         if self.knots.is_empty() {
             return 0;
@@ -58,6 +61,7 @@ impl Path {
     ///
     /// `t` ranges from 0 to `path.num_segments()`. Integer values correspond
     /// to knot points. Fractional values interpolate along the cubic segment.
+    #[must_use]
     pub fn point_at(&self, t: Scalar) -> Point {
         if self.knots.is_empty() {
             return Point::ZERO;
@@ -69,6 +73,7 @@ impl Path {
         CubicSegment::from_path(self, seg).point_at(frac)
     }
 
+    #[must_use]
     pub fn direction_at(&self, t: Scalar) -> Vec2 {
         if self.knots.is_empty() {
             return Vec2::ZERO;

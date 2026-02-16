@@ -26,11 +26,13 @@ pub struct Span {
 
 impl Span {
     /// Create a new span.
+    #[must_use]
     pub const fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
 
     /// A zero-length span at the given position.
+    #[must_use]
     pub const fn at(pos: usize) -> Self {
         Self {
             start: pos,
@@ -39,11 +41,13 @@ impl Span {
     }
 
     /// Length in bytes.
+    #[must_use]
     pub const fn len(&self) -> usize {
         self.end - self.start
     }
 
     /// Whether the span is empty.
+    #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.start == self.end
     }
