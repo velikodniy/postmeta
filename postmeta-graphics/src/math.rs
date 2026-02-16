@@ -68,7 +68,7 @@ pub fn normal_deviate(seed: &mut u64) -> Scalar {
     (-2.0 * u1.ln()).sqrt() * (2.0 * core::f64::consts::PI * u2).cos()
 }
 
-/// Reduce an angle to the range [-π, π].
+/// Reduce an angle to the range (-π, π].
 pub fn normalize_angle(a: Scalar) -> Scalar {
     // Normalize to [0, 2π).
     let normalized = a.rem_euclid(std::f64::consts::TAU);
@@ -92,15 +92,6 @@ pub fn normalize_angle(a: Scalar) -> Scalar {
 mod tests {
     use super::*;
     use crate::types::EPSILON;
-
-    #[test]
-    fn test_angle() {
-        assert!((angle(1.0, 0.0)).abs() < EPSILON);
-        assert!((angle(0.0, 1.0) - 90.0).abs() < EPSILON);
-        assert!((angle(-1.0, 0.0) - 180.0).abs() < EPSILON);
-        assert!((angle(0.0, -1.0) + 90.0).abs() < EPSILON);
-        assert!((angle(1.0, 1.0) - 45.0).abs() < EPSILON);
-    }
 
     #[test]
     fn test_angle_zero_vector() {

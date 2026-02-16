@@ -24,9 +24,6 @@ pub const EPSILON: Scalar = 1.0 / 65536.0;
 /// detect degenerate transforms, zero-length vectors, etc.
 pub const NEAR_ZERO: Scalar = 1e-30;
 
-/// Tolerance for floating-point angle comparisons near multiples of pi.
-pub const ANGLE_TOLERANCE: Scalar = 1e-12;
-
 /// Convert a segment index to a path time parameter.
 ///
 /// Path operations use `f64` time parameters where integer values correspond
@@ -156,18 +153,15 @@ impl Vec2 {
 
     /// Angle in radians, measured counter-clockwise from the positive x-axis.
     pub fn direction(self) -> Scalar {
-        self.y.atan2(self.x)
+        let angle = self.y.atan2(self.x);
+        // Normalize to (-pi, pi]
+        math::normalize_angle(angle)
     }
 
+    // Angle from `self` to `other`, in the range (-pi, pi].
     pub fn angle_to(self, other: Self) -> Scalar {
         let diff = other.direction() - self.direction();
-        // Normalize for robustness.
-        let t = math::normalize_angle(diff);
-        if (t + std::f64::consts::PI).abs() < ANGLE_TOLERANCE {
-            std::f64::consts::PI
-        } else {
-            t
-        }
+        math::normalize_angle(diff)
     }
 }
 

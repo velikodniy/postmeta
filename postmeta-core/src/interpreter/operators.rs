@@ -205,7 +205,8 @@ impl Interpreter {
             }
             UnaryOp::Angle => {
                 let (px, py) = value_to_pair(input)?;
-                Ok((Value::Numeric(math::angle(px, py)), Type::Known))
+                let angle = Vec2::new(px, py).direction().to_degrees();
+                Ok((Value::Numeric(angle), Type::Known))
             }
             UnaryOp::UniformDeviate => {
                 let v = value_to_scalar(input)?;
