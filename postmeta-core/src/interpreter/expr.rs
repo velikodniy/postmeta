@@ -24,6 +24,22 @@ use crate::variables::{SuffixSegment, VarValue};
 use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
 use super::{ExprResultValue, Interpreter, LhsBinding};
 
+/// Format a numeric subscript into a variable name string.
+///
+/// `MetaPost` supports fractional subscripts (e.g., `A[0.08]`). We need a
+/// canonical string representation so that two evaluations of the same
+/// numeric value always produce the same key. Integer values are formatted
+/// without decimals (e.g., `[1]`) for backward compatibility; fractional
+/// values use Rust's shortest round-trip representation (e.g., `[0.08]`).
+fn write_subscript_key(name: &mut String, v: f64) {
+    let rounded = v.round();
+    if (v - rounded).abs() < 1e-10 {
+        let _ = write!(name, "[{}]", rounded as i64);
+    } else {
+        let _ = write!(name, "[{v}]");
+    }
+}
+
 /// Result from an infix (led) handler — either continue the Pratt loop
 /// or break out of it.
 enum InfixAction {
@@ -553,7 +569,7 @@ impl Interpreter {
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
-                    let _ = write!(name, "[{}]", v as i64);
+                    write_subscript_key(&mut name, v);
                     suffix_segs.push(SuffixSegment::Subscript);
                 }
                 has_suffixes = true;
@@ -564,10 +580,10 @@ impl Interpreter {
                 if self.cur.command == Command::RightBracket {
                     // Subscript: var[expr]
                     let subscript = match &subscript_result.exp {
-                        Value::Numeric(v) => *v as i64,
-                        _ => 0,
+                        Value::Numeric(v) => *v,
+                        _ => 0.0,
                     };
-                    let _ = write!(name, "[{subscript}]");
+                    write_subscript_key(&mut name, subscript);
                     suffix_segs.push(SuffixSegment::Subscript);
                     self.get_x_next();
                     has_suffixes = true;

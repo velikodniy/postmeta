@@ -36,6 +36,11 @@ const MIN_TENSION: Scalar = 0.75;
 /// After this call, all `KnotDirection` values in the path will be
 /// `Explicit` (computed Bezier control points).
 pub fn make_choices(path: &mut Path) {
+    // Follow mp.web: when consecutive knots are coincident, force that
+    // segment to be explicit with control points equal to the knot.
+    // This prevents zero-length chords from entering turning-angle math.
+    join_consecutive_equal_knots(path);
+
     if path.knots.len() < 2 {
         // A single knot: set controls to the knot itself.
         if let Some(knot) = path.knots.first_mut() {
@@ -50,6 +55,49 @@ pub fn make_choices(path: &mut Path) {
         make_choices_cyclic(path);
     } else {
         make_choices_open(path);
+    }
+}
+
+/// If consecutive knots are coincident, join them explicitly.
+///
+/// This mirrors mp.web's `make_choices` pre-pass:
+/// - set `right(p)` and `left(q)` to explicit controls at the knot point;
+/// - if the opposite side is still open, set it to `curl 1`.
+fn join_consecutive_equal_knots(path: &mut Path) {
+    let knot_count = path.knots.len();
+    if knot_count < 2 {
+        return;
+    }
+
+    let pair_count = if path.is_cyclic {
+        knot_count
+    } else {
+        knot_count - 1
+    };
+
+    for knot_index in 0..pair_count {
+        let next_index = (knot_index + 1) % knot_count;
+        let knot_point = path.knots[knot_index].point;
+        let next_point = path.knots[next_index].point;
+        let delta = next_point - knot_point;
+
+        if delta.x.abs() >= EPSILON || delta.y.abs() >= EPSILON {
+            continue;
+        }
+
+        if matches!(path.knots[knot_index].right, KnotDirection::Explicit(_)) {
+            continue;
+        }
+
+        path.knots[knot_index].right = KnotDirection::Explicit(knot_point);
+        if matches!(path.knots[knot_index].left, KnotDirection::Open) {
+            path.knots[knot_index].left = KnotDirection::Curl(1.0);
+        }
+
+        path.knots[next_index].left = KnotDirection::Explicit(knot_point);
+        if matches!(path.knots[next_index].right, KnotDirection::Open) {
+            path.knots[next_index].right = KnotDirection::Curl(1.0);
+        }
     }
 }
 
@@ -1907,5 +1955,42 @@ mod tests {
         assert_cp("s1 lcp", left_cp(&path, 2), 2.46371, -1.02052);
         assert_cp("s2 rcp", right_cp(&path, 2), 3.69557, -0.51027);
         assert_cp("s2 lcp", left_cp(&path, 0), 3.69557, 0.51027);
+    }
+
+    #[test]
+    fn test_cyclic_duplicate_endpoint_is_joined_explicitly() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(1.0, 0.0);
+        let c = Point::new(0.5, 1.0);
+
+        // Last knot repeats the first knot geometrically.
+        let mut path = Path::from_knots(
+            vec![Knot::new(a), Knot::new(b), Knot::new(c), Knot::new(a)],
+            true,
+        );
+
+        make_choices(&mut path);
+
+        // Keep all knots (reference behavior is to join explicitly, not drop).
+        assert_eq!(path.knots.len(), 4);
+
+        // Closing zero-length segment must be explicit at both ends.
+        assert_eq!(path.knots[3].right, KnotDirection::Explicit(a));
+        assert_eq!(path.knots[0].left, KnotDirection::Explicit(a));
+
+        assert_all_explicit(&path);
+    }
+
+    #[test]
+    fn test_open_consecutive_equal_knots_are_joined_explicitly() {
+        let a = Point::new(0.0, 0.0);
+        let b = Point::new(1.0, 0.0);
+
+        let mut path = Path::from_knots(vec![Knot::new(a), Knot::new(a), Knot::new(b)], false);
+        make_choices(&mut path);
+
+        assert_eq!(path.knots[0].right, KnotDirection::Explicit(a));
+        assert_eq!(path.knots[1].left, KnotDirection::Explicit(a));
+        assert_all_explicit(&path);
     }
 }
