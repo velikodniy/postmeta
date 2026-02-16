@@ -285,6 +285,35 @@ pub fn reverse(path: &Path) -> Path {
         return Path::new();
     }
 
+    if path.is_cyclic {
+        // MetaPost-style reverse for cycles keeps the same start knot.
+        // Original order: 0,1,2,...,n-1 (cyclic)
+        // Reversed order: 0,n-1,n-2,...,1 (cyclic)
+        let mut knots = Vec::with_capacity(path.knots.len());
+
+        let k0 = &path.knots[0];
+        knots.push(Knot {
+            point: k0.point,
+            left: k0.right,
+            right: k0.left,
+            left_tension: k0.right_tension,
+            right_tension: k0.left_tension,
+        });
+
+        for i in (1..path.knots.len()).rev() {
+            let k = &path.knots[i];
+            knots.push(Knot {
+                point: k.point,
+                left: k.right,
+                right: k.left,
+                left_tension: k.right_tension,
+                right_tension: k.left_tension,
+            });
+        }
+
+        return Path::from_knots(knots, true);
+    }
+
     let knots: Vec<Knot> = path
         .knots
         .iter()
@@ -386,6 +415,24 @@ mod tests {
         let rev = reverse(&path);
         assert!(rev.is_cyclic);
         assert_eq!(rev.knots.len(), 3);
+        assert_eq!(rev.knots[0].point, path.knots[0].point);
+    }
+
+    #[test]
+    fn test_reverse_cyclic_time_mapping() {
+        let path = make_triangle_path();
+        let rev = reverse(&path);
+        let n = index_to_scalar(path.num_segments());
+
+        for &t in &[0.0, 0.25, 0.9, 1.5, 2.2] {
+            let p_rev = rev.point_at(t);
+            let mapped = ((n - t) % n + n) % n;
+            let p_orig = path.point_at(mapped);
+            assert!(
+                (p_rev.x - p_orig.x).abs() < 1e-6 && (p_rev.y - p_orig.y).abs() < 1e-6,
+                "t={t}: rev={p_rev:?}, orig={p_orig:?}, mapped={mapped}"
+            );
+        }
     }
 
     #[test]
