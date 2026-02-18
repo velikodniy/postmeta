@@ -135,11 +135,25 @@ pub fn precontrol_of(path: &Path, t: Scalar) -> Point {
     let Some(t) = normalize_time(path, t) else {
         return path.knots[0].point;
     };
-    let (seg, _) = time_to_seg_frac(t, path.num_segments());
-    let j = (seg + 1) % path.knots.len();
-    match path.knots[j].left {
-        KnotDirection::Explicit(p) => p,
-        _ => path.knots[j].point,
+    let n = path.num_segments();
+    let (seg, frac) = time_to_seg_frac(t, n);
+
+    // MetaPost's `find_point` semantics:
+    // - for integer times, return controls at that knot;
+    // - for fractional times, split the segment and use the inserted knot.
+    if frac.abs() < EPSILON {
+        let knot_idx = seg % path.knots.len();
+        if !path.is_cyclic && knot_idx == 0 {
+            return path.knots[0].point;
+        }
+        match path.knots[knot_idx].left {
+            KnotDirection::Explicit(p) => p,
+            _ => path.knots[knot_idx].point,
+        }
+    } else {
+        let cubic = CubicSegment::from_path(path, seg % n);
+        let (left_part, _) = cubic.split(frac);
+        left_part.p2
     }
 }
 
@@ -152,10 +166,22 @@ pub fn postcontrol_of(path: &Path, t: Scalar) -> Point {
     let Some(t) = normalize_time(path, t) else {
         return path.knots[0].point;
     };
-    let (seg, _) = time_to_seg_frac(t, path.num_segments());
-    match path.knots[seg].right {
-        KnotDirection::Explicit(p) => p,
-        _ => path.knots[seg].point,
+    let n = path.num_segments();
+    let (seg, frac) = time_to_seg_frac(t, n);
+
+    if frac.abs() < EPSILON {
+        let knot_idx = seg % path.knots.len();
+        if !path.is_cyclic && knot_idx == path.knots.len() - 1 {
+            return path.knots[knot_idx].point;
+        }
+        match path.knots[knot_idx].right {
+            KnotDirection::Explicit(p) => p,
+            _ => path.knots[knot_idx].point,
+        }
+    } else {
+        let cubic = CubicSegment::from_path(path, seg % n);
+        let (_, right_part) = cubic.split(frac);
+        right_part.p1
     }
 }
 
@@ -398,6 +424,35 @@ mod tests {
         // Direction should be roughly (10, 0) (positive x)
         assert!(d.x > 0.0);
         assert!(d.y.abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_pre_postcontrol_open_endpoints() {
+        let path = make_line_path();
+
+        let pre0 = precontrol_of(&path, 0.0);
+        let post0 = postcontrol_of(&path, 0.0);
+        assert!((pre0.x - 0.0).abs() < EPSILON);
+        assert!((post0.x - 10.0 / 3.0).abs() < EPSILON);
+
+        let pre1 = precontrol_of(&path, 1.0);
+        let post1 = postcontrol_of(&path, 1.0);
+        assert!((pre1.x - 20.0 / 3.0).abs() < EPSILON);
+        assert!((post1.x - 10.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_precontrol_at_cyclic_knot_uses_same_knot_left() {
+        let path = make_triangle_path();
+        let pre0 = precontrol_of(&path, 0.0);
+
+        let expected = match path.knots[0].left {
+            KnotDirection::Explicit(p) => p,
+            _ => path.knots[0].point,
+        };
+
+        assert!((pre0.x - expected.x).abs() < EPSILON);
+        assert!((pre0.y - expected.y).abs() < EPSILON);
     }
 
     #[test]
