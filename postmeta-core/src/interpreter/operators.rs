@@ -27,6 +27,7 @@ use super::helpers::{
     value_to_transform,
 };
 use super::{Interpreter, LhsBinding};
+use crate::variables::VarValue;
 
 impl Interpreter {
     fn compare_values(
@@ -75,16 +76,18 @@ impl Interpreter {
         input: Value,
         pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
     ) -> InterpResult<super::ExprResultValue> {
-        self.lhs_tracking.last_lhs_binding = None;
+        // Save the operand binding before clearing — part-extraction operators
+        // need it to find transform sub-part VarIds for equation solving.
+        let operand_binding = self.lhs_tracking.last_lhs_binding.take();
 
         // Part-extraction operators need pair_dep access — handle them here.
         match op {
-            UnaryOp::XPart => return self.extract_part(&input, 0, pair_dep),
-            UnaryOp::YPart => return self.extract_part(&input, 1, pair_dep),
-            UnaryOp::XXPart => return self.extract_part(&input, 2, pair_dep),
-            UnaryOp::XYPart => return self.extract_part(&input, 3, pair_dep),
-            UnaryOp::YXPart => return self.extract_part(&input, 4, pair_dep),
-            UnaryOp::YYPart => return self.extract_part(&input, 5, pair_dep),
+            UnaryOp::XPart => return self.extract_part(&input, 0, pair_dep, operand_binding),
+            UnaryOp::YPart => return self.extract_part(&input, 1, pair_dep, operand_binding),
+            UnaryOp::XXPart => return self.extract_part(&input, 2, pair_dep, operand_binding),
+            UnaryOp::XYPart => return self.extract_part(&input, 3, pair_dep, operand_binding),
+            UnaryOp::YXPart => return self.extract_part(&input, 4, pair_dep, operand_binding),
+            UnaryOp::YYPart => return self.extract_part(&input, 5, pair_dep, operand_binding),
             _ => {}
         }
 
@@ -599,11 +602,17 @@ impl Interpreter {
     /// propagated to the returned result's `dep` and to
     /// `last_lhs_binding` so that it can participate in linear equation
     /// solving (e.g. `xpart A = 0`).
+    ///
+    /// For transform variables, `operand_binding` carries the variable
+    /// binding from before the unary operator cleared it, allowing us to
+    /// look up the sub-part `VarId` for equation solving (e.g.
+    /// `xxpart T = 1`).
     fn extract_part(
         &mut self,
         input: &Value,
         part: usize,
         pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
+        operand_binding: Option<LhsBinding>,
     ) -> InterpResult<super::ExprResultValue> {
         match input {
             Value::Pair(x, y) => {
@@ -663,6 +672,52 @@ impl Interpreter {
                         ));
                     }
                 };
+                // If the operand was a transform variable, look up the
+                // sub-part VarId so the result can participate in equation
+                // solving (e.g. `xxpart T = 1`).
+                if let Some(LhsBinding::Variable { id, .. }) = operand_binding {
+                    if let VarValue::Transform {
+                        tx,
+                        ty,
+                        txx,
+                        txy,
+                        tyx,
+                        tyy,
+                    } = self.variables.get(id).clone()
+                    {
+                        let sub_id = match part {
+                            0 => tx,
+                            1 => ty,
+                            2 => txx,
+                            3 => txy,
+                            4 => tyx,
+                            5 => tyy,
+                            _ => unreachable!(),
+                        };
+                        let dep = self.numeric_dep_for_var(sub_id);
+                        if crate::equation::is_constant(&dep) {
+                            return Ok(super::ExprResultValue {
+                                exp: Value::Numeric(v),
+                                ty: Type::Known,
+                                dep: Some(dep),
+                                pair_dep: None,
+                            });
+                        }
+                        let primary_var = dep.iter().find_map(|t| t.var_id);
+                        if let Some(vid) = primary_var {
+                            self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
+                                id: vid,
+                                negated: false,
+                            });
+                        }
+                        return Ok(super::ExprResultValue {
+                            exp: Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(v)),
+                            ty: Type::Dependent,
+                            dep: Some(dep),
+                            pair_dep: None,
+                        });
+                    }
+                }
                 Ok(super::ExprResultValue::numeric_known(v))
             }
             _ => Err(InterpreterError::new(
