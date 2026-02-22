@@ -349,7 +349,6 @@ pub enum PrimaryBinaryOp {
     PrecontrolOf = 85,
     PostcontrolOf = 86,
     PenOffsetOf = 87,
-    DirectionOf = 88,
     SubpathOf = 89,
     DirectionTimeOf = 90,
     ArcTimeOf = 91,
@@ -370,7 +369,6 @@ pub enum SecondaryBinaryOp {
     Slanted = 99,
     ZScaled = 100,
     Transformed = 101,
-    DotProd = 102,
     Infont = 112,
 }
 
@@ -616,7 +614,6 @@ impl_from_modifier!(PrimaryBinaryOp {
     PrecontrolOf,
     PostcontrolOf,
     PenOffsetOf,
-    DirectionOf,
     SubpathOf,
     DirectionTimeOf,
     ArcTimeOf,
@@ -633,7 +630,6 @@ impl_from_modifier!(SecondaryBinaryOp {
     Slanted,
     ZScaled,
     Transformed,
-    DotProd,
     Infont,
 });
 impl_from_modifier!(TertiaryBinaryOp {
@@ -1375,11 +1371,6 @@ pub const PRIMITIVES: &[Primitive] = &[
         modifier: PrimaryBinaryOp::PenOffsetOf as u16,
     },
     Primitive {
-        name: "direction",
-        command: Command::PrimaryBinary,
-        modifier: PrimaryBinaryOp::DirectionOf as u16,
-    },
-    Primitive {
         name: "subpath",
         command: Command::PrimaryBinary,
         modifier: PrimaryBinaryOp::SubpathOf as u16,
@@ -1434,11 +1425,6 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "transformed",
         command: Command::SecondaryBinary,
         modifier: SecondaryBinaryOp::Transformed as u16,
-    },
-    Primitive {
-        name: "dotprod",
-        command: Command::SecondaryBinary,
-        modifier: SecondaryBinaryOp::DotProd as u16,
     },
     Primitive {
         name: "infont",

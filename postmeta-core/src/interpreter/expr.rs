@@ -1303,10 +1303,9 @@ impl Interpreter {
             SecondaryBinaryOp::Transformed => {
                 value_to_transform(right).unwrap_or(postmeta_graphics::types::Transform::IDENTITY)
             }
-            SecondaryBinaryOp::Times
-            | SecondaryBinaryOp::Over
-            | SecondaryBinaryOp::DotProd
-            | SecondaryBinaryOp::Infont => postmeta_graphics::types::Transform::IDENTITY,
+            SecondaryBinaryOp::Times | SecondaryBinaryOp::Over | SecondaryBinaryOp::Infont => {
+                postmeta_graphics::types::Transform::IDENTITY
+            }
         }
     }
 }

@@ -366,13 +366,6 @@ impl Interpreter {
                 let pt = p.point_at(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
-            PrimaryBinaryOp::DirectionOf => {
-                let t = value_to_scalar(first)?;
-                let p = value_to_path(second)?;
-                let post = path::postcontrol_of(p, t);
-                let pre = path::precontrol_of(p, t);
-                Ok((Value::Pair(post.x - pre.x, post.y - pre.y), Type::PairType))
-            }
             PrimaryBinaryOp::PrecontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
@@ -502,11 +495,6 @@ impl Interpreter {
             SecondaryBinaryOp::Transformed => {
                 let t = value_to_transform(right)?;
                 Self::apply_transform(left, &t)
-            }
-            SecondaryBinaryOp::DotProd => {
-                let (ax, ay) = value_to_pair(left)?;
-                let (bx, by) = value_to_pair(right)?;
-                Ok((Value::Numeric(ax.mul_add(bx, ay * by)), Type::Known))
             }
             SecondaryBinaryOp::Infont => {
                 let text = value_to_string(left)?;
@@ -878,8 +866,6 @@ fn expression_binary_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use postmeta_graphics::path::Path;
-    use postmeta_graphics::types::{Knot, KnotDirection, Point};
 
     #[test]
     fn compare_values_nan_is_not_comparable() {
@@ -898,24 +884,5 @@ mod tests {
             .expect("char should evaluate");
         assert_eq!(ty, Type::String);
         assert_eq!(val, Value::String(Arc::from("\"")));
-    }
-
-    #[test]
-    fn direction_of_matches_post_minus_pre_control() {
-        let mut k0 = Knot::new(Point::new(0.0, 0.0));
-        k0.right = KnotDirection::Explicit(Point::new(30.0, 0.0));
-        let mut k1 = Knot::new(Point::new(90.0, 0.0));
-        k1.left = KnotDirection::Explicit(Point::new(60.0, 0.0));
-        let p = Path::from_knots(vec![k0, k1], false);
-
-        let (value, ty) = Interpreter::do_primary_binary(
-            PrimaryBinaryOp::DirectionOf,
-            &Value::Numeric(0.0),
-            &Value::Path(p),
-        )
-        .expect("direction should evaluate");
-
-        assert_eq!(ty, Type::PairType);
-        assert_eq!(value, Value::Pair(30.0, 0.0));
     }
 }
