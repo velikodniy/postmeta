@@ -1858,6 +1858,173 @@ fn pair_equation_preserves_dep_when_length_minus_unknown() {
     );
 }
 
+#[test]
+fn vardef_expr_param_preserves_pair_deps() {
+    // Regression: passing an unknown pair through a vardef expr parameter
+    // must preserve equation deps so the solver can determine the variable.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef assign(expr m, v) = m = v enddef;
+             pair A; assign(A, (3,7)); show A;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        infos.iter().any(|m| m.contains("(3,7)")),
+        "expected A=(3,7), got: {infos:?}"
+    );
+}
+
+#[test]
+fn vardef_expr_param_preserves_numeric_deps() {
+    // Passing an unknown numeric through a vardef expr parameter must
+    // preserve its dependency so the equation solver can determine it.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef assign(expr m, v) = m = v enddef;
+             numeric x; assign(x, 42); show x;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        infos.iter().any(|m| m.contains("42")),
+        "expected x=42, got: {infos:?}"
+    );
+}
+
+#[test]
+fn vardef_expr_param_chained_pair_equations() {
+    // Regression for example 177: a system of linear pair equations where
+    // all unknowns pass through vardef expr parameters.
+    //   bar(A, P0, P4, B)  =>  A = 1/3*P0 + 1/3*P4 + 1/3*B
+    //   bar(B, A,  P1, C)  =>  B = 1/3*A  + 1/3*P1 + 1/3*C
+    //   bar(C, B,  P2, P3) =>  C = 1/3*B  + 1/3*P2 + 1/3*P3
+    // With P0..P4 known, the system is fully determined.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef bar(expr m,a,b,c) = m = 1/3a + 1/3b + 1/3c enddef;
+             pair A, B, C;
+             bar(A, (9,0), (0,9), B);
+             bar(B, A, (0,0), C);
+             bar(C, B, (9,0), (0,9));
+             show A; show B; show C;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    // Verify that all three pairs are known (not (0,0) placeholders).
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(infos.len(), 3, "expected 3 show messages, got: {infos:?}");
+    // None of the solved pairs should be (0,0) — that would indicate
+    // deps were lost and the solver couldn't determine the variables.
+    for info in &infos {
+        assert!(
+            !info.contains("(0,0)"),
+            "pair should not be (0,0) — deps were likely lost: {infos:?}"
+        );
+    }
+}
+
+#[test]
+fn def_expr_param_preserves_pair_deps() {
+    // Same as the vardef test, but with `def` (no group scope).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "def assign(expr m, v) = m = v enddef;
+             pair A; assign(A, (5,11)); show A;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        infos.iter().any(|m| m.contains("(5,11)")),
+        "expected A=(5,11), got: {infos:?}"
+    );
+}
+
+#[test]
+fn undelimited_expr_param_preserves_pair_deps() {
+    // Undelimited primary/expr params also need dep preservation.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "def assign(expr m) primary v = m = v enddef;
+             pair A; assign(A) (4,8); show A;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert!(
+        infos.iter().any(|m| m.contains("(4,8)")),
+        "expected A=(4,8), got: {infos:?}"
+    );
+}
+
 // -----------------------------------------------------------------------
 // plain.mp loads without hard error
 // -----------------------------------------------------------------------
