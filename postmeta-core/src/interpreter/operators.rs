@@ -146,6 +146,15 @@ impl Interpreter {
                 let v = value_to_scalar(input)?;
                 Ok((Value::Numeric(v.floor()), Type::Known))
             }
+            UnaryOp::Odd => {
+                let v = value_to_scalar(input)?;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "rounding to integer for odd test"
+                )]
+                let rounded = v.round() as i64;
+                Ok((Value::Boolean(rounded % 2 != 0), Type::Boolean))
+            }
             UnaryOp::MExp => {
                 let v = value_to_scalar(input)?;
                 Ok((Value::Numeric(math::mexp(v)), Type::Known))

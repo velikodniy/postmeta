@@ -291,6 +291,7 @@ pub enum NullaryOp {
 #[repr(u16)]
 pub enum UnaryOp {
     // Type tests and conversions
+    Odd = 200,
     Not = 38,
     Sqrt = 39,
     MExp = 40,
@@ -562,6 +563,7 @@ impl_from_modifier!(NullaryOp {
     NormalDeviate,
 });
 impl_from_modifier!(UnaryOp {
+    Odd,
     Not,
     Sqrt,
     MExp,
@@ -1141,9 +1143,24 @@ pub const PRIMITIVES: &[Primitive] = &[
         modifier: UnaryOp::Floor as u16,
     },
     Primitive {
+        name: "odd",
+        command: Command::Unary,
+        modifier: UnaryOp::Odd as u16,
+    },
+    Primitive {
         name: "uniformdeviate",
         command: Command::Unary,
         modifier: UnaryOp::UniformDeviate as u16,
+    },
+    Primitive {
+        name: "charexists",
+        command: Command::Unary,
+        modifier: UnaryOp::CharExists as u16,
+    },
+    Primitive {
+        name: "fontsize",
+        command: Command::Unary,
+        modifier: UnaryOp::FontSize as u16,
     },
     Primitive {
         name: "angle",
