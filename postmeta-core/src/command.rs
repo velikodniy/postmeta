@@ -290,85 +290,81 @@ pub enum NullaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum UnaryOp {
-    // Type tests and conversions
-    Odd = 200,
-    Not = 38,
-    Sqrt = 39,
-    MExp = 40,
-    MLog = 41,
-    SinD = 42,
-    CosD = 43,
-    Floor = 44,
-    UniformDeviate = 45,
-    CharExists = 46,
-    FontSize = 47,
+    Odd = 40,
+    Not = 43,
+    Decimal = 44,
+    Reverse = 45,
+    MakePath = 46,
+    MakePen = 47,
+    Oct = 48,
+    Hex = 49,
+    ASCII = 50,
+    Char = 51,
+    Length = 52,
+    TurningNumber = 53,
     // Part extractors
-    LLCorner = 48,
-    LRCorner = 49,
-    ULCorner = 50,
-    URCorner = 51,
-    ArcLength = 52,
-    Angle = 53,
-    CycleOp = 54,
-    FilledOp = 55,
-    StrokedOp = 56,
-    TextualOp = 57,
-    ClippedOp = 58,
-    BoundedOp = 59,
-    MakePath = 60,
-    MakePen = 61,
-    Oct = 62,
-    Hex = 63,
-    ASCII = 64,
-    Char = 65,
-    Length = 66,
-    TurningNumber = 67,
-    XPart = 68,
-    YPart = 69,
-    XXPart = 70,
-    XYPart = 71,
-    YXPart = 72,
-    YYPart = 73,
-    RedPart = 74,
-    GreenPart = 75,
-    BluePart = 76,
-    FontPart = 77,
-    TextPart = 78,
-    PathPart = 79,
-    PenPart = 80,
-    DashPart = 81,
-    Decimal = 82,
-    Reverse = 83,
+    XPart = 54,
+    YPart = 55,
+    XXPart = 56,
+    XYPart = 57,
+    YXPart = 58,
+    YYPart = 59,
+    RedPart = 60,
+    GreenPart = 61,
+    BluePart = 62,
+    FontPart = 63,
+    TextPart = 64,
+    PathPart = 65,
+    PenPart = 66,
+    DashPart = 67,
+    // Math
+    Sqrt = 68,
+    MExp = 69,
+    MLog = 70,
+    SinD = 71,
+    CosD = 72,
+    Floor = 73,
+    UniformDeviate = 74,
+    CharExists = 75,
+    FontSize = 76,
+    // Corner / geometry
+    LLCorner = 77,
+    LRCorner = 78,
+    ULCorner = 79,
+    URCorner = 80,
+    ArcLength = 81,
+    Angle = 82,
+    CycleOp = 83,
+    // Picture queries
+    FilledOp = 84,
+    StrokedOp = 85,
+    TextualOp = 86,
+    ClippedOp = 87,
+    BoundedOp = 88,
 }
 
-/// Operation codes for [`Command::PrimaryBinary`] ("expr X of Y").
+/// Operation codes for [`Command::PlusOrMinus`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
-pub enum PrimaryBinaryOp {
-    PointOf = 84,
-    PrecontrolOf = 85,
-    PostcontrolOf = 86,
-    PenOffsetOf = 87,
-    SubpathOf = 89,
-    DirectionTimeOf = 90,
-    ArcTimeOf = 91,
-    SubstringOf = 115,
+pub enum PlusMinusOp {
+    Plus = 89,
+    Minus = 90,
 }
 
 /// Operation codes for [`Command::SecondaryBinary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum SecondaryBinaryOp {
-    Times = 92,
-    Over = 93,
-    Scaled = 94,
-    Shifted = 95,
-    Rotated = 96,
-    XScaled = 97,
-    YScaled = 98,
-    Slanted = 99,
-    ZScaled = 100,
-    Transformed = 101,
+    Times = 91,
+    Over = 92,
+    Rotated = 104,
+    Slanted = 105,
+    Scaled = 106,
+    Shifted = 107,
+    Transformed = 108,
+    XScaled = 109,
+    YScaled = 110,
+    ZScaled = 111,
     Infont = 112,
 }
 
@@ -376,31 +372,37 @@ pub enum SecondaryBinaryOp {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum TertiaryBinaryOp {
-    PythagAdd = 103,
-    PythagSub = 104,
-    Or = 105,
+    PythagAdd = 93,
+    PythagSub = 94,
+    Or = 95,
 }
 
 /// Operation codes for [`Command::ExpressionBinary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ExpressionBinaryOp {
-    LessThan = 106,
-    LessOrEqual = 107,
-    GreaterThan = 108,
-    GreaterOrEqual = 109,
-    EqualTo = 110,
-    UnequalTo = 111,
-    Concatenate = 112,
+    LessThan = 97,
+    LessOrEqual = 98,
+    GreaterThan = 99,
+    GreaterOrEqual = 100,
+    EqualTo = 101,
+    UnequalTo = 102,
+    Concatenate = 103,
     IntersectionTimes = 113,
 }
 
-/// Operation codes for [`Command::PlusOrMinus`].
+/// Operation codes for [`Command::PrimaryBinary`] ("expr X of Y").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
-pub enum PlusMinusOp {
-    Plus = 115,
-    Minus = 116,
+pub enum PrimaryBinaryOp {
+    SubstringOf = 115,
+    SubpathOf = 116,
+    DirectionTimeOf = 117,
+    PointOf = 118,
+    PrecontrolOf = 119,
+    PostcontrolOf = 120,
+    PenOffsetOf = 121,
+    ArcTimeOf = 122,
 }
 
 /// Operation codes for [`Command::Show`].
@@ -563,27 +565,8 @@ impl_from_modifier!(NullaryOp {
 impl_from_modifier!(UnaryOp {
     Odd,
     Not,
-    Sqrt,
-    MExp,
-    MLog,
-    SinD,
-    CosD,
-    Floor,
-    UniformDeviate,
-    CharExists,
-    FontSize,
-    LLCorner,
-    LRCorner,
-    ULCorner,
-    URCorner,
-    ArcLength,
-    Angle,
-    CycleOp,
-    FilledOp,
-    StrokedOp,
-    TextualOp,
-    ClippedOp,
-    BoundedOp,
+    Decimal,
+    Reverse,
     MakePath,
     MakePen,
     Oct,
@@ -606,36 +589,46 @@ impl_from_modifier!(UnaryOp {
     PathPart,
     PenPart,
     DashPart,
-    Decimal,
-    Reverse,
+    Sqrt,
+    MExp,
+    MLog,
+    SinD,
+    CosD,
+    Floor,
+    UniformDeviate,
+    CharExists,
+    FontSize,
+    LLCorner,
+    LRCorner,
+    ULCorner,
+    URCorner,
+    ArcLength,
+    Angle,
+    CycleOp,
+    FilledOp,
+    StrokedOp,
+    TextualOp,
+    ClippedOp,
+    BoundedOp,
 });
-impl_from_modifier!(PrimaryBinaryOp {
-    PointOf,
-    PrecontrolOf,
-    PostcontrolOf,
-    PenOffsetOf,
-    SubpathOf,
-    DirectionTimeOf,
-    ArcTimeOf,
-    SubstringOf,
-});
+impl_from_modifier!(PlusMinusOp { Plus, Minus });
 impl_from_modifier!(SecondaryBinaryOp {
     Times,
     Over,
+    Rotated,
+    Slanted,
     Scaled,
     Shifted,
-    Rotated,
+    Transformed,
     XScaled,
     YScaled,
-    Slanted,
     ZScaled,
-    Transformed,
     Infont,
 });
 impl_from_modifier!(TertiaryBinaryOp {
     PythagAdd,
     PythagSub,
-    Or,
+    Or
 });
 impl_from_modifier!(ExpressionBinaryOp {
     LessThan,
@@ -647,7 +640,16 @@ impl_from_modifier!(ExpressionBinaryOp {
     Concatenate,
     IntersectionTimes,
 });
-impl_from_modifier!(PlusMinusOp { Plus, Minus });
+impl_from_modifier!(PrimaryBinaryOp {
+    SubstringOf,
+    SubpathOf,
+    DirectionTimeOf,
+    PointOf,
+    PrecontrolOf,
+    PostcontrolOf,
+    PenOffsetOf,
+    ArcTimeOf,
+});
 impl_from_modifier!(ShowOp {
     Show,
     ShowToken,
