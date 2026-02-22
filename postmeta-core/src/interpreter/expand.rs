@@ -7,7 +7,7 @@
 
 use crate::command::{Command, FiOrElseOp, IterationOp, MacroDefOp, MacroSpecialOp, ParamTypeOp};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::input::{StoredToken, TokenList};
+use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
@@ -1336,10 +1336,7 @@ impl Interpreter {
                         match param_type {
                             ParamType::Expr => {
                                 if let Ok(result) = self.scan_expression() {
-                                    args.push(value_to_stored_tokens(
-                                        &result.exp,
-                                        &mut self.symbols,
-                                    ));
+                                    args.push(expr_result_to_capsule(result));
                                 } else {
                                     args.push(Vec::new());
                                 }
@@ -1480,7 +1477,7 @@ impl Interpreter {
         scanner: fn(&mut Self) -> InterpResult<super::ExprResultValue>,
     ) -> TokenList {
         match scanner(self) {
-            Ok(result) => value_to_stored_tokens(&result.exp, &mut self.symbols),
+            Ok(result) => expr_result_to_capsule(result),
             Err(err) => {
                 self.errors.push(err);
                 Vec::new()
@@ -1748,4 +1745,17 @@ impl Interpreter {
             }
         }
     }
+}
+
+/// Convert an `ExprResultValue` to a single-element token list containing a
+/// capsule that preserves dependency information. This is used for expr
+/// arguments to macros so that the equation solver can still track unknown
+/// variables passed through macro parameters.
+fn expr_result_to_capsule(result: ExprResultValue) -> TokenList {
+    vec![StoredToken::Capsule(CapsulePayload {
+        value: result.exp,
+        ty: result.ty,
+        dep: result.dep,
+        pair_dep: result.pair_dep,
+    })]
 }
