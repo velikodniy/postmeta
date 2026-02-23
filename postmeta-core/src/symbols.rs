@@ -107,7 +107,8 @@ impl SymbolTable {
 
         // Multi-char operators that map to specific commands
         table.register_primitive("..", Command::PathJoin, 0);
-        table.register_primitive("...", Command::PathJoin, 1);
+        // `...` is NOT a primitive — it is defined in plain.mp as:
+        //   def ... = .. tension atleast 1 .. enddef;
         table.register_primitive(":=", Command::Assignment, 0);
         table.register_primitive("::", Command::DoubleColon, 0);
         table.register_primitive("&", Command::Ampersand, 0);

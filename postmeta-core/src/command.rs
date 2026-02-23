@@ -496,8 +496,6 @@ pub enum MessageOp {
 #[repr(u16)]
 pub enum StrOpOp {
     Str = 0,
-    Char = 1,
-    Decimal = 2,
     ReadFrom = 3,
 }
 
@@ -693,12 +691,7 @@ impl_from_modifier!(MessageOp {
     ErrMessage,
     ErrHelp,
 });
-impl_from_modifier!(StrOpOp {
-    Str,
-    Char,
-    Decimal,
-    ReadFrom,
-});
+impl_from_modifier!(StrOpOp { Str, ReadFrom });
 impl_from_modifier!(ParamTypeOp {
     Expr,
     Suffix,
