@@ -170,6 +170,69 @@ pub fn arc_time(path: &Path, target: Scalar) -> Scalar {
     index_to_scalar(n)
 }
 
+/// Compute the turning number of a cyclic path.
+///
+/// The turning number counts how many times the tangent direction rotates
+/// through 360° as we traverse the path.  Returns +1 for counterclockwise
+/// simple closed curves, −1 for clockwise, and 0 for non-cyclic paths or
+/// pairs.
+///
+/// Algorithm: subdivide each cubic segment into small steps, accumulate
+/// signed turning angles between consecutive direction vectors, then
+/// round the total to the nearest integer (since the turning number is
+/// always an integer for a closed curve).
+/// Number of subdivision steps per cubic segment for turning number.
+const TURNING_STEPS: usize = 64;
+const TURNING_STEPS_F: Scalar = 64.0;
+
+#[must_use]
+pub fn turning_number(path: &Path) -> Scalar {
+    if !path.is_cyclic || path.knots.len() < 2 {
+        return 0.0;
+    }
+
+    let n = path.num_segments();
+    if n == 0 {
+        return 0.0;
+    }
+
+    let mut total_angle: Scalar = 0.0;
+
+    // Get initial direction from the first segment.
+    let first_seg = CubicSegment::from_path(path, 0);
+    let mut prev_dir = first_seg.direction_at(0.0);
+
+    // If the direction is zero (degenerate), try a small offset.
+    if prev_dir.x.abs() < EPSILON && prev_dir.y.abs() < EPSILON {
+        prev_dir = first_seg.direction_at(1e-6);
+    }
+
+    for i in 0..n {
+        let seg = CubicSegment::from_path(path, i);
+
+        for step in 1..=TURNING_STEPS {
+            #[allow(clippy::cast_precision_loss)]
+            let t = step as Scalar / TURNING_STEPS_F;
+            let cur_dir = seg.direction_at(t);
+
+            // Skip zero-length direction vectors.
+            if cur_dir.x.abs() < EPSILON && cur_dir.y.abs() < EPSILON {
+                continue;
+            }
+
+            // Signed angle between prev_dir and cur_dir via atan2 of cross/dot.
+            let cross = prev_dir.x.mul_add(cur_dir.y, -prev_dir.y * cur_dir.x);
+            let dot = prev_dir.x.mul_add(cur_dir.x, prev_dir.y * cur_dir.y);
+            total_angle += cross.atan2(dot);
+
+            prev_dir = cur_dir;
+        }
+    }
+
+    // Divide by 2π and round to nearest integer.
+    (total_angle / (2.0 * std::f64::consts::PI)).round()
+}
+
 /// Bisect to find the parameter `t` in [0,1] such that the arc length
 /// from 0 to `t` on `seg` equals `target`.
 fn bisect_arc_length(seg: &CubicSegment, target: Scalar) -> Scalar {
@@ -652,5 +715,61 @@ mod tests {
 
         let p2 = make_triangle_path();
         assert_eq!(p2.num_segments(), 3);
+    }
+
+    #[test]
+    fn turning_number_counterclockwise_triangle() {
+        // (0,0)→(10,0)→(5,10) is counterclockwise → turning number = +1
+        let tri = make_triangle_path();
+        assert_eq!(turning_number(&tri), 1.0);
+    }
+
+    #[test]
+    fn turning_number_clockwise_triangle() {
+        // Reverse the triangle → clockwise → turning number = −1
+        let tri = make_triangle_path();
+        let rev = reverse(&tri);
+        assert_eq!(turning_number(&rev), -1.0);
+    }
+
+    #[test]
+    fn turning_number_open_path() {
+        // Open paths have turning number 0
+        let line = make_line_path();
+        assert_eq!(turning_number(&line), 0.0);
+    }
+
+    #[test]
+    fn turning_number_single_knot() {
+        // Single-knot cyclic path → 0
+        let k = Knot::new(Point::new(5.0, 5.0));
+        let p = Path::from_knots(vec![k], true);
+        assert_eq!(turning_number(&p), 0.0);
+    }
+
+    fn make_square_path() -> Path {
+        // Unit square (0,0)→(1,0)→(1,1)→(0,1) counterclockwise with straight controls
+        let pts = [
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(0.0, 1.0),
+        ];
+        let knots: Vec<Knot> = (0..4)
+            .map(|i| {
+                let j = (i + 1) % 4;
+                let prev = (i + 3) % 4;
+                let right_cp = pts[i].lerp(pts[j], 1.0 / 3.0);
+                let left_cp = pts[prev].lerp(pts[i], 2.0 / 3.0);
+                Knot::with_controls(pts[i], left_cp, right_cp)
+            })
+            .collect();
+        Path::from_knots(knots, true)
+    }
+
+    #[test]
+    fn turning_number_counterclockwise_square() {
+        let sq = make_square_path();
+        assert_eq!(turning_number(&sq), 1.0);
     }
 }

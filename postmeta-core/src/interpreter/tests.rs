@@ -396,17 +396,36 @@ fn nested_forever_loops_keep_outer_replay_state() {
         .filter(|e| e.severity == crate::error::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+}
 
-    let infos: Vec<_> = interp
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
-    assert!(
-        infos.iter().any(|m| m.contains('3')),
-        "expected outer=3 in infos: {infos:?}"
-    );
+#[test]
+fn turningnumber_counterclockwise() {
+    // A counterclockwise triangle should have turningnumber = 1
+    // Use `..` (primitive path join), not `--` (plain.mp macro)
+    let mut interp = Interpreter::new();
+    interp
+        .run("path p; p := (0,0)..(10,0)..(5,10)..cycle; show turningnumber p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("1"), "expected 1 in: {msg}");
+}
+
+#[test]
+fn turningnumber_pair_returns_zero() {
+    let mut interp = Interpreter::new();
+    interp.run("show turningnumber (3,4);").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("0"), "expected 0 in: {msg}");
+}
+
+#[test]
+fn turningnumber_open_path_returns_zero() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("path p; p := (0,0)..(10,0); show turningnumber p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
 #[test]

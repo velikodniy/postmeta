@@ -362,6 +362,14 @@ impl Interpreter {
                 let len = path::arc_length(p);
                 Ok((Value::Numeric(len), Type::Known))
             }
+            UnaryOp::TurningNumber => {
+                if let Value::Pair(..) = input {
+                    Ok((Value::Numeric(0.0), Type::Known))
+                } else {
+                    let p = value_to_path(input)?;
+                    Ok((Value::Numeric(path::turning_number(p)), Type::Known))
+                }
+            }
             // readfrom: stub — no filesystem access (WASM compatibility).
             // TODO: Implement via FileSystem trait when I/O support is added.
             UnaryOp::ReadFrom => {
