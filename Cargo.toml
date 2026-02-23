@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "postmeta-graphics",
+    "postmeta-fonts",
     "postmeta-svg",
     "postmeta-core",
     "postmeta-cli",

@@ -1,0 +1,13 @@
+[package]
+name = "postmeta-fonts"
+description = "Font loading and metrics for PostMeta"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+ttf-parser = "0.25"
+
+[lints]
+workspace = true
