@@ -2724,16 +2724,60 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
 // -----------------------------------------------------------------------
 
 #[test]
-fn btex_etex_produces_string() {
-    // btex Hello World etex should produce a string "Hello World"
+fn btex_etex_produces_picture() {
+    // btex ... etex should produce a picture capsule (not a string).
     let mut interp = Interpreter::new();
     interp
-        .run(r#"string s; s = btex Hello World etex; show s;"#)
+        .run(r#"picture p; p = btex Hello World etex; show p;"#)
         .unwrap();
     let msg = &interp.errors[0].message;
     assert!(
-        msg.contains("Hello World"),
-        "expected 'Hello World' in: {msg}"
+        msg.contains("(picture)"),
+        "expected picture type in show output: {msg}"
+    );
+}
+
+#[test]
+fn btex_etex_picture_is_transformable() {
+    // btex...etex result can be shifted without error, since it's a picture.
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; p = btex test etex shifted (10,20);")
+        .unwrap();
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.message.contains("Cannot transform"))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "btex picture should be transformable, got: {:?}",
+        errors
+    );
+}
+
+#[test]
+fn btex_etex_draw_shifted_no_error() {
+    // `draw btex...etex shifted z` — the pattern from examples 203-207.
+    // Should work with plain.mp loaded (addto currentpicture).
+    let mut interp = Interpreter::new();
+    interp.set_filesystem(Box::new(PlainMpFs));
+    interp
+        .run("input plain; beginfig(1); draw btex Q etex shifted (5,5); endfig; end;")
+        .unwrap();
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.message.contains("error") || e.message.contains("Cannot"))
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "draw btex...etex shifted should not error: {:?}",
+        errors
+    );
+    assert!(
+        !interp.output().is_empty(),
+        "should produce an output picture"
     );
 }
 
