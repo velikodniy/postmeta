@@ -241,7 +241,7 @@ fn text_bbox(text: &TextObject, bb: &mut BoundingBox) {
 )]
 mod tests {
     use super::*;
-    use crate::types::{Color, EPSILON, Knot, Transform};
+    use crate::types::{Color, EPSILON, Knot, TextMetrics, Transform};
     use std::sync::Arc;
 
     fn make_unit_square() -> Path {
@@ -362,6 +362,7 @@ mod tests {
             text: Arc::from("Hello"),
             font_name: Arc::from("cmr10"),
             font_size: 10.0,
+            metrics: TextMetrics::default(),
             color: Color::BLACK,
             transform: Transform::IDENTITY,
         };

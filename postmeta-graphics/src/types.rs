@@ -557,12 +557,28 @@ pub struct StrokeObject {
     pub miter_limit: Scalar,
 }
 
+/// Precomputed text dimensions at the nominal font size.
+///
+/// Populated by the interpreter from real font metrics (via `FontProvider`)
+/// or a heuristic fallback.  The graphics layer trusts these values and
+/// never recomputes them — it simply uses them for bounding-box and layout.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct TextMetrics {
+    /// Total advance width in points (character advances + kerning).
+    pub width: Scalar,
+    /// Ascender above the baseline, in points (positive upward).
+    pub height: Scalar,
+    /// Descender below the baseline, in points (positive downward).
+    pub depth: Scalar,
+}
+
 /// A text label.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TextObject {
     pub text: Arc<str>,
     pub font_name: Arc<str>,
     pub font_size: Scalar,
+    pub metrics: TextMetrics,
     pub color: Color,
     pub transform: Transform,
 }

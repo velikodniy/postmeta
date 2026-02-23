@@ -13,7 +13,7 @@ use postmeta_graphics::pen;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, GraphicsObject, Knot, Pen, Picture, Point, TextObject, Transform, Vec2,
+    Color, GraphicsObject, Knot, Pen, Picture, Point, TextMetrics, TextObject, Transform, Vec2,
 };
 
 use crate::command::{
@@ -646,6 +646,7 @@ impl Interpreter {
                     text: Arc::from(text.as_ref()),
                     font_name: Arc::from(font_name.as_ref()),
                     font_size,
+                    metrics: TextMetrics::default(),
                     color: Color::BLACK,
                     transform: Transform::IDENTITY,
                 };

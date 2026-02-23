@@ -759,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_render_text() {
-        use postmeta_graphics::types::{TextObject, Transform};
+        use postmeta_graphics::types::{TextMetrics, TextObject, Transform};
         use std::sync::Arc;
 
         let mut pic = Picture::new();
@@ -767,6 +767,7 @@ mod tests {
             text: Arc::from("Hello"),
             font_name: Arc::from("CMR10"),
             font_size: 10.0,
+            metrics: TextMetrics::default(),
             color: Color::BLACK,
             transform: Transform {
                 tx: 50.0,

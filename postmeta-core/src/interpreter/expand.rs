@@ -11,7 +11,9 @@ use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
-use postmeta_graphics::types::{Color, GraphicsObject, Picture, TextObject, Transform};
+use postmeta_graphics::types::{
+    Color, GraphicsObject, Picture, TextMetrics, TextObject, Transform,
+};
 
 use super::helpers::value_to_stored_tokens;
 use super::{ExprResultValue, Interpreter};
@@ -1630,12 +1632,13 @@ impl Interpreter {
 
         let text = parts.join(" ");
 
-        // Build a TextObject with default font settings (cmr10 at 10pt),
-        // mirroring the pattern used by SecondaryBinaryOp::Infont.
+        // Build a TextObject with default font settings (cmr10 at 10pt).
+        // Metrics are heuristic until a FontProvider is wired in.
         let text_obj = TextObject {
             text: text.into(),
             font_name: "cmr10".into(),
             font_size: 10.0,
+            metrics: TextMetrics::default(),
             color: Color::BLACK,
             transform: Transform::IDENTITY,
         };

@@ -153,6 +153,7 @@ impl Transformable for GraphicsObject {
                 text: text.text.clone(),
                 font_name: text.font_name.clone(),
                 font_size: text.font_size,
+                metrics: text.metrics,
                 color: text.color,
                 transform: text.transform.transformed(t),
             }),
