@@ -18,11 +18,13 @@ use crate::types::{Knot, NEAR_ZERO, Pen, Point, Scalar, Transform, Vec2, index_t
 // makepen — path to pen
 // ---------------------------------------------------------------------------
 
-/// Convert a cyclic path (after Hobby's algorithm) to a polygonal pen.
+/// Convert a path to a polygonal pen.
 ///
 /// Extracts the on-curve points and computes the convex hull.
-/// The path must be cyclic. Returns a polygonal pen with vertices in
-/// counter-clockwise order.
+/// Returns a polygonal pen with vertices in counter-clockwise order.
+///
+/// If the path is not cyclic the ends are implicitly connected by a
+/// straight line, matching the original `MetaPost` behaviour (mp.web §302).
 ///
 /// Degenerate cases are allowed:
 /// - 1 knot: a single-point pen (like `penspeck`)
@@ -30,12 +32,8 @@ use crate::types::{Knot, NEAR_ZERO, Pen, Point, Scalar, Transform, Vec2, index_t
 ///
 /// # Errors
 ///
-/// Returns [`GraphicsError::InvalidPen`] if the path is not cyclic or is
-/// empty.
+/// Returns [`GraphicsError::InvalidPen`] if the path is empty.
 pub fn makepen(path: &Path) -> Result<Pen, GraphicsError> {
-    if !path.is_cyclic {
-        return Err(GraphicsError::InvalidPen("makepen requires a cyclic path"));
-    }
     if path.knots.is_empty() {
         return Err(GraphicsError::InvalidPen(
             "makepen requires a non-empty path",
@@ -353,5 +351,37 @@ mod tests {
         let hull = convex_hull(&points);
         // Collinear points: hull is degenerate (2 points)
         assert!(hull.len() <= 3);
+    }
+
+    /// mp.web §302: non-cyclic paths are auto-closed by makepen.
+    #[test]
+    fn test_makepen_non_cyclic_auto_closes() {
+        let knots = vec![
+            Knot::new(Point::new(0.0, 0.0)),
+            Knot::new(Point::new(1.0, 0.0)),
+        ];
+        let path = Path::from_knots(knots, false);
+        assert!(!path.is_cyclic);
+        let pen = makepen(&path).expect("makepen should accept non-cyclic path");
+        match pen {
+            Pen::Polygonal(verts) => {
+                assert_eq!(verts.len(), 2);
+            }
+            Pen::Elliptical(_) => panic!("expected polygonal"),
+        }
+    }
+
+    #[test]
+    fn test_makepen_single_knot() {
+        let path = Path::from_knots(vec![Knot::new(Point::new(5.0, 3.0))], true);
+        let pen = makepen(&path).expect("single-knot makepen should work");
+        match pen {
+            Pen::Polygonal(verts) => {
+                assert_eq!(verts.len(), 1);
+                assert!((verts[0].x - 5.0).abs() < EPSILON);
+                assert!((verts[0].y - 3.0).abs() < EPSILON);
+            }
+            Pen::Elliptical(_) => panic!("expected polygonal"),
+        }
     }
 }
