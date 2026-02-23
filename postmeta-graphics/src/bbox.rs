@@ -7,22 +7,6 @@ use crate::path::Path;
 use crate::types::{GraphicsObject, KnotDirection, Pen, Picture, Point, Scalar, TextObject, Vec2};
 
 // ---------------------------------------------------------------------------
-// Text bounding box heuristic constants
-// ---------------------------------------------------------------------------
-
-/// Estimated character width as a fraction of font size.
-///
-/// This is a rough heuristic for label positioning; accurate values would
-/// require loading font metrics (e.g., TFM or CMR tables).
-const TEXT_CHAR_WIDTH_RATIO: Scalar = 0.5;
-
-/// Ascender height as a fraction of font size.
-const TEXT_ASCENDER_RATIO: Scalar = 0.8;
-
-/// Descender depth as a fraction of font size.
-const TEXT_DESCENDER_RATIO: Scalar = 0.2;
-
-// ---------------------------------------------------------------------------
 // BoundingBox type
 // ---------------------------------------------------------------------------
 
@@ -207,26 +191,21 @@ pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
     bb
 }
 
-/// Expand a bounding box to include a text object's estimated extent.
+/// Expand a bounding box to include a text object's extent.
+///
+/// Uses the precomputed [`TextMetrics`] stored on the object.  If all
+/// metrics are zero (no font data available), the text contributes a
+/// single degenerate point at its origin.
 fn text_bbox(text: &TextObject, bb: &mut BoundingBox) {
-    let char_width = TEXT_CHAR_WIDTH_RATIO * text.font_size;
-    #[expect(
-        clippy::cast_precision_loss,
-        reason = "text character count fits in f64"
-    )]
-    let width = char_width * text.text.chars().count() as Scalar;
-    let ascender = TEXT_ASCENDER_RATIO * text.font_size;
-    let descender = TEXT_DESCENDER_RATIO * text.font_size;
-    // Text rectangle corners in local coordinates (origin at left baseline).
+    let m = &text.metrics;
     let corners = [
-        Point::new(0.0, -descender),
-        Point::new(width, -descender),
-        Point::new(width, ascender),
-        Point::new(0.0, ascender),
+        Point::new(0.0, -m.depth),
+        Point::new(m.width, -m.depth),
+        Point::new(m.width, m.height),
+        Point::new(0.0, m.height),
     ];
     for corner in &corners {
-        let pt = text.transform.apply(*corner);
-        bb.include_point(pt);
+        bb.include_point(text.transform.apply(*corner));
     }
 }
 
@@ -357,7 +336,31 @@ mod tests {
     }
 
     #[test]
-    fn text_bbox_estimates_dimensions() {
+    fn text_bbox_uses_stored_metrics() {
+        let text = TextObject {
+            text: Arc::from("Hello"),
+            font_name: Arc::from("cmr10"),
+            font_size: 10.0,
+            metrics: TextMetrics {
+                width: 25.0,
+                height: 8.0,
+                depth: 2.0,
+            },
+            color: Color::BLACK,
+            transform: Transform::IDENTITY,
+        };
+        let mut pic = Picture::new();
+        pic.objects.push(GraphicsObject::Text(text));
+        let bb = picture_bbox(&pic, false);
+
+        assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
+        assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
+        assert!((bb.max_y - 8.0).abs() < EPSILON, "max_y: {}", bb.max_y);
+        assert!((bb.min_y + 2.0).abs() < EPSILON, "min_y: {}", bb.min_y);
+    }
+
+    #[test]
+    fn text_bbox_zero_metrics_is_degenerate() {
         let text = TextObject {
             text: Arc::from("Hello"),
             font_name: Arc::from("cmr10"),
@@ -370,14 +373,11 @@ mod tests {
         pic.objects.push(GraphicsObject::Text(text));
         let bb = picture_bbox(&pic, false);
 
-        // Width: 5 chars × 0.5 × 10 = 25
-        assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
-        // Height: ascender = 0.8 × 10 = 8
-        assert!((bb.max_y - 8.0).abs() < EPSILON, "max_y: {}", bb.max_y);
-        // Descender: -0.2 × 10 = -2
-        assert!((bb.min_y + 2.0).abs() < EPSILON, "min_y: {}", bb.min_y);
-        // Left edge at 0
-        assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
+        // Zero metrics → all four corners collapse to the origin.
+        assert!(bb.min_x.abs() < EPSILON, "min_x: {}", bb.min_x);
+        assert!(bb.max_x.abs() < EPSILON, "max_x: {}", bb.max_x);
+        assert!(bb.min_y.abs() < EPSILON, "min_y: {}", bb.min_y);
+        assert!(bb.max_y.abs() < EPSILON, "max_y: {}", bb.max_y);
     }
 
     #[test]
