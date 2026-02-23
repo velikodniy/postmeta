@@ -41,6 +41,13 @@ pub(super) struct ForeverLoopFrame {
     pub body: TokenList,
     /// Set by `exitif` to stop replaying this frame.
     pub exit_requested: bool,
+    /// Whether this is a `for`/`forsuffixes` loop (vs `forever`).
+    /// When true, the loop terminates after `remaining_iterations` is exhausted.
+    pub is_for_loop: bool,
+    /// Remaining iteration parameter lists for `for`/`forsuffixes` loops,
+    /// stored in reverse order so that `Vec::pop()` yields the next iteration.
+    /// `forever` loops leave this empty (they replay unconditionally).
+    pub remaining_iterations: Vec<TokenList>,
 }
 
 #[derive(Debug)]
@@ -378,12 +385,47 @@ impl Interpreter {
         // token-level substitution (mp.web §13694).
         let body = self.scan_loop_body_with_param(loop_var_sym);
 
-        // Push iterations in reverse order so the first is on top.
-        for val_tokens in value_token_lists.into_iter().rev() {
-            let params = vec![val_tokens];
-            self.input
-                .push_token_list(body.clone(), params, "for-body".into());
+        if value_token_lists.is_empty() {
+            // No iterations — skip the loop entirely.
+            self.get_next();
+            self.expand_current();
+            return;
         }
+
+        // Use sentinel-based replay (like `forever`) so that `exitif`
+        // can interrupt iteration.  Push the first iteration's body with
+        // a RepeatLoop sentinel at the end; store remaining iterations
+        // in the loop frame.
+        let mut iter = value_token_lists.into_iter();
+        let Some(first_params) = iter.next() else {
+            // Unreachable: we checked non-empty above.
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+        // Store remaining in reverse so Vec::pop() yields the next iteration.
+        let mut remaining: Vec<TokenList> = iter.collect();
+        remaining.reverse();
+
+        self.control_flow.forever_stack.push(ForeverLoopFrame {
+            body: body.clone(),
+            exit_requested: false,
+            is_for_loop: true,
+            remaining_iterations: remaining,
+        });
+
+        let repeat_sym = self.symbols.lookup("__repeat_loop__");
+        self.symbols.set(
+            repeat_sym,
+            crate::symbols::SymbolEntry {
+                command: Command::RepeatLoop,
+                modifier: 0,
+            },
+        );
+        let mut iteration = body;
+        iteration.push(StoredToken::Symbol(repeat_sym));
+        self.input
+            .push_token_list(iteration, vec![first_params], "for-body".into());
 
         // Get the first token and continue expanding
         self.get_next();
@@ -411,6 +453,8 @@ impl Interpreter {
         self.control_flow.forever_stack.push(ForeverLoopFrame {
             body: body.clone(),
             exit_requested: false,
+            is_for_loop: false,
+            remaining_iterations: Vec::new(),
         });
 
         // Push the first iteration with a RepeatLoop sentinel at the end
@@ -436,28 +480,43 @@ impl Interpreter {
     /// Handle the `RepeatLoop` sentinel during expansion.
     ///
     /// Re-pushes the loop body for the next iteration, or stops if `exitif` fired.
+    /// For `forever` loops (no `is_for_loop` flag), unconditionally replays.
+    /// For `for`/`forsuffixes` loops, pops the next iteration params from the queue;
+    /// when the queue is empty the loop is finished and the frame is popped.
     fn expand_repeat_loop(&mut self) {
-        if let Some((exit_requested, body)) = self
-            .control_flow
-            .forever_stack
-            .last()
-            .map(|frame| (frame.exit_requested, frame.body.clone()))
-        {
-            if exit_requested {
-                // Exit was requested for this loop.
+        if let Some(frame) = self.control_flow.forever_stack.last_mut() {
+            if frame.exit_requested {
+                // Exit was requested — stop the loop.
                 self.control_flow.forever_stack.pop();
                 self.get_next();
                 self.expand_current();
                 return;
             }
 
-            // Re-push the body for the next iteration.
-            let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
-            let mut iteration = body;
-            iteration.push(StoredToken::Symbol(repeat_sym));
-            self.state
-                .input
-                .push_token_list(iteration, Vec::new(), "forever-body".into());
+            if frame.is_for_loop {
+                // `for`/`forsuffixes` loop — check for remaining iterations.
+                if let Some(params) = frame.remaining_iterations.pop() {
+                    let body = frame.body.clone();
+                    let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
+                    let mut iteration = body;
+                    iteration.push(StoredToken::Symbol(repeat_sym));
+                    self.state
+                        .input
+                        .push_token_list(iteration, vec![params], "for-body".into());
+                } else {
+                    // No more iterations — loop is done.
+                    self.control_flow.forever_stack.pop();
+                }
+            } else {
+                // `forever` loop — replay unconditionally.
+                let body = frame.body.clone();
+                let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
+                let mut iteration = body;
+                iteration.push(StoredToken::Symbol(repeat_sym));
+                self.state
+                    .input
+                    .push_token_list(iteration, Vec::new(), "forever-body".into());
+            }
         }
 
         self.get_next();

@@ -374,6 +374,40 @@ fn exitif_outside_loop_does_not_leak_into_future_forever() {
 }
 
 #[test]
+fn exitif_in_for_step_until_stops_loop() {
+    // `exitif` inside a `for step until` loop must stop iteration.
+    // Regression: previously, `for` pre-pushed all iterations so `exitif`
+    // had no loop frame to set the exit flag on.
+    let mut interp = Interpreter::new();
+    interp
+        .run(concat!(
+            "numeric t;\n",
+            "for i:=0 step 1 until 10:\n",
+            "  t := i;\n",
+            "  exitif i > 2;\n",
+            "endfor;\n",
+            "show t;\n",
+        ))
+        .unwrap();
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "exitif in for-step-until should not produce errors: {errors:?}"
+    );
+    let msg = interp
+        .errors
+        .iter()
+        .find(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.as_str())
+        .unwrap_or("");
+    assert!(msg.contains('3'), "expected t=3 in: {msg}");
+}
+
+#[test]
 fn nested_forever_loops_keep_outer_replay_state() {
     // Regression: nested `forever` loops used a single pending body slot,
     // so an inner loop could clobber outer replay state.
@@ -2940,7 +2974,6 @@ fn equals_as_comparison_in_if() {
 #[test]
 fn equals_as_comparison_in_exitif() {
     // `exitif n = 3` — the `=` must be comparison, not equation.
-    // Uses `forever` + `exitif` since `for` pre-pushes all iterations.
     // `exitif` finishes the current iteration body; loop stops at endfor.
     let mut interp = Interpreter::new();
     interp
