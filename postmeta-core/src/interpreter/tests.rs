@@ -1294,6 +1294,27 @@ fn type_declaration_compound_suffix() {
     interp.run("path path_.l, path_.r;").unwrap();
 }
 
+#[test]
+fn type_declaration_clears_subscripted_descendants() {
+    let mut interp = Interpreter::new();
+    // First pass: assign t[0] and t[1]
+    interp
+        .run("numeric t[]; t[0] := 10; t[1] := 20; show t[0];")
+        .unwrap();
+    assert!(
+        interp.errors[0].message.contains("10"),
+        "first assignment: expected 10 in {:?}",
+        interp.errors[0].message
+    );
+    // Re-declare: clears old subscripted values
+    interp.run("numeric t[]; t[0] := 99; show t[0];").unwrap();
+    let msg = &interp.errors[1].message;
+    assert!(
+        msg.contains("99"),
+        "after re-declaration: expected 99, got: {msg}"
+    );
+}
+
 // -----------------------------------------------------------------------
 // back_input / back_expr integration
 // -----------------------------------------------------------------------

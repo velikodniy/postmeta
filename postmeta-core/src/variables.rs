@@ -201,6 +201,34 @@ impl Variables {
         taken
     }
 
+    /// Clear a variable and all its suffixed descendants from the name table.
+    ///
+    /// For a name `"t"`, this removes `"t"`, `"t[0]"`, `"t.x"`, etc.
+    /// For a compound name `"a.b"`, it removes `"a.b"`, `"a.b[0]"`,
+    /// `"a.b.c"`, etc., but NOT `"a"` or `"a.c"`.
+    pub fn clear_variable_and_descendants(&mut self, name: &str) {
+        let root = Self::root_of(name);
+        let Some(all_names) = self.names_by_root.get_mut(root) else {
+            return;
+        };
+        let to_remove: Vec<String> = all_names
+            .iter()
+            .filter(|n| {
+                *n == name
+                    || n.starts_with(&format!("{name}."))
+                    || n.starts_with(&format!("{name}["))
+            })
+            .cloned()
+            .collect();
+        for n in &to_remove {
+            all_names.remove(n);
+            self.name_to_id.remove(n);
+        }
+        if all_names.is_empty() {
+            self.names_by_root.remove(root);
+        }
+    }
+
     /// Clear current bindings for a root name and all its descendants.
     pub fn clear_name_bindings_for_root(&mut self, root: &str) {
         let Some(names) = self.names_by_root.remove(root) else {

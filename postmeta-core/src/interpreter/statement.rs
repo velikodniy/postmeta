@@ -241,6 +241,11 @@ impl Interpreter {
                 // Expand whatever follows the variable name.
                 self.expand_current();
 
+                // Clear the variable and all its suffixed descendants so
+                // that re-declaring (e.g. `numeric t[]` inside a loop)
+                // resets subscripted forms like `t[0]`, `t[1]`, etc.
+                self.variables.clear_variable_and_descendants(&name);
+
                 let var_id = self.variables.lookup(&name);
 
                 // Determine the MetaPost type for the trie registration
