@@ -83,6 +83,11 @@ pub(super) enum ParamType {
     UndelimitedSuffix,
     /// `text` — undelimited text (tokens until semicolon/endgroup).
     UndelimitedText,
+    /// Expression parameter preceded by `of` delimiter (from `expr t of p`
+    /// pattern in macro definitions).  During expansion the `of` token is
+    /// consumed, then the argument is scanned as a primary expression
+    /// (matching `MetaPost`'s behavior per mp.web §710).
+    OfPrimary,
 }
 
 impl ParamType {
@@ -96,6 +101,7 @@ impl ParamType {
                 | Self::UndelimitedExpr
                 | Self::UndelimitedSuffix
                 | Self::UndelimitedText
+                | Self::OfPrimary
         )
     }
 }
@@ -1021,7 +1027,7 @@ impl Interpreter {
                     String::new()
                 };
                 self.get_next();
-                params.push((of_name, ParamType::UndelimitedSuffix, u16::MAX));
+                params.push((of_name, ParamType::OfPrimary, u16::MAX));
             }
         }
 
@@ -1399,6 +1405,15 @@ impl Interpreter {
                     }
                     ParamType::UndelimitedSuffix => {
                         args.push(self.scan_suffix_arg());
+                    }
+                    ParamType::OfPrimary => {
+                        // `expr t of p` — consume the `of` delimiter, then
+                        // scan the argument as a primary expression (mp.web
+                        // §710: both sides of `of` are expr parameters).
+                        if self.cur.command == Command::OfToken {
+                            self.get_x_next();
+                        }
+                        args.push(self.scan_undelimited_value_arg(Self::scan_primary));
                     }
                     ParamType::UndelimitedText => {
                         // Collect tokens until semicolon/endgroup

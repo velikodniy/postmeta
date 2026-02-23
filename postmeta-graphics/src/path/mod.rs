@@ -126,6 +126,77 @@ fn time_to_seg_frac(t: Scalar, n: usize) -> (usize, Scalar) {
 // Path query operations
 // ---------------------------------------------------------------------------
 
+/// Total arc length of a path.
+#[must_use]
+pub fn arc_length(path: &Path) -> Scalar {
+    let n = path.num_segments();
+    if n == 0 {
+        return 0.0;
+    }
+    (0..n)
+        .map(|i| CubicSegment::from_path(path, i).arc_length())
+        .sum()
+}
+
+/// Find the time parameter at which the cumulative arc length from the
+/// start of the path equals `target`.
+///
+/// Returns a MetaPost-style time (integer part = segment index, fractional
+/// part = position within that segment).  If `target` exceeds the total arc
+/// length, returns the path's `num_segments()`.  If `target <= 0`, returns 0.
+#[must_use]
+pub fn arc_time(path: &Path, target: Scalar) -> Scalar {
+    let n = path.num_segments();
+    if n == 0 || target <= 0.0 {
+        return 0.0;
+    }
+
+    let mut remaining = target;
+
+    for i in 0..n {
+        let seg = CubicSegment::from_path(path, i);
+        let seg_len = seg.arc_length();
+
+        if remaining <= seg_len {
+            // Target falls within this segment — bisect to find local t.
+            let local_t = bisect_arc_length(&seg, remaining);
+            return index_to_scalar(i) + local_t;
+        }
+
+        remaining -= seg_len;
+    }
+
+    // Target exceeds total arc length.
+    index_to_scalar(n)
+}
+
+/// Bisect to find the parameter `t` in [0,1] such that the arc length
+/// from 0 to `t` on `seg` equals `target`.
+fn bisect_arc_length(seg: &CubicSegment, target: Scalar) -> Scalar {
+    const TOL: Scalar = 1e-6;
+    const MAX_ITER: u32 = 50;
+
+    let mut lo = 0.0_f64;
+    let mut hi = 1.0_f64;
+
+    for _ in 0..MAX_ITER {
+        let mid = (lo + hi) * 0.5;
+        let len = seg.arc_length_to(mid);
+
+        if (len - target).abs() < TOL {
+            return mid;
+        }
+
+        if len < target {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+
+    (lo + hi) * 0.5
+}
+
 /// Get the precontrol point at time `t`.
 #[must_use]
 pub fn precontrol_of(path: &Path, t: Scalar) -> Point {

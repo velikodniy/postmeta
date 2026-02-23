@@ -357,6 +357,11 @@ impl Interpreter {
                 };
                 Ok((Value::Pair(px, py), Type::PairType))
             }
+            UnaryOp::ArcLength => {
+                let p = value_to_path(input)?;
+                let len = path::arc_length(p);
+                Ok((Value::Numeric(len), Type::Known))
+            }
             // Part-extraction ops are handled in do_unary before calling this.
             _ => Err(InterpreterError::new(
                 ErrorKind::InvalidExpression,
@@ -436,9 +441,16 @@ impl Interpreter {
 
                 Ok((Value::String(Arc::from(substr)), Type::String))
             }
-            PrimaryBinaryOp::DirectionTimeOf | PrimaryBinaryOp::ArcTimeOf => Err(
-                InterpreterError::new(ErrorKind::InvalidExpression, "Unimplemented primary binary"),
-            ),
+            PrimaryBinaryOp::ArcTimeOf => {
+                let target_len = value_to_scalar(first)?;
+                let p = value_to_path(second)?;
+                let t = path::arc_time(p, target_len);
+                Ok((Value::Numeric(t), Type::Known))
+            }
+            PrimaryBinaryOp::DirectionTimeOf => Err(InterpreterError::new(
+                ErrorKind::InvalidExpression,
+                "Unimplemented primary binary: directiontime",
+            )),
         }
     }
 

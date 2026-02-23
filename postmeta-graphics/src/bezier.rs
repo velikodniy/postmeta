@@ -152,6 +152,48 @@ impl CubicSegment {
         let (min, max) = self.bbox();
         (max - min).length()
     }
+
+    /// Approximate arc length using recursive subdivision.
+    ///
+    /// Compares the chord length (p0→p3) with the control-polygon length
+    /// (p0→p1 + p1→p2 + p2→p3).  When they agree within tolerance, returns
+    /// their average.  Otherwise splits at t=0.5 and recurses.
+    #[must_use]
+    pub fn arc_length(&self) -> Scalar {
+        arc_length_recursive(self, 0)
+    }
+
+    /// Arc length of the sub-segment from parameter 0 to `t`.
+    #[must_use]
+    pub fn arc_length_to(&self, t: Scalar) -> Scalar {
+        if t <= 0.0 {
+            return 0.0;
+        }
+        if t >= 1.0 {
+            return self.arc_length();
+        }
+        let (left, _) = self.split(t);
+        left.arc_length()
+    }
+}
+
+/// Tolerance for arc-length convergence (in bp).
+const ARC_TOL: Scalar = 0.001;
+
+/// Maximum recursion depth for arc-length subdivision.
+const ARC_MAX_DEPTH: u32 = 20;
+
+/// Recursive arc-length computation via subdivision.
+fn arc_length_recursive(seg: &CubicSegment, depth: u32) -> Scalar {
+    let chord = (seg.p3 - seg.p0).length();
+    let poly = (seg.p1 - seg.p0).length() + (seg.p2 - seg.p1).length() + (seg.p3 - seg.p2).length();
+
+    if (poly - chord) < ARC_TOL || depth >= ARC_MAX_DEPTH {
+        return (chord + poly) * 0.5;
+    }
+
+    let (left, right) = seg.split(0.5);
+    arc_length_recursive(&left, depth + 1) + arc_length_recursive(&right, depth + 1)
 }
 
 // ---------------------------------------------------------------------------
