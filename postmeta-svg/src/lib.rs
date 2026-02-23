@@ -13,7 +13,10 @@
 //! - `SetBounds` regions are transparent in SVG (they only affect
 //!   bounding-box computation at the `MetaPost` level).
 
-use postmeta_fonts::FontProvider;
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use postmeta_fonts::{FontProvider, OutlineSink};
 use postmeta_graphics::bbox::{BoundingBox, picture_bbox};
 use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{
@@ -21,7 +24,7 @@ use postmeta_graphics::types::{
     Scalar, StrokeObject, TextObject, Vec2,
 };
 use svg::Document;
-use svg::node::element::{ClipPath, Definitions, Group, Text as SvgText};
+use svg::node::element::{ClipPath, Definitions, Group, Symbol, Text as SvgText, Use as SvgUse};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -42,6 +45,20 @@ pub fn render_to_string(picture: &Picture) -> String {
     render(picture).to_string()
 }
 
+/// How text is rendered in SVG output.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TextMode {
+    /// Render text as glyph outline paths (`<symbol>`/`<use>`).
+    /// Produces self-contained SVG that does not depend on installed fonts.
+    /// Requires a [`FontProvider`]; falls back to [`Raw`](TextMode::Raw)
+    /// per-label when the font is unavailable.
+    #[default]
+    Paths,
+    /// Render text as `<text>` elements with `font-family` attributes.
+    /// Requires the viewer to have the font installed.
+    Raw,
+}
+
 /// Options controlling SVG output.
 #[derive(Debug, Clone)]
 pub struct RenderOptions {
@@ -52,6 +69,8 @@ pub struct RenderOptions {
     /// Whether to use `truecorners` for bounding-box computation.
     /// When false, `setbounds` regions override the computed bbox.
     pub true_corners: bool,
+    /// How text labels are rendered. Default: [`TextMode::Paths`].
+    pub text_mode: TextMode,
 }
 
 impl Default for RenderOptions {
@@ -60,6 +79,7 @@ impl Default for RenderOptions {
             margin: 1.0,
             precision: 4,
             true_corners: false,
+            text_mode: TextMode::default(),
         }
     }
 }
@@ -88,7 +108,13 @@ pub fn render_with_fonts(
     let mut renderer = SvgRenderer::new(opts, fonts);
     let content = renderer.render_objects(&picture.objects);
 
-    build_document(&bb, opts, content, &renderer.defs)
+    build_document(
+        &bb,
+        opts,
+        content,
+        &renderer.clip_defs,
+        &renderer.glyph_defs,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -97,13 +123,22 @@ pub fn render_with_fonts(
 
 struct SvgRenderer<'a> {
     opts: &'a RenderOptions,
-    /// Font provider for glyph path rendering (used in `TextMode::Paths`).
-    #[expect(dead_code, reason = "will be used when TextMode::Paths is added")]
     fonts: Option<&'a dyn FontProvider>,
-    /// Accumulated `<defs>` content (clip paths, glyph symbols).
-    defs: Vec<ClipPath>,
-    /// Counter for generating unique clip-path IDs.
+    /// Accumulated clip-path defs.
+    clip_defs: Vec<ClipPath>,
     clip_counter: usize,
+    /// Accumulated glyph symbol defs (for `TextMode::Paths`).
+    glyph_defs: Vec<Symbol>,
+    /// Maps `(font_name, glyph_id)` → symbol id string (e.g., "g0").
+    glyph_map: HashMap<GlyphKey, String>,
+    glyph_counter: usize,
+}
+
+/// Deduplication key for glyph outlines.
+#[derive(Hash, Eq, PartialEq)]
+struct GlyphKey {
+    font_name: Arc<str>,
+    glyph_id: u16,
 }
 
 impl<'a> SvgRenderer<'a> {
@@ -111,8 +146,11 @@ impl<'a> SvgRenderer<'a> {
         Self {
             opts,
             fonts,
-            defs: Vec::new(),
+            clip_defs: Vec::new(),
             clip_counter: 0,
+            glyph_defs: Vec::new(),
+            glyph_map: HashMap::new(),
+            glyph_counter: 0,
         }
     }
 
@@ -122,10 +160,42 @@ impl<'a> SvgRenderer<'a> {
         id
     }
 
-    /// Render a slice of [`GraphicsObject`]s into a [`Group`].
+    /// Ensure a glyph outline is in `<defs>` and return its symbol id.
     ///
-    /// Handles `ClipStart`/`ClipEnd` and `SetBoundsStart`/`SetBoundsEnd`
-    /// bracketing by recursing into nested groups.
+    /// Returns `None` if the font is unavailable or the glyph has no outline
+    /// (e.g., a space character).
+    fn ensure_glyph(&mut self, font_name: &Arc<str>, glyph_id: u16) -> Option<String> {
+        let key = GlyphKey {
+            font_name: Arc::clone(font_name),
+            glyph_id,
+        };
+        if let Some(id) = self.glyph_map.get(&key) {
+            return Some(id.clone());
+        }
+
+        let font = self.fonts?.font(font_name)?;
+        let mut sink = SvgOutlineSink::new(self.opts.precision);
+        // Extract outline in design units (scale = 1.0) by passing
+        // units_per_em as the font size.  The per-glyph `<use>` element
+        // applies the real scaling in `render_text_as_paths`.
+        let design_size = f64::from(font.units_per_em());
+        if !font.outline(glyph_id, design_size, &mut sink) {
+            return None; // no outline (space, etc.)
+        }
+
+        let sym_id = format!("g{}", self.glyph_counter);
+        self.glyph_counter += 1;
+
+        let symbol = Symbol::new()
+            .set("id", sym_id.as_str())
+            .set("overflow", "visible")
+            .add(svg::node::element::Path::new().set("d", sink.into_d()));
+        self.glyph_defs.push(symbol);
+        self.glyph_map.insert(key, sym_id.clone());
+        Some(sym_id)
+    }
+
+    /// Render a slice of [`GraphicsObject`]s into a [`Group`].
     fn render_objects(&mut self, objects: &[GraphicsObject]) -> Group {
         let mut group = Group::new();
         let mut i = 0;
@@ -141,11 +211,10 @@ impl<'a> SvgRenderer<'a> {
                     i += 1;
                 }
                 GraphicsObject::Text(text) => {
-                    group = group.add(render_text(text, self.opts));
+                    group = self.render_text_object(group, text);
                     i += 1;
                 }
                 GraphicsObject::ClipStart(clip_path) => {
-                    // Find matching ClipEnd
                     let end = find_matching_end(objects, i, true);
                     let inner = &objects[i + 1..end];
 
@@ -154,7 +223,7 @@ impl<'a> SvgRenderer<'a> {
                     let clip_def = ClipPath::new()
                         .set("id", clip_id.as_str())
                         .add(svg::node::element::Path::new().set("d", clip_data));
-                    self.defs.push(clip_def);
+                    self.clip_defs.push(clip_def);
 
                     let inner_group = self.render_objects(inner);
                     let clipped = Group::new()
@@ -164,25 +233,155 @@ impl<'a> SvgRenderer<'a> {
 
                     i = end + 1;
                 }
-                GraphicsObject::ClipEnd => {
-                    // Should not appear outside of a matched pair; skip.
-                    i += 1;
-                }
                 GraphicsObject::SetBoundsStart(_) => {
-                    // SetBounds is transparent in SVG output — just render contents.
                     let end = find_matching_end(objects, i, false);
                     let inner = &objects[i + 1..end];
                     let inner_group = self.render_objects(inner);
                     group = group.add(inner_group);
                     i = end + 1;
                 }
-                GraphicsObject::SetBoundsEnd => {
+                GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
                     i += 1;
                 }
             }
         }
 
         group
+    }
+
+    /// Render a single text object, choosing between path and raw modes.
+    fn render_text_object(&mut self, group: Group, text: &TextObject) -> Group {
+        if self.opts.text_mode == TextMode::Paths && self.fonts.is_some() {
+            if let Some(g) = self.render_text_as_paths(text) {
+                return group.add(g);
+            }
+        }
+        // Fallback to raw <text> element.
+        group.add(render_text_raw(text, self.opts))
+    }
+
+    /// Render text as glyph outlines using `<symbol>`/`<use>` elements.
+    ///
+    /// Returns `None` if the font is not available in the provider
+    /// (triggering fallback to raw text).
+    fn render_text_as_paths(&mut self, text: &TextObject) -> Option<Group> {
+        let font = self.fonts?.font(&text.font_name)?;
+        let prec = self.opts.precision;
+
+        // Build the MetaPost→SVG transform matrix (Y-flip conjugation).
+        let t = &text.transform;
+        let matrix = format!(
+            "matrix({},{},{},{},{},{})",
+            fmt_scalar(t.txx, prec),
+            fmt_scalar(-t.tyx, prec),
+            fmt_scalar(-t.txy, prec),
+            fmt_scalar(t.tyy, prec),
+            fmt_scalar(t.tx, prec),
+            fmt_scalar(-t.ty, prec),
+        );
+
+        let mut g = Group::new()
+            .set("transform", matrix)
+            .set("fill", color_to_svg(text.color));
+
+        let scale = text.font_size / f64::from(font.units_per_em());
+        let mut cursor_x: f64 = 0.0;
+        let mut prev_glyph: Option<u16> = None;
+
+        for ch in text.text.chars() {
+            let Some(gid) = font.glyph_id(ch) else {
+                continue;
+            };
+
+            // Kerning between consecutive glyphs.
+            if let Some(prev) = prev_glyph {
+                let kern = f64::from(font.kern(prev, gid)) * scale;
+                cursor_x += kern;
+            }
+
+            // Ensure glyph outline is defined (dedup via glyph_map).
+            if let Some(sym_id) = self.ensure_glyph(&text.font_name, gid) {
+                // Place the glyph with a transform that scales from design
+                // units and applies the cursor offset.  Y is already Y-up in
+                // the glyph outline (handled by the outer group flip).
+                let use_el = SvgUse::new().set("href", format!("#{sym_id}")).set(
+                    "transform",
+                    format!(
+                        "translate({},0) scale({s},{s})",
+                        fmt_scalar(cursor_x, prec),
+                        s = fmt_scalar(scale, prec + 2),
+                    ),
+                );
+                g = g.add(use_el);
+            }
+
+            // Advance cursor.
+            if let Some(adv) = font.advance_width(gid) {
+                cursor_x += f64::from(adv) * scale;
+            }
+            prev_glyph = Some(gid);
+        }
+
+        Some(g)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Glyph outline → SVG path data
+// ---------------------------------------------------------------------------
+
+/// Collects glyph outline commands into an SVG `d` attribute string.
+///
+/// Coordinates are in font design units (Y-up), matching the `<symbol>`
+/// coordinate space.  The per-glyph `<use>` element applies scaling.
+struct SvgOutlineSink {
+    d: String,
+    precision: usize,
+}
+
+impl SvgOutlineSink {
+    fn new(precision: usize) -> Self {
+        Self {
+            d: String::with_capacity(256),
+            precision,
+        }
+    }
+
+    fn into_d(self) -> String {
+        self.d
+    }
+}
+
+impl OutlineSink for SvgOutlineSink {
+    fn move_to(&mut self, x: f64, y: f64) {
+        use std::fmt::Write;
+        let p = self.precision;
+        let _ = write!(self.d, "M{x:.p$},{y:.p$}");
+    }
+
+    fn line_to(&mut self, x: f64, y: f64) {
+        use std::fmt::Write;
+        let p = self.precision;
+        let _ = write!(self.d, "L{x:.p$},{y:.p$}");
+    }
+
+    fn quad_to(&mut self, x1: f64, y1: f64, x: f64, y: f64) {
+        use std::fmt::Write;
+        let p = self.precision;
+        let _ = write!(self.d, "Q{x1:.p$},{y1:.p$} {x:.p$},{y:.p$}");
+    }
+
+    fn curve_to(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, x: f64, y: f64) {
+        use std::fmt::Write;
+        let p = self.precision;
+        let _ = write!(
+            self.d,
+            "C{x1:.p$},{y1:.p$} {x2:.p$},{y2:.p$} {x:.p$},{y:.p$}"
+        );
+    }
+
+    fn close(&mut self) {
+        self.d.push('Z');
     }
 }
 
@@ -241,11 +440,11 @@ fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::elem
     el
 }
 
-/// Render a text label to an SVG `<text>` element.
+/// Render a text label as a raw SVG `<text>` element.
 ///
 /// Y coordinates are negated to convert from `MetaPost` (Y-up) to SVG
 /// (Y-down). The transform matrix is adjusted accordingly.
-fn render_text(text: &TextObject, opts: &RenderOptions) -> SvgText {
+fn render_text_raw(text: &TextObject, opts: &RenderOptions) -> SvgText {
     let t = &text.transform;
     // MetaPost transform: (x,y) → (txx·x + txy·y + tx, tyx·x + tyy·y + ty)
     // SVG matrix(a,b,c,d,e,f): (x,y) → (a·x + c·y + e, b·x + d·y + f)
@@ -459,6 +658,7 @@ fn build_document(
     opts: &RenderOptions,
     content: Group,
     clip_defs: &[ClipPath],
+    glyph_defs: &[Symbol],
 ) -> Document {
     let m = opts.margin;
 
@@ -488,8 +688,12 @@ fn build_document(
         .set("width", format!("{}pt", fmt_scalar(vb_w, opts.precision)))
         .set("height", format!("{}pt", fmt_scalar(vb_h, opts.precision)));
 
-    if !clip_defs.is_empty() {
+    let has_defs = !clip_defs.is_empty() || !glyph_defs.is_empty();
+    if has_defs {
         let mut defs = Definitions::new();
+        for sym in glyph_defs {
+            defs = defs.add(sym.clone());
+        }
         for clip in clip_defs {
             defs = defs.add(clip.clone());
         }

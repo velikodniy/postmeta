@@ -157,6 +157,7 @@ fn write_output(interp: &Interpreter, output_dir: &str) {
             .internals
             .get(postmeta_core::internals::InternalId::TrueCorners as u16)
             > 0.0,
+        ..RenderOptions::default()
     };
 
     for (i, pic) in interp.output().iter().enumerate() {
