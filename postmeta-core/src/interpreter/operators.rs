@@ -23,8 +23,8 @@ use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 
 use super::helpers::{
-    value_to_bool, value_to_pair, value_to_path, value_to_pen, value_to_scalar, value_to_string,
-    value_to_transform,
+    value_to_bool, value_to_pair, value_to_path, value_to_pen, value_to_picture, value_to_scalar,
+    value_to_string, value_to_transform,
 };
 use super::{Interpreter, LhsBinding};
 use crate::variables::VarValue;
@@ -376,6 +376,32 @@ impl Interpreter {
                 // In MetaPost, readfrom reads the next line from a file.
                 // Without filesystem access we return EOF sentinel.
                 Ok((Value::String(Arc::from("")), Type::String))
+            }
+            // Picture type tests: check first object in the picture.
+            UnaryOp::FilledOp => {
+                let pic = value_to_picture(input)?;
+                let result = matches!(pic.objects.first(), Some(GraphicsObject::Fill(_)));
+                Ok((Value::Boolean(result), Type::Boolean))
+            }
+            UnaryOp::StrokedOp => {
+                let pic = value_to_picture(input)?;
+                let result = matches!(pic.objects.first(), Some(GraphicsObject::Stroke(_)));
+                Ok((Value::Boolean(result), Type::Boolean))
+            }
+            UnaryOp::TextualOp => {
+                let pic = value_to_picture(input)?;
+                let result = matches!(pic.objects.first(), Some(GraphicsObject::Text(_)));
+                Ok((Value::Boolean(result), Type::Boolean))
+            }
+            UnaryOp::ClippedOp => {
+                let pic = value_to_picture(input)?;
+                let result = matches!(pic.objects.first(), Some(GraphicsObject::ClipStart(_)));
+                Ok((Value::Boolean(result), Type::Boolean))
+            }
+            UnaryOp::BoundedOp => {
+                let pic = value_to_picture(input)?;
+                let result = matches!(pic.objects.first(), Some(GraphicsObject::SetBoundsStart(_)));
+                Ok((Value::Boolean(result), Type::Boolean))
             }
             // Part-extraction ops are handled in do_unary before calling this.
             _ => Err(InterpreterError::new(

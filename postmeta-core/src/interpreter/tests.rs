@@ -399,6 +399,54 @@ fn nested_forever_loops_keep_outer_replay_state() {
 }
 
 #[test]
+fn filled_returns_true_for_fill_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show filled p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("true"), "expected true in: {msg}");
+}
+
+#[test]
+fn stroked_returns_true_for_stroke_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p doublepath ((0,0)..(10,0)); show stroked p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("true"), "expected true in: {msg}");
+}
+
+#[test]
+fn filled_returns_false_for_stroke_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p doublepath ((0,0)..(10,0)); show filled p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
+fn textual_returns_false_for_fill_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textual p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
+fn clipped_returns_false_for_empty_picture() {
+    let mut interp = Interpreter::new();
+    interp.run("picture p; show clipped p;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
 fn directiontime_east_on_right_path() {
     // Path going right: direction (1,0) should be found at time ~0
     let mut interp = Interpreter::new();

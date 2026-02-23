@@ -3,7 +3,7 @@
 //! Free functions used across all interpreter submodules.
 
 use postmeta_graphics::path::Path;
-use postmeta_graphics::types::{Pen, Scalar, Transform};
+use postmeta_graphics::types::{Pen, Picture, Scalar, Transform};
 
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{CapsulePayload, StoredToken, TokenList};
@@ -45,6 +45,7 @@ pub(super) fn value_to_path_owned(val: Value) -> InterpResult<Path> {
 }
 
 impl_value_extractor!(value_to_pen, &Pen, "pen", Value::Pen(p) => p);
+impl_value_extractor!(value_to_picture, &Picture, "picture", Value::Picture(p) => p);
 impl_value_extractor!(value_to_string, String, "string", Value::String(s) => s.to_string());
 impl_value_extractor!(
     value_to_transform,
