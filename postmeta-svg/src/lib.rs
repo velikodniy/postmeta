@@ -13,15 +13,15 @@
 //! - `SetBounds` regions are transparent in SVG (they only affect
 //!   bounding-box computation at the `MetaPost` level).
 
-use postmeta_graphics::path::Path;
-use svg::Document;
-use svg::node::element::{ClipPath, Definitions, Group, Text as SvgText};
-
+use postmeta_fonts::FontProvider;
 use postmeta_graphics::bbox::{BoundingBox, picture_bbox};
+use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, KnotDirection, LineCap, LineJoin, Pen, Picture,
     Scalar, StrokeObject, TextObject, Vec2,
 };
+use svg::Document;
+use svg::node::element::{ClipPath, Definitions, Group, Text as SvgText};
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -29,8 +29,8 @@ use postmeta_graphics::types::{
 
 /// Render a [`Picture`] to an SVG [`Document`].
 ///
-/// The resulting document has a `viewBox` derived from the picture's
-/// bounding box (with a small margin) and uses PostScript points as units.
+/// Uses default options and no font provider (text is rendered as raw
+/// `<text>` elements).
 #[must_use]
 pub fn render(picture: &Picture) -> Document {
     render_with_options(picture, &RenderOptions::default())
@@ -65,31 +65,52 @@ impl Default for RenderOptions {
 }
 
 /// Render a [`Picture`] to an SVG [`Document`] with custom options.
+///
+/// Backward-compatible: no font provider, text rendered as `<text>`.
 #[must_use]
 pub fn render_with_options(picture: &Picture, opts: &RenderOptions) -> Document {
-    let bb = picture_bbox(picture, opts.true_corners);
-    let mut state = RenderState::new(opts);
-    let content = state.render_objects(&picture.objects);
+    render_with_fonts(picture, opts, None)
+}
 
-    build_document(&bb, opts, content, &state.defs)
+/// Render a [`Picture`] to an SVG [`Document`] with custom options and
+/// an optional font provider.
+///
+/// This is the primary entry point when font-aware rendering is desired.
+/// Pass `None` for the font provider to get the same behavior as
+/// [`render_with_options`].
+#[must_use]
+pub fn render_with_fonts(
+    picture: &Picture,
+    opts: &RenderOptions,
+    fonts: Option<&dyn FontProvider>,
+) -> Document {
+    let bb = picture_bbox(picture, opts.true_corners);
+    let mut renderer = SvgRenderer::new(opts, fonts);
+    let content = renderer.render_objects(&picture.objects);
+
+    build_document(&bb, opts, content, &renderer.defs)
 }
 
 // ---------------------------------------------------------------------------
-// Render state (tracks clip IDs and defs)
+// SVG renderer state
 // ---------------------------------------------------------------------------
 
-struct RenderState<'a> {
+struct SvgRenderer<'a> {
     opts: &'a RenderOptions,
-    /// Accumulated `<defs>` content (clip paths).
+    /// Font provider for glyph path rendering (used in `TextMode::Paths`).
+    #[expect(dead_code, reason = "will be used when TextMode::Paths is added")]
+    fonts: Option<&'a dyn FontProvider>,
+    /// Accumulated `<defs>` content (clip paths, glyph symbols).
     defs: Vec<ClipPath>,
     /// Counter for generating unique clip-path IDs.
     clip_counter: usize,
 }
 
-impl<'a> RenderState<'a> {
-    const fn new(opts: &'a RenderOptions) -> Self {
+impl<'a> SvgRenderer<'a> {
+    fn new(opts: &'a RenderOptions, fonts: Option<&'a dyn FontProvider>) -> Self {
         Self {
             opts,
+            fonts,
             defs: Vec::new(),
             clip_counter: 0,
         }
