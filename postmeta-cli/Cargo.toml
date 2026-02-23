@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 postmeta-core = { path = "../postmeta-core" }
+postmeta-fonts = { path = "../postmeta-fonts" }
 postmeta-svg = { path = "../postmeta-svg" }
 postmeta-graphics = { path = "../postmeta-graphics" }
 
