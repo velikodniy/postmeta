@@ -203,6 +203,14 @@ fn eval_string_concat() {
 }
 
 #[test]
+fn chained_string_concat() {
+    let mut interp = Interpreter::new();
+    interp.run("show \"a\" & \"b\" & \"c\" & \"d\";").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("abcd"), "expected 'abcd' in: {msg}");
+}
+
+#[test]
 fn eval_multiple_statements() {
     let mut interp = Interpreter::new();
     interp.run("show 1; show 2; show 3;").unwrap();

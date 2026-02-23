@@ -913,7 +913,7 @@ impl Interpreter {
                         &left_val,
                         &right.exp,
                     )?;
-                    Ok(InfixAction::Break(ExprResultValue::typed(val, ty)))
+                    Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
                 }
             }
 
