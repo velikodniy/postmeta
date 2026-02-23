@@ -834,6 +834,15 @@ fn tertiary_binary_value(
             let b = value_to_bool(right)?;
             Ok((Value::Boolean(a || b), Type::Boolean))
         }
+        TertiaryBinaryOp::IntersectionTimes => {
+            let p1 = value_to_path(left)?;
+            let p2 = value_to_path(right)?;
+            let value = postmeta_graphics::intersection::intersection_times(p1, p2).map_or_else(
+                || Value::Pair(-1.0, -1.0),
+                |isect| Value::Pair(isect.t1, isect.t2),
+            );
+            Ok((value, Type::PairType))
+        }
     }
 }
 
@@ -874,15 +883,6 @@ fn expression_binary_value(
             let b = value_to_string(right)?;
             let result = format!("{a}{b}");
             Ok((Value::String(Arc::from(result)), Type::String))
-        }
-        ExpressionBinaryOp::IntersectionTimes => {
-            let p1 = value_to_path(left)?;
-            let p2 = value_to_path(right)?;
-            let value = postmeta_graphics::intersection::intersection_times(p1, p2).map_or_else(
-                || Value::Pair(-1.0, -1.0),
-                |isect| Value::Pair(isect.t1, isect.t2),
-            );
-            Ok((value, Type::PairType))
         }
     }
 }

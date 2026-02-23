@@ -843,7 +843,21 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_tertiary_binary(op, &left_val, &right.exp)?;
-                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
+                let result = if op == TertiaryBinaryOp::IntersectionTimes {
+                    if let Value::Pair(x, y) = val {
+                        ExprResultValue {
+                            exp: Value::Pair(x, y),
+                            ty,
+                            dep: None,
+                            pair_dep: Some((const_dep(x), const_dep(y))),
+                        }
+                    } else {
+                        ExprResultValue::typed(val, ty)
+                    }
+                } else {
+                    ExprResultValue::typed(val, ty)
+                };
+                Ok(InfixAction::Continue(result))
             }
 
             // ----- Expression level: =, <, >, path join, &, ... -----
@@ -875,21 +889,7 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
                 let (val, ty) = Self::do_expression_binary(op, &left_val, &right.exp)?;
-                let result = if op == ExpressionBinaryOp::IntersectionTimes {
-                    if let Value::Pair(x, y) = val {
-                        ExprResultValue {
-                            exp: Value::Pair(x, y),
-                            ty,
-                            dep: None,
-                            pair_dep: Some((const_dep(x), const_dep(y))),
-                        }
-                    } else {
-                        ExprResultValue::typed(val, ty)
-                    }
-                } else {
-                    ExprResultValue::typed(val, ty)
-                };
-                Ok(InfixAction::Continue(result))
+                Ok(InfixAction::Continue(ExprResultValue::typed(val, ty)))
             }
 
             // ----- Path construction and & -----

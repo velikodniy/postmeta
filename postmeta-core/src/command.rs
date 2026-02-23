@@ -375,6 +375,7 @@ pub enum TertiaryBinaryOp {
     PythagAdd = 93,
     PythagSub = 94,
     Or = 95,
+    IntersectionTimes = 113,
 }
 
 /// Operation codes for [`Command::ExpressionBinary`].
@@ -388,7 +389,6 @@ pub enum ExpressionBinaryOp {
     EqualTo = 101,
     UnequalTo = 102,
     Concatenate = 103,
-    IntersectionTimes = 113,
 }
 
 /// Operation codes for [`Command::PrimaryBinary`] ("expr X of Y").
@@ -626,7 +626,8 @@ impl_from_modifier!(SecondaryBinaryOp {
 impl_from_modifier!(TertiaryBinaryOp {
     PythagAdd,
     PythagSub,
-    Or
+    Or,
+    IntersectionTimes
 });
 impl_from_modifier!(ExpressionBinaryOp {
     LessThan,
@@ -636,7 +637,6 @@ impl_from_modifier!(ExpressionBinaryOp {
     EqualTo,
     UnequalTo,
     Concatenate,
-    IntersectionTimes,
 });
 impl_from_modifier!(PrimaryBinaryOp {
     SubstringOf,
@@ -1437,11 +1437,11 @@ pub const PRIMITIVES: &[Primitive] = &[
         command: Command::TertiaryBinary,
         modifier: TertiaryBinaryOp::Or as u16,
     },
-    // -- Expression binary --
+    // -- Tertiary binary (continued) --
     Primitive {
         name: "intersectiontimes",
-        command: Command::ExpressionBinary,
-        modifier: ExpressionBinaryOp::IntersectionTimes as u16,
+        command: Command::TertiaryBinary,
+        modifier: TertiaryBinaryOp::IntersectionTimes as u16,
     },
     Primitive {
         name: "substring",
