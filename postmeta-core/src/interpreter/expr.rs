@@ -775,7 +775,12 @@ impl Interpreter {
                 let right = self.scan_rhs(cmd)?;
                 let right_binding = self.lhs_tracking.last_lhs_binding.clone();
                 self.lhs_tracking.last_lhs_binding = None;
-                let (val, ty) = Self::do_secondary_binary(op, &left_val, &right.exp)?;
+                let (val, ty) = Self::do_secondary_binary(
+                    op,
+                    &left_val,
+                    &right.exp,
+                    self.state.font_provider.as_deref(),
+                )?;
                 let result = if op == SecondaryBinaryOp::Times {
                     self.mul_deps(val, ty, &left_val, left_dep, left_pair_dep, &right)
                 } else {

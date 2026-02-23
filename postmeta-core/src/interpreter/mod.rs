@@ -23,6 +23,7 @@ mod statement;
 
 use std::sync::Arc;
 
+use postmeta_fonts::FontProvider;
 use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{Color, Pen, Picture, Transform};
 
@@ -188,6 +189,8 @@ impl PictureState {
 pub struct MachineState {
     /// Filesystem for `input` commands.
     fs: Box<dyn FileSystem>,
+    /// Font provider for text metrics (optional; falls back to heuristics).
+    font_provider: Option<Arc<dyn FontProvider>>,
     /// Symbol table (names → command codes).
     pub symbols: SymbolTable,
     /// Variable storage.
@@ -269,6 +272,7 @@ impl Interpreter {
         Self {
             state: MachineState {
                 fs: Box::new(crate::filesystem::NullFileSystem),
+                font_provider: None,
                 symbols,
                 variables: Variables::new(),
                 var_trie: VarTrie::new(),
@@ -292,6 +296,14 @@ impl Interpreter {
     /// Set the filesystem for `input` commands.
     pub fn set_filesystem(&mut self, fs: Box<dyn FileSystem>) {
         self.state.fs = fs;
+    }
+
+    /// Set the font provider for text metrics and glyph data.
+    ///
+    /// When set, operators like `infont` and `fontsize` use real OpenType
+    /// metrics.  When `None`, the interpreter falls back to heuristics.
+    pub fn set_font_provider(&mut self, provider: Arc<dyn FontProvider>) {
+        self.state.font_provider = Some(provider);
     }
 
     // =======================================================================

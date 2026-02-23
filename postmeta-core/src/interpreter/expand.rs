@@ -11,11 +11,10 @@ use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
-use postmeta_graphics::types::{
-    Color, GraphicsObject, Picture, TextMetrics, TextObject, Transform,
-};
+use postmeta_graphics::types::{Color, GraphicsObject, Picture, TextObject, Transform};
 
 use super::helpers::value_to_stored_tokens;
+use super::operators::compute_text_metrics;
 use super::{ExprResultValue, Interpreter};
 
 // ---------------------------------------------------------------------------
@@ -1633,12 +1632,19 @@ impl Interpreter {
         let text = parts.join(" ");
 
         // Build a TextObject with default font settings (cmr10 at 10pt).
-        // Metrics are heuristic until a FontProvider is wired in.
+        let font_name = "cmr10";
+        let font_size = 10.0;
+        let metrics = compute_text_metrics(
+            &text,
+            font_name,
+            font_size,
+            self.state.font_provider.as_deref(),
+        );
         let text_obj = TextObject {
             text: text.into(),
-            font_name: "cmr10".into(),
-            font_size: 10.0,
-            metrics: TextMetrics::default(),
+            font_name: font_name.into(),
+            font_size,
+            metrics,
             color: Color::BLACK,
             transform: Transform::IDENTITY,
         };

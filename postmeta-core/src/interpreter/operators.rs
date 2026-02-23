@@ -5,6 +5,7 @@
 use std::cmp::Ordering;
 use std::sync::Arc;
 
+use postmeta_fonts::FontProvider;
 use postmeta_graphics::bbox;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
@@ -93,7 +94,10 @@ impl Interpreter {
         }
 
         // All remaining unary operators are pure value transformations.
-        let (val, ty) = Self::eval_unary(op, &input, &mut self.random_seed)?;
+        // Access both fields through `self.state` so the borrow checker can
+        // see they are disjoint (Deref would borrow all of `self`).
+        let fonts = self.state.font_provider.as_deref();
+        let (val, ty) = Self::eval_unary(op, &input, &mut self.state.random_seed, fonts)?;
         // Synthesize const_dep for known numeric results so that dependency
         // tracking is preserved through subsequent arithmetic (e.g.,
         // `alpha = angle(A) - angle(B)` where both angle calls return known
@@ -120,6 +124,7 @@ impl Interpreter {
         op: UnaryOp,
         input: &Value,
         random_seed: &mut u64,
+        fonts: Option<&dyn FontProvider>,
     ) -> InterpResult<(Value, Type)> {
         match op {
             UnaryOp::Not => {
@@ -385,11 +390,14 @@ impl Interpreter {
                 let exists = (0.0..=255.0).contains(&code) && (code - code.floor()).abs() < 0.001;
                 Ok((Value::Boolean(exists), Type::Boolean))
             }
-            // TODO: Load actual font metrics for real font sizes.
             UnaryOp::FontSize => {
-                // Stub: always return 10pt (default design size for CMR fonts).
-                let _name = value_to_string(input)?;
-                Ok((Value::Numeric(10.0), Type::Known))
+                let name = value_to_string(input)?;
+                // OpenType fonts don't carry a design size; return 10pt
+                // (MetaPost convention for CMR).  If the font name encodes
+                // a size (cmr7, cmr5), extract it.
+                let size = extract_design_size(&name).unwrap_or(10.0);
+                let _ = fonts; // available for future per-font metadata
+                Ok((Value::Numeric(size), Type::Known))
             }
             // Picture part extraction operators.
             UnaryOp::TextPart => {
@@ -575,6 +583,7 @@ impl Interpreter {
         op: SecondaryBinaryOp,
         left: &Value,
         right: &Value,
+        fonts: Option<&dyn FontProvider>,
     ) -> InterpResult<(Value, Type)> {
         match op {
             SecondaryBinaryOp::Times => {
@@ -639,14 +648,16 @@ impl Interpreter {
             SecondaryBinaryOp::Infont => {
                 let text = value_to_string(left)?;
                 let font_name = value_to_string(right)?;
-                // Default font size — MetaPost uses 10pt for design size.
-                // `plain.mp` applies `scaled defaultscale` after infont.
+                // MetaPost uses 10pt for the design size; `plain.mp`
+                // applies `scaled defaultscale` after infont.
                 let font_size = 10.0;
+                let metrics =
+                    compute_text_metrics(text.as_ref(), font_name.as_ref(), font_size, fonts);
                 let text_obj = TextObject {
                     text: Arc::from(text.as_ref()),
                     font_name: Arc::from(font_name.as_ref()),
                     font_size,
-                    metrics: TextMetrics::default(),
+                    metrics,
                     color: Color::BLACK,
                     transform: Transform::IDENTITY,
                 };
@@ -1004,6 +1015,57 @@ fn expression_binary_value(
     }
 }
 
+// ---------------------------------------------------------------------------
+// Text metric helpers
+// ---------------------------------------------------------------------------
+
+/// Compute text metrics using the font provider if available, otherwise fall
+/// back to a rough heuristic (0.5 × `font_size` per character, 0.8/0.2 split
+/// for ascender/descender).
+pub(super) fn compute_text_metrics(
+    text: &str,
+    font_name: &str,
+    font_size: f64,
+    fonts: Option<&dyn FontProvider>,
+) -> TextMetrics {
+    if let Some(provider) = fonts {
+        if let Some(font) = provider.font(font_name) {
+            let fm = font.text_metrics(text, font_size);
+            return TextMetrics {
+                width: fm.width,
+                height: fm.height,
+                depth: fm.depth,
+            };
+        }
+    }
+    heuristic_text_metrics(text, font_size)
+}
+
+/// Extract the trailing numeric suffix from a CM font name (e.g., "cmr10" → 10,
+/// "cmr7" → 7).  Returns `None` for names without a numeric suffix.
+fn extract_design_size(font_name: &str) -> Option<f64> {
+    let suffix_start = font_name.rfind(|c: char| !c.is_ascii_digit())?;
+    let suffix = &font_name[suffix_start + 1..];
+    if suffix.is_empty() {
+        return None;
+    }
+    suffix.parse().ok()
+}
+
+/// Rough text metrics when no font data is available.
+fn heuristic_text_metrics(text: &str, font_size: f64) -> TextMetrics {
+    #[expect(
+        clippy::cast_precision_loss,
+        reason = "character count fits comfortably in f64"
+    )]
+    let char_count = text.chars().count() as f64;
+    TextMetrics {
+        width: 0.5 * font_size * char_count,
+        height: 0.8 * font_size,
+        depth: 0.2 * font_size,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1021,8 +1083,9 @@ mod tests {
     #[test]
     fn unary_char_from_numeric_code() {
         let mut seed = 0_u64;
-        let (val, ty) = Interpreter::eval_unary(UnaryOp::Char, &Value::Numeric(34.0), &mut seed)
-            .expect("char should evaluate");
+        let (val, ty) =
+            Interpreter::eval_unary(UnaryOp::Char, &Value::Numeric(34.0), &mut seed, None)
+                .expect("char should evaluate");
         assert_eq!(ty, Type::String);
         assert_eq!(val, Value::String(Arc::from("\"")));
     }
