@@ -11,6 +11,8 @@ use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
+use postmeta_graphics::types::{Color, GraphicsObject, Picture, TextObject, Transform};
+
 use super::helpers::value_to_stored_tokens;
 use super::{ExprResultValue, Interpreter};
 
@@ -1538,10 +1540,13 @@ impl Interpreter {
     /// Handle `btex ... etex`.
     ///
     /// Collects the raw text between `btex` and `etex` (without macro
-    /// expansion) and produces a string value. In the original `MetaPost` this
-    /// would be shipped to TeX for typesetting; `PostMeta` treats it as plain
-    /// text. The `thelabel` macro in `plain.mp` will then apply `infont` to
-    /// convert it into a picture.
+    /// expansion) and produces a picture capsule containing a `TextObject`.
+    /// In the original `MetaPost` this would be shipped to TeX for typesetting;
+    /// `PostMeta` treats it as plain text rendered with the default font
+    /// (`cmr10` at 10pt). Producing a picture directly makes `btex...etex`
+    /// results immediately transformable (e.g. `draw btex...etex shifted z`),
+    /// matching real `MetaPost` behavior. The `thelabel` macro in `plain.mp`
+    /// already handles picture input via its `if picture s` branch.
     fn expand_start_tex(&mut self) {
         let mut parts: Vec<String> = Vec::new();
 
@@ -1564,11 +1569,22 @@ impl Interpreter {
             }
         }
 
-        let text: std::sync::Arc<str> = parts.join(" ").into();
+        let text = parts.join(" ");
 
-        // Push a string capsule — `thelabel` will call `s infont defaultfont`
-        // to convert to a picture.
-        self.back_expr_value(super::ExprResultValue::plain(Value::String(text)));
+        // Build a TextObject with default font settings (cmr10 at 10pt),
+        // mirroring the pattern used by SecondaryBinaryOp::Infont.
+        let text_obj = TextObject {
+            text: text.into(),
+            font_name: "cmr10".into(),
+            font_size: 10.0,
+            color: Color::BLACK,
+            transform: Transform::IDENTITY,
+        };
+        let mut pic = Picture::new();
+        pic.objects.push(GraphicsObject::Text(text_obj));
+
+        // Push a picture capsule — directly transformable.
+        self.back_expr_value(super::ExprResultValue::plain(Value::Picture(pic)));
 
         // Advance past the capsule and continue expansion.
         self.get_next();
