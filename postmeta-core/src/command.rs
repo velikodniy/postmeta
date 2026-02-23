@@ -97,7 +97,7 @@ pub enum Command {
     /// Unary operators: `not`, `sqrt`, `sind`, `cosd`, `floor`, `length`,
     /// `abs`, `xpart`, `ypart`, `xxpart`, etc.
     Unary = 36,
-    /// String-specific unary: `str`, `char`, `decimal`, `readfrom`.
+    /// String-specific unary: `str`.
     StrOp = 37,
     /// `cycle`.
     Cycle = 38,
@@ -341,6 +341,8 @@ pub enum UnaryOp {
     TextualOp = 86,
     ClippedOp = 87,
     BoundedOp = 88,
+    // I/O (stub — no filesystem in WASM)
+    ReadFrom = 89,
 }
 
 /// Operation codes for [`Command::PlusOrMinus`].
@@ -496,7 +498,6 @@ pub enum MessageOp {
 #[repr(u16)]
 pub enum StrOpOp {
     Str = 0,
-    ReadFrom = 3,
 }
 
 /// Operation codes for [`Command::ParamType`] — macro parameter type markers.
@@ -608,6 +609,7 @@ impl_from_modifier!(UnaryOp {
     TextualOp,
     ClippedOp,
     BoundedOp,
+    ReadFrom,
 });
 impl_from_modifier!(PlusMinusOp { Plus, Minus });
 impl_from_modifier!(SecondaryBinaryOp {
@@ -691,7 +693,7 @@ impl_from_modifier!(MessageOp {
     ErrMessage,
     ErrHelp,
 });
-impl_from_modifier!(StrOpOp { Str, ReadFrom });
+impl_from_modifier!(StrOpOp { Str });
 impl_from_modifier!(ParamTypeOp {
     Expr,
     Suffix,
@@ -1341,8 +1343,8 @@ pub const PRIMITIVES: &[Primitive] = &[
     },
     Primitive {
         name: "readfrom",
-        command: Command::StrOp,
-        modifier: StrOpOp::ReadFrom as u16,
+        command: Command::Unary,
+        modifier: UnaryOp::ReadFrom as u16,
     },
     // -- Primary binary ("X of Y") --
     Primitive {

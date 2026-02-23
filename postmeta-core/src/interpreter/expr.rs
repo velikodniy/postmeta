@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use crate::command::{
     Command, ExpressionBinaryOp, NullaryOp, PlusMinusOp, PrimaryBinaryOp, SecondaryBinaryOp,
-    StrOpOp, TertiaryBinaryOp, TypeNameOp, UnaryOp,
+    TertiaryBinaryOp, TypeNameOp, UnaryOp,
 };
 use crate::equation::{DepList, const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
@@ -178,16 +178,10 @@ impl Interpreter {
             }
 
             Command::StrOp => {
-                let op = StrOpOp::from_modifier(self.cur.modifier);
+                // `str` <suffix> — converts suffix to string
                 self.get_x_next();
-                let val = if op == Some(StrOpOp::Str) {
-                    // `str` <suffix> — converts suffix to string
-                    let name = self.scan_str_suffix()?;
-                    Value::String(Arc::from(name.as_str()))
-                } else {
-                    // readfrom etc. — not yet implemented
-                    Value::String(Arc::from(""))
-                };
+                let name = self.scan_str_suffix()?;
+                let val = Value::String(Arc::from(name.as_str()));
                 self.lhs_tracking.last_lhs_binding = None;
                 ExprResultValue::plain(val)
             }

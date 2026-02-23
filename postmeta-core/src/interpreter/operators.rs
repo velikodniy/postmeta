@@ -362,6 +362,13 @@ impl Interpreter {
                 let len = path::arc_length(p);
                 Ok((Value::Numeric(len), Type::Known))
             }
+            // readfrom: stub — no filesystem access (WASM compatibility).
+            // TODO: Implement via FileSystem trait when I/O support is added.
+            UnaryOp::ReadFrom => {
+                // In MetaPost, readfrom reads the next line from a file.
+                // Without filesystem access we return EOF sentinel.
+                Ok((Value::String(Arc::from("")), Type::String))
+            }
             // Part-extraction ops are handled in do_unary before calling this.
             _ => Err(InterpreterError::new(
                 ErrorKind::InvalidExpression,
