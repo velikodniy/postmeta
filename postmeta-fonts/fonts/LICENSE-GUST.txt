@@ -1,0 +1,22 @@
+New Computer Modern Fonts
+Version 7.1.1
+Author: Antonis Tsolomitis
+
+These fonts are distributed under the GUST Font License (GFLv1 or later).
+
+The GUST Font License is a free license, legally equivalent to the
+LaTeX Project Public License (LPPL), version 1.3c or later. It allows
+free use, modification, and redistribution of the fonts, provided that
+modified versions are distributed under a different name.
+
+Full text of the GUST Font License:
+https://www.gust.org.pl/projects/e-foundry/licenses
+
+This license is also compatible with the Debian Free Software Guidelines (DFSG).
+
+Bundled font files:
+  - NewCM10-Regular.otf
+  - NewCM10-Bold.otf
+  - NewCM10-Italic.otf
+  - NewCMMono10-Regular.otf
+  - NewCMMath-Regular.otf
