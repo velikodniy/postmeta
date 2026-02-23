@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use postmeta_core::error::{InterpreterError, Severity};
 use postmeta_core::filesystem::FileSystem;
 use postmeta_core::internals::InternalId;
 use postmeta_core::interpreter::Interpreter;
-use postmeta_svg::{RenderOptions, render_with_options};
+use postmeta_fonts::{CompositeFontProvider, FontProvider};
+use postmeta_svg::{RenderOptions, render_with_fonts};
 use wasm_bindgen::prelude::*;
 
 const PLAIN_MP: &str = include_str!("../../lib/plain.mp");
@@ -54,10 +57,19 @@ fn compile_program(source: &str) -> CompileOutput {
     let mut interpreter = Interpreter::new();
     interpreter.set_filesystem(Box::new(EmbeddedFileSystem));
 
+    // Build font provider with embedded defaults (no custom dirs in WASM).
+    let fonts: Option<Arc<dyn FontProvider>> = CompositeFontProvider::new()
+        .ok()
+        .map(|p| Arc::new(p) as Arc<dyn FontProvider>);
+
+    if let Some(ref f) = fonts {
+        interpreter.set_font_provider(Arc::clone(f));
+    }
+
     let run_failure = interpreter.run(source).err();
     let diagnostics = collect_diagnostics(&interpreter.errors, run_failure.as_ref());
     let has_error = has_errors(&interpreter.errors) || run_failure.is_some();
-    let svg = render_svg_preview(&interpreter);
+    let svg = render_svg_preview(&interpreter, fonts.as_deref());
 
     CompileOutput {
         svg,
@@ -104,7 +116,7 @@ fn format_diagnostic(err: &InterpreterError) -> String {
     }
 }
 
-fn render_svg_preview(interpreter: &Interpreter) -> String {
+fn render_svg_preview(interpreter: &Interpreter, fonts: Option<&dyn FontProvider>) -> String {
     let picture = interpreter.output().last().or({
         if interpreter.current_picture().objects.is_empty() {
             None
@@ -118,8 +130,9 @@ fn render_svg_preview(interpreter: &Interpreter) -> String {
             margin: 1.0,
             precision: 4,
             true_corners: interpreter.internals.get(InternalId::TrueCorners as u16) > 0.0,
+            ..RenderOptions::default()
         };
-        render_with_options(picture, &opts).to_string()
+        render_with_fonts(picture, &opts, fonts).to_string()
     } else {
         String::new()
     }
