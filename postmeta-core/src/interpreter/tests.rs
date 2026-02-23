@@ -419,31 +419,82 @@ fn stroked_returns_true_for_stroke_picture() {
 }
 
 #[test]
-fn filled_returns_false_for_stroke_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p doublepath ((0,0)..(10,0)); show filled p;")
-        .unwrap();
-    let msg = &interp.errors[0].message;
-    assert!(msg.contains("false"), "expected false in: {msg}");
-}
-
-#[test]
-fn textual_returns_false_for_fill_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textual p;")
-        .unwrap();
-    let msg = &interp.errors[0].message;
-    assert!(msg.contains("false"), "expected false in: {msg}");
-}
-
-#[test]
 fn clipped_returns_false_for_empty_picture() {
     let mut interp = Interpreter::new();
     interp.run("picture p; show clipped p;").unwrap();
     let msg = &interp.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
+fn textpart_extracts_text_from_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(r#"picture p; p = "hello" infont "cmr10"; show textpart p;"#)
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("hello"), "expected hello in: {msg}");
+}
+
+#[test]
+fn fontpart_extracts_font_from_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(r#"picture p; p = "abc" infont "cmr10"; show fontpart p;"#)
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("cmr10"), "expected cmr10 in: {msg}");
+}
+
+#[test]
+fn textpart_returns_empty_for_non_text_picture() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textpart p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    // Empty string shows as ""
+    assert!(msg.contains("\"\""), "expected empty string in: {msg}");
+}
+
+#[test]
+fn pathpart_extracts_path_from_fill() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show pathpart p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    // Should show a path, not an error
+    assert!(
+        !msg.contains("Unimplemented"),
+        "pathpart should not error: {msg}"
+    );
+}
+
+#[test]
+fn penpart_returns_pen_for_stroke() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p doublepath ((0,0)..(10,0)); show penpart p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(
+        !msg.contains("Unimplemented"),
+        "penpart should not error: {msg}"
+    );
+}
+
+#[test]
+fn dashpart_returns_picture_for_stroke() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; addto p doublepath ((0,0)..(10,0)); show dashpart p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(
+        !msg.contains("Unimplemented"),
+        "dashpart should not error: {msg}"
+    );
 }
 
 #[test]

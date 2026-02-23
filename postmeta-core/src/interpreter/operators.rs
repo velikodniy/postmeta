@@ -8,11 +8,12 @@ use std::sync::Arc;
 use postmeta_graphics::bbox;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
+use postmeta_graphics::path::Path;
 use postmeta_graphics::pen;
 use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, GraphicsObject, Pen, Picture, Point, TextObject, Transform, Vec2,
+    Color, GraphicsObject, Knot, Pen, Picture, Point, TextObject, Transform, Vec2,
 };
 
 use crate::command::{
@@ -376,6 +377,60 @@ impl Interpreter {
                 // In MetaPost, readfrom reads the next line from a file.
                 // Without filesystem access we return EOF sentinel.
                 Ok((Value::String(Arc::from("")), Type::String))
+            }
+            // Picture part extraction operators.
+            UnaryOp::TextPart => {
+                let pic = value_to_picture(input)?;
+                let text = match pic.objects.first() {
+                    Some(GraphicsObject::Text(t)) => t.text.to_string(),
+                    _ => String::new(),
+                };
+                Ok((Value::String(Arc::from(text)), Type::String))
+            }
+            UnaryOp::FontPart => {
+                let pic = value_to_picture(input)?;
+                let font = match pic.objects.first() {
+                    Some(GraphicsObject::Text(t)) => t.font_name.to_string(),
+                    _ => String::new(),
+                };
+                Ok((Value::String(Arc::from(font)), Type::String))
+            }
+            UnaryOp::PathPart => {
+                let pic = value_to_picture(input)?;
+                let path = match pic.objects.first() {
+                    Some(GraphicsObject::Fill(f)) => f.path.clone(),
+                    Some(GraphicsObject::Stroke(s)) => s.path.clone(),
+                    Some(GraphicsObject::ClipStart(p) | GraphicsObject::SetBoundsStart(p)) => {
+                        p.clone()
+                    }
+                    _ => {
+                        // Default: single-knot path at origin
+                        Path::from_knots(vec![Knot::new(Point::ZERO)], false)
+                    }
+                };
+                Ok((Value::Path(path), Type::Path))
+            }
+            UnaryOp::PenPart => {
+                let pic = value_to_picture(input)?;
+                let pen = match pic.objects.first() {
+                    Some(GraphicsObject::Fill(f)) => f.pen.clone().unwrap_or(Pen::null()),
+                    Some(GraphicsObject::Stroke(s)) => s.pen.clone(),
+                    _ => Pen::null(),
+                };
+                Ok((Value::Pen(pen), Type::Pen))
+            }
+            UnaryOp::DashPart => {
+                let pic = value_to_picture(input)?;
+                let dash_pic = match pic.objects.first() {
+                    Some(GraphicsObject::Stroke(s)) => {
+                        // TODO: convert DashPattern back to a picture representation.
+                        // For now return empty picture (matches MetaPost's nullpicture).
+                        let _ = &s.dash;
+                        Picture::new()
+                    }
+                    _ => Picture::new(),
+                };
+                Ok((Value::Picture(dash_pic), Type::Picture))
             }
             // Picture type tests: check first object in the picture.
             UnaryOp::FilledOp => {
