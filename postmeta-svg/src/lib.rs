@@ -302,14 +302,18 @@ impl<'a> SvgRenderer<'a> {
             // Ensure glyph outline is defined (dedup via glyph_map).
             if let Some(sym_id) = self.ensure_glyph(&text.font_name, gid) {
                 // Place the glyph with a transform that scales from design
-                // units and applies the cursor offset.  Y is already Y-up in
-                // the glyph outline (handled by the outer group flip).
+                // units and applies the cursor offset.  Glyph outlines are
+                // Y-up (font convention) but the outer group already maps
+                // MetaPost→SVG coordinates.  We negate the Y scale so that
+                // ascending glyphs extend upward in MetaPost space (which
+                // the outer conjugation matrix then flips for SVG).
+                let s = fmt_scalar(scale, prec + 2);
+                let ns = fmt_scalar(-scale, prec + 2);
                 let use_el = SvgUse::new().set("href", format!("#{sym_id}")).set(
                     "transform",
                     format!(
-                        "translate({},0) scale({s},{s})",
+                        "translate({},0) scale({s},{ns})",
                         fmt_scalar(cursor_x, prec),
-                        s = fmt_scalar(scale, prec + 2),
                     ),
                 );
                 g = g.add(use_el);
