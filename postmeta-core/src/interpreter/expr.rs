@@ -98,7 +98,20 @@ impl Interpreter {
                 };
                 self.get_x_next();
                 let operand_result = self.scan_primary()?;
-                self.do_unary(op, operand_result.exp, operand_result.pair_dep)?
+                // known/unknown need the operand's type, not its value.
+                if op == UnaryOp::KnownOp || op == UnaryOp::UnknownOp {
+                    let ty = operand_result.ty;
+                    let is_known = (ty as u8) < (Type::Dependent as u8);
+                    let result = if op == UnaryOp::KnownOp {
+                        is_known
+                    } else {
+                        !is_known
+                    };
+                    self.lhs_tracking.last_lhs_binding = None;
+                    ExprResultValue::plain(Value::Boolean(result))
+                } else {
+                    self.do_unary(op, operand_result.exp, operand_result.pair_dep)?
+                }
             }
 
             Command::PlusOrMinus => {
@@ -219,8 +232,6 @@ impl Interpreter {
                     Some(TypeNameOp::Transform) => ty == Type::TransformType,
                     Some(TypeNameOp::Color) => ty == Type::ColorType,
                     Some(TypeNameOp::Pair) => ty == Type::PairType,
-                    Some(TypeNameOp::Known) => (ty as u8) < (Type::Dependent as u8),
-                    Some(TypeNameOp::Unknown) => (ty as u8) >= (Type::Dependent as u8),
                     _ => false,
                 };
                 self.lhs_tracking.last_lhs_binding = None;

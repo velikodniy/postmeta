@@ -343,6 +343,9 @@ pub enum UnaryOp {
     BoundedOp = 88,
     // I/O (stub — no filesystem in WASM)
     ReadFrom = 89,
+    // Type tests
+    KnownOp = 90,
+    UnknownOp = 91,
 }
 
 /// Operation codes for [`Command::PlusOrMinus`].
@@ -533,8 +536,6 @@ pub enum TypeNameOp {
     Color = 6,
     Pair = 7,
     Numeric = 8,
-    Known = 9,
-    Unknown = 10,
 }
 
 macro_rules! impl_from_modifier {
@@ -610,6 +611,8 @@ impl_from_modifier!(UnaryOp {
     ClippedOp,
     BoundedOp,
     ReadFrom,
+    KnownOp,
+    UnknownOp,
 });
 impl_from_modifier!(PlusMinusOp { Plus, Minus });
 impl_from_modifier!(SecondaryBinaryOp {
@@ -713,8 +716,6 @@ impl_from_modifier!(TypeNameOp {
     Color,
     Pair,
     Numeric,
-    Known,
-    Unknown,
 });
 
 // ---------------------------------------------------------------------------
@@ -1039,13 +1040,13 @@ pub const PRIMITIVES: &[Primitive] = &[
     },
     Primitive {
         name: "known",
-        command: Command::TypeName,
-        modifier: TypeNameOp::Known as u16,
+        command: Command::Unary,
+        modifier: UnaryOp::KnownOp as u16,
     },
     Primitive {
         name: "unknown",
-        command: Command::TypeName,
-        modifier: TypeNameOp::Unknown as u16,
+        command: Command::Unary,
+        modifier: UnaryOp::UnknownOp as u16,
     },
     // -- Delimiters & grouping --
     Primitive {

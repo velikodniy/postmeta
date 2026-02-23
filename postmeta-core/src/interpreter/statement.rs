@@ -289,7 +289,6 @@ impl Interpreter {
             TypeNameOp::Pair => Type::PairType,
             TypeNameOp::Color => Type::ColorType,
             TypeNameOp::Transform => Type::TransformType,
-            TypeNameOp::Known | TypeNameOp::Unknown => Type::Undefined,
         }
     }
 
