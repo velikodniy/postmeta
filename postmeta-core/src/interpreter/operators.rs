@@ -285,17 +285,29 @@ impl Interpreter {
                 }
             }
             UnaryOp::MakePen => {
-                if let Value::Path(p) = input {
-                    let result = pen::makepen(p).map_err(|e| {
-                        InterpreterError::new(ErrorKind::TypeError, format!("makepen: {e}"))
-                    })?;
-                    Ok((Value::Pen(result), Type::Pen))
-                } else {
-                    Err(InterpreterError::new(
-                        ErrorKind::TypeError,
-                        "makepen requires a path",
-                    ))
-                }
+                // mp.web §16987: pair_to_path before makepen
+                let owned_path;
+                let path_ref = match input {
+                    Value::Path(p) => p,
+                    Value::Pair(x, y) => {
+                        use postmeta_graphics::types::Knot;
+                        owned_path = postmeta_graphics::path::Path {
+                            knots: vec![Knot::new(Point::new(*x, *y))],
+                            is_cyclic: true,
+                        };
+                        &owned_path
+                    }
+                    _ => {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            "makepen requires a path or pair",
+                        ));
+                    }
+                };
+                let result = pen::makepen(path_ref).map_err(|e| {
+                    InterpreterError::new(ErrorKind::TypeError, format!("makepen: {e}"))
+                })?;
+                Ok((Value::Pen(result), Type::Pen))
             }
             UnaryOp::CycleOp => {
                 let is_cyclic = matches!(input, Value::Path(p) if p.is_cyclic);

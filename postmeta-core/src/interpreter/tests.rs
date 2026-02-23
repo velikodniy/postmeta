@@ -3641,3 +3641,35 @@ fn special_statement_reports_unimplemented() {
         "expected unimplemented diagnostic, got: {errors:?}"
     );
 }
+
+/// mp.web §302: makepen auto-closes non-cyclic paths.
+#[test]
+fn makepen_accepts_non_cyclic_path() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("pen p; p := makepen ((0,0)..(100,0));")
+        .expect("makepen should accept non-cyclic path");
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+}
+
+/// mp.web §16987: makepen accepts a pair (pair_to_path).
+#[test]
+fn makepen_accepts_pair() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("pen p; p := makepen (5,3);")
+        .expect("makepen should accept a pair");
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+}
