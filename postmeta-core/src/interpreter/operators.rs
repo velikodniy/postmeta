@@ -378,6 +378,19 @@ impl Interpreter {
                 // Without filesystem access we return EOF sentinel.
                 Ok((Value::String(Arc::from("")), Type::String))
             }
+            // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
+            UnaryOp::CharExists => {
+                // Stub: assume all byte-range character codes exist.
+                let code = value_to_scalar(input)?;
+                let exists = (0.0..=255.0).contains(&code) && (code - code.floor()).abs() < 0.001;
+                Ok((Value::Boolean(exists), Type::Boolean))
+            }
+            // TODO: Load actual font metrics for real font sizes.
+            UnaryOp::FontSize => {
+                // Stub: always return 10pt (default design size for CMR fonts).
+                let _name = value_to_string(input)?;
+                Ok((Value::Numeric(10.0), Type::Known))
+            }
             // Picture part extraction operators.
             UnaryOp::TextPart => {
                 let pic = value_to_picture(input)?;

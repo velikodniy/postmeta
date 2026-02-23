@@ -498,6 +498,38 @@ fn dashpart_returns_picture_for_stroke() {
 }
 
 #[test]
+fn charexists_valid_code() {
+    let mut interp = Interpreter::new();
+    interp.run("show charexists 65;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("true"), "expected true in: {msg}");
+}
+
+#[test]
+fn charexists_out_of_range() {
+    let mut interp = Interpreter::new();
+    interp.run("show charexists 256;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
+fn charexists_negative() {
+    let mut interp = Interpreter::new();
+    interp.run("show charexists -1;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("false"), "expected false in: {msg}");
+}
+
+#[test]
+fn fontsize_returns_ten() {
+    let mut interp = Interpreter::new();
+    interp.run(r#"show fontsize "cmr10";"#).unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("10"), "expected 10 in: {msg}");
+}
+
+#[test]
 fn directiontime_east_on_right_path() {
     // Path going right: direction (1,0) should be found at time ~0
     let mut interp = Interpreter::new();
