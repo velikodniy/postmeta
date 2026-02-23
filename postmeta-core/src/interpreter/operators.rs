@@ -462,10 +462,17 @@ impl Interpreter {
                 let t = path::arc_time(p, target_len);
                 Ok((Value::Numeric(t), Type::Known))
             }
-            PrimaryBinaryOp::DirectionTimeOf => Err(InterpreterError::new(
-                ErrorKind::InvalidExpression,
-                "Unimplemented primary binary: directiontime",
-            )),
+            PrimaryBinaryOp::DirectionTimeOf => {
+                let Value::Pair(dx, dy) = first else {
+                    return Err(InterpreterError::new(
+                        ErrorKind::TypeError,
+                        "directiontime requires a pair as first argument",
+                    ));
+                };
+                let p = value_to_path(second)?;
+                let t = p.direction_time(Vec2::new(*dx, *dy)).unwrap_or(-1.0);
+                Ok((Value::Numeric(t), Type::Known))
+            }
         }
     }
 

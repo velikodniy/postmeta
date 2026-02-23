@@ -84,6 +84,72 @@ impl Path {
         let (seg, frac) = time_to_seg_frac(t, self.num_segments());
         CubicSegment::from_path(self, seg).direction_at(frac)
     }
+
+    /// Find the first time at which the path travels in the given direction.
+    ///
+    /// Returns `None` if the direction is never matched.  If `dir` is `(0,0)`,
+    /// returns `Some(0.0)` (undefined direction matches immediately).  If the
+    /// tangent at a point is zero (degenerate), it is considered to match any
+    /// direction.
+    ///
+    /// The algorithm: for each cubic segment, rotate the derivative control
+    /// points so that the target direction becomes "due east" (+x axis), then
+    /// find where the y-component of the rotated derivative crosses zero
+    /// while the x-component is non-negative (i.e., the tangent points east).
+    #[must_use]
+    pub fn direction_time(&self, dir: Vec2) -> Option<Scalar> {
+        // Zero direction matches immediately.
+        if dir.x.abs() < EPSILON && dir.y.abs() < EPSILON {
+            return Some(0.0);
+        }
+
+        let n = self.num_segments();
+        if n == 0 {
+            return None;
+        }
+
+        // Normalize direction for rotation.
+        let len = dir.x.hypot(dir.y);
+        let (dx, dy) = (dir.x / len, dir.y / len);
+
+        for i in 0..n {
+            let seg = CubicSegment::from_path(self, i);
+
+            // Derivative control points (B'(t)/3 = B(d1,d2,d3;t))
+            let d1 = Vec2::new(seg.p1.x - seg.p0.x, seg.p1.y - seg.p0.y);
+            let d2 = Vec2::new(seg.p2.x - seg.p1.x, seg.p2.y - seg.p1.y);
+            let d3 = Vec2::new(seg.p3.x - seg.p2.x, seg.p3.y - seg.p2.y);
+
+            // Rotate so that (dx,dy) → (1,0): multiply by conjugate rotation
+            // x' = x*dx + y*dy, y' = y*dx - x*dy
+            let ry1 = d1.y.mul_add(dx, -d1.x * dy);
+            let ry2 = d2.y.mul_add(dx, -d2.x * dy);
+            let ry3 = d3.y.mul_add(dx, -d3.x * dy);
+
+            let rx1 = d1.x.mul_add(dx, d1.y * dy);
+            let rx2 = d2.x.mul_add(dx, d2.y * dy);
+            let rx3 = d3.x.mul_add(dx, d3.y * dy);
+
+            // Check t=0: if tangent is zero or matches direction
+            if ry1.abs() < EPSILON && rx1 >= -EPSILON {
+                return Some(index_to_scalar(i));
+            }
+
+            // Find roots of B(ry1, ry2, ry3; t) = 0 in [0,1].
+            // This is a quadratic Bernstein polynomial.
+            for t in find_bernstein_roots(ry1, ry2, ry3) {
+                if (0.0..=1.0).contains(&t) {
+                    // x-component must be non-negative (same direction, not opposite)
+                    let rx = bernstein_eval(rx1, rx2, rx3, t);
+                    if rx >= -EPSILON {
+                        return Some(index_to_scalar(i) + t);
+                    }
+                }
+            }
+        }
+
+        None
+    }
 }
 
 impl Default for Path {
@@ -231,6 +297,45 @@ pub fn turning_number(path: &Path) -> Scalar {
 
     // Divide by 2π and round to nearest integer.
     (total_angle / (2.0 * std::f64::consts::PI)).round()
+}
+
+/// Evaluate a degree-2 Bernstein polynomial `B(b0, b1, b2; t)`.
+fn bernstein_eval(b0: Scalar, b1: Scalar, b2: Scalar, param: Scalar) -> Scalar {
+    let s = 1.0 - param;
+    s.mul_add(s * b0, (2.0 * s * param).mul_add(b1, param * param * b2))
+}
+
+/// Sentinel for unused root slots in [`find_bernstein_roots`].
+const NO_ROOT: Scalar = f64::NAN;
+
+/// Find real roots of the degree-2 Bernstein polynomial `B(b0, b1, b2; t) = 0`.
+///
+/// Returns up to 2 roots (not necessarily in `[0,1]`).  Unused slots are `NAN`.
+fn find_bernstein_roots(b0: Scalar, b1: Scalar, b2: Scalar) -> [Scalar; 2] {
+    // Convert to power basis: B(b0,b1,b2;t) = b0(1-t)^2 + 2*b1*t(1-t) + b2*t^2
+    //   = b0 + (2*b1 - 2*b0)*t + (b0 - 2*b1 + b2)*t^2
+    let coeff_a = 2.0f64.mul_add(-b1, b0) + b2;
+    let coeff_b = 2.0 * (b1 - b0);
+    let coeff_c = b0;
+
+    if coeff_a.abs() < EPSILON {
+        // Linear: coeff_b * t + coeff_c = 0
+        if coeff_b.abs() < EPSILON {
+            return [NO_ROOT, NO_ROOT];
+        }
+        let root = -coeff_c / coeff_b;
+        return [root, NO_ROOT];
+    }
+
+    let disc = coeff_b.mul_add(coeff_b, -4.0 * coeff_a * coeff_c);
+    if disc < 0.0 {
+        return [NO_ROOT, NO_ROOT];
+    }
+
+    let sqrt_disc = disc.sqrt();
+    let t1 = (-coeff_b - sqrt_disc) / (2.0 * coeff_a);
+    let t2 = (-coeff_b + sqrt_disc) / (2.0 * coeff_a);
+    [t1, t2]
 }
 
 /// Bisect to find the parameter `t` in [0,1] such that the arc length
@@ -715,6 +820,45 @@ mod tests {
 
         let p2 = make_triangle_path();
         assert_eq!(p2.num_segments(), 3);
+    }
+
+    #[test]
+    fn direction_time_east_on_line() {
+        // A straight line from (0,0) to (10,0) — direction is east.
+        let path = make_line_path();
+        let t = path.direction_time(Vec2::new(1.0, 0.0));
+        let t = t.expect("east direction should be found");
+        assert!((t - 0.0).abs() < 0.01, "expected ~0, got {t}");
+    }
+
+    #[test]
+    fn direction_time_west_not_found_open_line() {
+        // Straight line east → west direction never appears.
+        let path = make_line_path();
+        assert!(
+            path.direction_time(Vec2::new(-1.0, 0.0)).is_none(),
+            "west should not be found on an eastward line"
+        );
+    }
+
+    #[test]
+    fn direction_time_zero_dir_returns_zero() {
+        let path = make_line_path();
+        let t = path
+            .direction_time(Vec2::new(0.0, 0.0))
+            .expect("zero direction always matches");
+        assert!((t - 0.0).abs() < EPSILON, "expected 0, got {t}");
+    }
+
+    #[test]
+    fn direction_time_on_triangle() {
+        // Triangle (0,0)→(10,0)→(5,10)→cycle
+        // At time 0, the tangent direction is roughly east (towards (10,0)).
+        let tri = make_triangle_path();
+        let t = tri
+            .direction_time(Vec2::new(1.0, 0.0))
+            .expect("east direction should be found");
+        assert!(t >= 0.0 && t < 0.5, "expected near 0, got {t}");
     }
 
     #[test]

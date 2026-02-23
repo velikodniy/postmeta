@@ -399,6 +399,28 @@ fn nested_forever_loops_keep_outer_replay_state() {
 }
 
 #[test]
+fn directiontime_east_on_right_path() {
+    // Path going right: direction (1,0) should be found at time ~0
+    let mut interp = Interpreter::new();
+    interp
+        .run("path p; p := (0,0)..(10,0); show directiontime (1,0) of p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("0"), "expected 0 in: {msg}");
+}
+
+#[test]
+fn directiontime_not_found() {
+    // Path going right: direction (-1,0) should return -1
+    let mut interp = Interpreter::new();
+    interp
+        .run("path p; p := (0,0)..(10,0); show directiontime (-1,0) of p;")
+        .unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("-1"), "expected -1 in: {msg}");
+}
+
+#[test]
 fn turningnumber_counterclockwise() {
     // A counterclockwise triangle should have turningnumber = 1
     // Use `..` (primitive path join), not `--` (plain.mp macro)
