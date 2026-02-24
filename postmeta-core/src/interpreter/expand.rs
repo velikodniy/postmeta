@@ -984,8 +984,8 @@ impl Interpreter {
         // Set the symbol to the appropriate operator command
         let cmd = match def_op {
             MacroDefOp::PrimaryDef => Command::SecondaryPrimaryMacro,
-            MacroDefOp::SecondaryDef => Command::ExpressionTertiaryMacro,
-            MacroDefOp::TertiaryDef => Command::TertiarySecondaryMacro,
+            MacroDefOp::SecondaryDef => Command::TertiarySecondaryMacro,
+            MacroDefOp::TertiaryDef => Command::ExpressionTertiaryMacro,
             _ => {
                 self.report_error(
                     ErrorKind::UnexpectedToken,

@@ -905,13 +905,16 @@ impl Interpreter {
             // ----- Path construction and & -----
             Command::PathJoin | Command::LeftBrace => {
                 let result = self.scan_path_construction(left)?;
-                Ok(InfixAction::Break(result))
+                // Continue (not Break) so expression-level operators like
+                // `cutbefore`/`cutafter` (tertiarydef macros) that follow
+                // the path are picked up by the Pratt loop.
+                Ok(InfixAction::Continue(result))
             }
 
             Command::Ampersand => {
                 if matches!(left.ty, Type::PairType | Type::Path) {
                     let result = self.scan_path_construction(left)?;
-                    Ok(InfixAction::Break(result))
+                    Ok(InfixAction::Continue(result))
                 } else {
                     // String concatenation
                     let left_val = left.exp;

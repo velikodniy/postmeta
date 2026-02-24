@@ -3021,6 +3021,34 @@ fn delimited_suffix_in_def_endbox_pattern() {
     assert_eq!(msgs, vec!["hello"], "suffix passed through: {msgs:?}");
 }
 
+#[test]
+fn cutbefore_after_path_construction() {
+    // `tertiarydef a cutbefore b` from plain.mp must work after
+    // inline path construction: `(0,0)--(1cm,0) cutbefore fullcircle`
+    // Previously, path construction returned Break from the Pratt loop,
+    // so `cutbefore` was never reached.
+    let mut interp = Interpreter::new();
+    interp.set_filesystem(Box::new(PlainMpFs));
+    interp
+        .run(concat!(
+            "input plain;\n",
+            "beginfig(1)\n",
+            "  draw (0,0)--(28.34645,0) cutbefore fullcircle scaled 5;\n",
+            "endfig;\n",
+        ))
+        .unwrap();
+    let errors: Vec<&str> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .map(|e| e.message.as_str())
+        .collect();
+    assert!(
+        errors.is_empty(),
+        "cutbefore after path construction should not error: {errors:?}"
+    );
+}
+
 // -----------------------------------------------------------------------
 // Equals-means-equation flag (= as comparison vs equation)
 // -----------------------------------------------------------------------
