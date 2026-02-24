@@ -1028,14 +1028,20 @@ impl Interpreter {
             if self.cur.command == Command::RightDelimiter {
                 self.get_next();
             } else {
+                // Track the current type within a delimited group.
+                // In MetaPost, `(suffix a, b)` means both a and b are suffix.
+                // The type keyword applies to all following names until the next
+                // type keyword or closing paren (mp.web §12882).
+                let mut current_delimited_type = ParamType::Expr;
                 loop {
                     // Expect a param type: expr, suffix, or text
                     let param_type = if self.cur.command == Command::ParamType {
                         let pt = Self::delimited_param_type(self.cur.modifier);
                         self.get_next(); // skip type keyword
+                        current_delimited_type = pt;
                         pt
                     } else {
-                        ParamType::Expr
+                        current_delimited_type
                     };
 
                     // Get the parameter name

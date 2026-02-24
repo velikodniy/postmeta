@@ -2976,6 +2976,51 @@ fn abs_of_numeric_via_plain_mp_let() {
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
+#[test]
+fn delimited_suffix_comma_shares_type() {
+    // (suffix a, b) — both a and b should be suffix params (mp.web §12882).
+    // Previously, b was defaulting to expr.
+    let mut interp = Interpreter::new();
+    interp
+        .run(concat!(
+            "def mytwo(suffix aa, bb) =\n",
+            "  message str aa;\n",
+            "  message str bb;\n",
+            "enddef;\n",
+            "mytwo(foo, bar);\n",
+        ))
+        .unwrap();
+    let msgs: Vec<&str> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.as_str())
+        .collect();
+    assert_eq!(msgs, vec!["foo", "bar"], "both suffix params: {msgs:?}");
+}
+
+#[test]
+fn delimited_suffix_in_def_endbox_pattern() {
+    // The endbox_ pattern from boxes.mp: `def endbox_(suffix cl, $) = cl($); enddef`
+    // Both cl and $ are suffix params. When expanded, cl($) should call
+    // the macro named by cl with $ as its suffix argument.
+    let mut interp = Interpreter::new();
+    interp
+        .run(concat!(
+            "vardef myfunc(suffix $) = message str $; enddef;\n",
+            "def wrapper(suffix cl, $) = cl($); enddef;\n",
+            "wrapper(myfunc, hello);\n",
+        ))
+        .unwrap();
+    let msgs: Vec<&str> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.as_str())
+        .collect();
+    assert_eq!(msgs, vec!["hello"], "suffix passed through: {msgs:?}");
+}
+
 // -----------------------------------------------------------------------
 // Equals-means-equation flag (= as comparison vs equation)
 // -----------------------------------------------------------------------
