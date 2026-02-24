@@ -1521,6 +1521,30 @@ fn type_declaration_clears_subscripted_descendants() {
     );
 }
 
+#[test]
+fn type_declaration_generic_subscript_clears_existing() {
+    // Declaring `pair a[].off` must clear any pre-existing `a[N].off`
+    // that was auto-created as numeric by prior reference.
+    let mut interp = Interpreter::new();
+    interp
+        .run(concat!(
+            "show (pair a1.off);\n", // false: a1.off auto-created as numeric
+            "pair a[].off;\n",       // should clear a[1].off and redeclare as pair
+            "show (pair a1.off);\n", // should be true now
+        ))
+        .unwrap();
+    assert!(
+        interp.errors[0].message.contains("false"),
+        "before: expected false, got {:?}",
+        interp.errors[0].message
+    );
+    assert!(
+        interp.errors[1].message.contains("true"),
+        "after: expected true, got {:?}",
+        interp.errors[1].message
+    );
+}
+
 // -----------------------------------------------------------------------
 // back_input / back_expr integration
 // -----------------------------------------------------------------------

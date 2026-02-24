@@ -215,6 +215,7 @@ impl Interpreter {
                         self.get_next();
                         if self.cur.command == Command::RightBracket {
                             suffix_segs.push(SuffixSegment::Subscript);
+                            name.push_str("[]");
                             self.get_next();
                         } else {
                             // Not `[]` — push the bracket back and stop

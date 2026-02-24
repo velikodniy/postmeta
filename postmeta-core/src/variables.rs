@@ -213,11 +213,7 @@ impl Variables {
         };
         let to_remove: Vec<String> = all_names
             .iter()
-            .filter(|n| {
-                *n == name
-                    || n.starts_with(&format!("{name}."))
-                    || n.starts_with(&format!("{name}["))
-            })
+            .filter(|n| Self::matches_generic_pattern(n, name))
             .cloned()
             .collect();
         for n in &to_remove {
@@ -226,6 +222,71 @@ impl Variables {
         }
         if all_names.is_empty() {
             self.names_by_root.remove(root);
+        }
+    }
+
+    /// Check whether a concrete variable name matches a generic pattern.
+    ///
+    /// The pattern may contain `[]` which matches any subscript like `[0]`,
+    /// `[1]`, `[-3.5]`, etc. in the concrete name.  A match means the name
+    /// is either identical to the pattern (after generic expansion), or is a
+    /// descendant of it (has additional suffix segments).
+    ///
+    /// Examples:
+    /// - pattern `"a"`, name `"a"` → match (exact)
+    /// - pattern `"a"`, name `"a.off"` → match (descendant via `.`)
+    /// - pattern `"a"`, name `"a[1].off"` → match (descendant via `[`)
+    /// - pattern `"a[].off"`, name `"a[1].off"` → match (generic subscript)
+    /// - pattern `"a[].off"`, name `"a[1].off.x"` → match (descendant)
+    /// - pattern `"a[].off"`, name `"a.off"` → no match
+    /// - pattern `"a.off"`, name `"a[1].off"` → no match
+    fn matches_generic_pattern(name: &str, pattern: &str) -> bool {
+        let mut ni = name.as_bytes().iter().peekable();
+        let mut pi = pattern.as_bytes().iter().peekable();
+
+        loop {
+            match (pi.peek(), ni.peek()) {
+                // Pattern exhausted: match if name is also done or starts a new
+                // suffix/subscript segment (descendant).
+                (None, None | Some(&&(b'.' | b'['))) => return true,
+                (None, _) | (Some(_), None) => return false,
+                (Some(&&b'['), _) => {
+                    pi.next(); // skip `[` in pattern
+                    if pi.peek() == Some(&&b']') {
+                        // Generic subscript `[]` — skip `[<content>]` in name
+                        pi.next(); // skip `]` in pattern
+                        if ni.peek() != Some(&&b'[') {
+                            return false; // name must have `[` here
+                        }
+                        ni.next(); // skip `[` in name
+                        // Skip until matching `]` in name
+                        let mut found_close = false;
+                        for ch in ni.by_ref() {
+                            if *ch == b']' {
+                                found_close = true;
+                                break;
+                            }
+                        }
+                        if !found_close {
+                            return false;
+                        }
+                    } else {
+                        // Literal `[` in pattern (shouldn't happen for generic
+                        // patterns, but handle gracefully)
+                        if ni.peek() != Some(&&b'[') {
+                            return false;
+                        }
+                        ni.next();
+                    }
+                }
+                (Some(pc), Some(nc)) => {
+                    if **pc != **nc {
+                        return false;
+                    }
+                    pi.next();
+                    ni.next();
+                }
+            }
         }
     }
 
@@ -927,5 +988,39 @@ mod tests {
         assert!((vars.known_value(x).unwrap() - 2.0).abs() < 1e-9);
         assert!((vars.known_value(y).unwrap() - 4.0).abs() < 1e-9);
         assert!((vars.known_value(z).unwrap() - 7.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn matches_generic_pattern_exact() {
+        assert!(Variables::matches_generic_pattern("a", "a"));
+        assert!(!Variables::matches_generic_pattern("a", "b"));
+    }
+
+    #[test]
+    fn matches_generic_pattern_suffix_descendant() {
+        assert!(Variables::matches_generic_pattern("a.off", "a"));
+        assert!(Variables::matches_generic_pattern("a[1].off", "a"));
+        assert!(!Variables::matches_generic_pattern("ab", "a"));
+    }
+
+    #[test]
+    fn matches_generic_pattern_subscript_wildcard() {
+        assert!(Variables::matches_generic_pattern("a[1].off", "a[].off"));
+        assert!(Variables::matches_generic_pattern("a[2].off", "a[].off"));
+        assert!(Variables::matches_generic_pattern("a[-3].off", "a[].off"));
+        assert!(!Variables::matches_generic_pattern("a.off", "a[].off"));
+        assert!(!Variables::matches_generic_pattern("b[1].off", "a[].off"));
+    }
+
+    #[test]
+    fn matches_generic_pattern_descendant_of_generic() {
+        assert!(Variables::matches_generic_pattern("a[1].off.x", "a[].off"));
+        assert!(Variables::matches_generic_pattern("a[1].off[2]", "a[].off"));
+    }
+
+    #[test]
+    fn matches_generic_pattern_multiple_subscripts() {
+        assert!(Variables::matches_generic_pattern("a[1][2]", "a[][]"));
+        assert!(!Variables::matches_generic_pattern("a[1]", "a[][]"));
     }
 }
