@@ -251,10 +251,11 @@ impl Interpreter {
                         }
                     }
                     Value::Pair(x, y) => x.hypot(*y),
+                    Value::Numeric(v) => v.abs(),
                     _ => {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
-                            "length requires path, string, or pair",
+                            "length requires numeric, path, string, or pair",
                         ));
                     }
                 };

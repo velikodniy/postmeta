@@ -2953,6 +2953,29 @@ fn length_of_utf8_counts_characters() {
     assert!(msg.contains('3'), "expected length 3 in: {msg}");
 }
 
+#[test]
+fn length_of_numeric_returns_abs() {
+    let mut interp = Interpreter::new();
+    interp.run("show length -5;").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains('5'), "expected abs value 5 in: {msg}");
+
+    let mut interp2 = Interpreter::new();
+    interp2.run("show length 3.7;").unwrap();
+    let msg2 = &interp2.errors[0].message;
+    assert!(msg2.contains("3.7"), "expected 3.7 in: {msg2}");
+}
+
+#[test]
+fn abs_of_numeric_via_plain_mp_let() {
+    // plain.mp line 135: `let abs = length;`
+    // abs should work on numerics since length does
+    let mut interp = Interpreter::new();
+    interp.run("let abs = length; show abs(-42);").unwrap();
+    let msg = &interp.errors[0].message;
+    assert!(msg.contains("42"), "expected 42 in: {msg}");
+}
+
 // -----------------------------------------------------------------------
 // Equals-means-equation flag (= as comparison vs equation)
 // -----------------------------------------------------------------------
