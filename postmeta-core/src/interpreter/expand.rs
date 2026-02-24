@@ -425,8 +425,7 @@ impl Interpreter {
         );
         let mut iteration = body;
         iteration.push(StoredToken::Symbol(repeat_sym));
-        self.input
-            .push_token_list(iteration, vec![first_params], "for-body".into());
+        self.input.push_loop_body(iteration, vec![first_params]);
 
         // Get the first token and continue expanding
         self.get_next();
@@ -469,8 +468,7 @@ impl Interpreter {
             },
         );
         iteration.push(StoredToken::Symbol(repeat_sym));
-        self.input
-            .push_token_list(iteration, Vec::new(), "forever-body".into());
+        self.input.push_loop_body(iteration, Vec::new());
 
         // Get the first token and continue — the RepeatLoop sentinel will
         // be caught by expand_current and re-push the body.
@@ -501,9 +499,7 @@ impl Interpreter {
                     let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
                     let mut iteration = body;
                     iteration.push(StoredToken::Symbol(repeat_sym));
-                    self.state
-                        .input
-                        .push_token_list(iteration, vec![params], "for-body".into());
+                    self.state.input.push_loop_body(iteration, vec![params]);
                 } else {
                     // No more iterations — loop is done.
                     self.control_flow.forever_stack.pop();
@@ -514,9 +510,7 @@ impl Interpreter {
                 let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
                 let mut iteration = body;
                 iteration.push(StoredToken::Symbol(repeat_sym));
-                self.state
-                    .input
-                    .push_token_list(iteration, Vec::new(), "forever-body".into());
+                self.state.input.push_loop_body(iteration, Vec::new());
             }
         }
 
@@ -779,21 +773,28 @@ impl Interpreter {
             false
         };
 
-        // Set the flag BEFORE consuming remaining tokens, so that
-        // any RepeatLoop sentinel encountered during expand_current
-        // will see the exit request.
         if should_exit {
-            if let Some(frame) = self.control_flow.forever_stack.last_mut() {
-                frame.exit_requested = true;
-            } else {
+            if self.control_flow.forever_stack.is_empty() {
                 self.report_error(ErrorKind::BadExitIf, "No loop is in progress");
+                // Expect `;` after the condition
+                if self.cur.command == Command::Semicolon {
+                    self.get_next();
+                    self.expand_current();
+                }
+            } else {
+                // Premature exit: pop input levels until the loop body level
+                // is found, then pop the loop frame (mp.web §13020-13030).
+                self.input.pop_to_loop_body();
+                self.control_flow.forever_stack.pop();
+                self.get_next();
+                self.expand_current();
             }
-        }
-
-        // Expect `;` after the condition
-        if self.cur.command == Command::Semicolon {
-            self.get_next();
-            self.expand_current();
+        } else {
+            // Condition was false — expect `;` after the condition and continue
+            if self.cur.command == Command::Semicolon {
+                self.get_next();
+                self.expand_current();
+            }
         }
     }
 

@@ -91,6 +91,9 @@ enum InputLevel {
         pos: usize,
         /// Parameters for macro expansion.
         params: Vec<TokenList>,
+        /// Whether this is a loop body iteration (forever/for/forsuffixes).
+        /// Used by `exitif` to find and pop the current loop's input level.
+        is_loop_body: bool,
     },
 }
 
@@ -153,7 +156,46 @@ impl InputSystem {
             tokens,
             pos: 0,
             params,
+            is_loop_body: false,
         });
+    }
+
+    /// Push a token list that is a loop body iteration.
+    ///
+    /// Marked so that `exitif` can find and pop it during premature exit.
+    pub fn push_loop_body(&mut self, tokens: TokenList, params: Vec<TokenList>) {
+        self.levels.push(InputLevel::TokenList {
+            tokens,
+            pos: 0,
+            params,
+            is_loop_body: true,
+        });
+    }
+
+    /// Pop input levels until a loop body level is found and removed.
+    ///
+    /// This implements `MetaPost`'s premature loop exit: when `exitif` fires,
+    /// all intervening token list levels (macro expansions, backed-up tokens,
+    /// etc.) are discarded until the loop body's input level is found and popped.
+    /// Source-file levels are never removed.
+    ///
+    /// Returns `true` if a loop body level was found and removed.
+    pub fn pop_to_loop_body(&mut self) -> bool {
+        // Also clear any backed-up token
+        self.backed_up = None;
+        while let Some(level) = self.levels.last() {
+            match level {
+                InputLevel::Source { .. } => return false,
+                InputLevel::TokenList { is_loop_body, .. } => {
+                    let is_body = *is_loop_body;
+                    self.levels.pop();
+                    if is_body {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
     }
 
     /// Push a token back into the input stream.
@@ -245,6 +287,7 @@ impl InputSystem {
                         tokens: param_tokens,
                         pos: 0,
                         params: Vec::new(),
+                        is_loop_body: false,
                     });
                 }
             }
