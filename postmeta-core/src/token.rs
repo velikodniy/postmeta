@@ -87,6 +87,12 @@ pub enum TokenKind {
     /// Contains the text between the quotes (no escape processing).
     StringLit(String),
 
+    /// A capsule token carrying an already-evaluated expression.
+    ///
+    /// Used internally when the expression parser pushes a value back into
+    /// the input stream. Avoids allocating a `String` for the display name.
+    Capsule,
+
     /// End of input.
     Eof,
 }

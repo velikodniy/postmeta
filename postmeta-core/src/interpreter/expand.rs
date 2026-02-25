@@ -5,9 +5,11 @@
 //! (`def`/`vardef`/`primarydef`/`secondarydef`/`tertiarydef`), macro
 //! expansion, `input`, and `scantokens`.
 
+use std::sync::Arc;
+
 use crate::command::{Command, FiOrElseOp, IterationOp, MacroDefOp, MacroSpecialOp, ParamTypeOp};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::input::{CapsulePayload, StoredToken, TokenList};
+use crate::input::{CapsulePayload, SharedTokenList, StoredToken, TokenList};
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
@@ -38,8 +40,10 @@ pub(super) enum IfState {
 /// Only accessed by the expansion code in this module.
 #[derive(Debug, Clone)]
 pub(super) struct ForeverLoopFrame {
-    /// Loop body tokens replayed by `RepeatLoop`.
-    pub body: TokenList,
+    /// Loop body tokens replayed by `RepeatLoop`, with the `RepeatLoop`
+    /// sentinel already appended.  Stored as `Arc` so re-iterations are
+    /// O(1) clones.
+    pub body: SharedTokenList,
     /// Set by `exitif` to stop replaying this frame.
     pub exit_requested: bool,
     /// Whether this is a `for`/`forsuffixes` loop (vs `forever`).
@@ -48,7 +52,7 @@ pub(super) struct ForeverLoopFrame {
     /// Remaining iteration parameter lists for `for`/`forsuffixes` loops,
     /// stored in reverse order so that `Vec::pop()` yields the next iteration.
     /// `forever` loops leave this empty (they replay unconditionally).
-    pub remaining_iterations: Vec<TokenList>,
+    pub remaining_iterations: Vec<SharedTokenList>,
 }
 
 #[derive(Debug)]
@@ -124,8 +128,11 @@ pub(super) struct MacroInfo {
     /// Delimited parameter group for each parameter.
     /// `u16::MAX` means the parameter is undelimited.
     pub(super) param_groups: Vec<u16>,
-    /// The macro body as a token list.
-    pub(super) body: TokenList,
+    /// The macro body as a shared token list.
+    ///
+    /// Stored as `Arc` so that expansion clones are O(1).  For vardefs,
+    /// `begingroup`/`endgroup` tokens are pre-baked at definition time.
+    pub(super) body: SharedTokenList,
     /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
     pub(super) is_vardef: bool,
     /// Whether this vardef has an `@#` suffix parameter.
@@ -355,9 +362,8 @@ impl Interpreter {
         self.get_next(); // skip `for`/`forsuffixes`
 
         // Get the loop variable name
-        let loop_var_name = if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind
-        {
-            name.clone()
+        let loop_var_name = if let Some(name) = self.cur_symbolic_name() {
+            name.to_owned()
         } else {
             self.report_error(ErrorKind::MissingToken, "Expected loop variable name");
             self.get_next();
@@ -393,7 +399,7 @@ impl Interpreter {
         // with `Param(0)`.  This mirrors how macro bodies substitute
         // parameter names, and ensures that `for`/`forsuffixes` work as
         // token-level substitution (mp.web §13694).
-        let body = self.scan_loop_body_with_param(loop_var_sym);
+        let mut body = self.scan_loop_body_with_param(loop_var_sym);
 
         if value_token_lists.is_empty() {
             // No iterations — skip the loop entirely.
@@ -414,16 +420,9 @@ impl Interpreter {
             return;
         };
         // Store remaining in reverse so Vec::pop() yields the next iteration.
-        let mut remaining: Vec<TokenList> = iter.collect();
-        remaining.reverse();
+        let remaining: Vec<SharedTokenList> = iter.map(Into::into).rev().collect();
 
-        self.control_flow.forever_stack.push(ForeverLoopFrame {
-            body: body.clone(),
-            exit_requested: false,
-            is_for_loop: true,
-            remaining_iterations: remaining,
-        });
-
+        // Append RepeatLoop sentinel to the body and freeze as Arc.
         let repeat_sym = self.symbols.lookup("__repeat_loop__");
         self.symbols.set(
             repeat_sym,
@@ -432,9 +431,17 @@ impl Interpreter {
                 modifier: 0,
             },
         );
-        let mut iteration = body;
-        iteration.push(StoredToken::Symbol(repeat_sym));
-        self.input.push_loop_body(iteration, vec![first_params]);
+        body.push(StoredToken::Symbol(repeat_sym));
+        let body: SharedTokenList = body.into();
+
+        self.control_flow.forever_stack.push(ForeverLoopFrame {
+            body: Arc::clone(&body),
+            exit_requested: false,
+            is_for_loop: true,
+            remaining_iterations: remaining,
+        });
+
+        self.input.push_loop_body(body, vec![first_params.into()]);
 
         // Get the first token and continue expanding
         self.get_next();
@@ -454,20 +461,8 @@ impl Interpreter {
             self.get_next();
         }
 
-        // Scan the loop body
-        let body = self.scan_loop_body();
-
-        // Push a new forever-loop frame. Nested forever loops are handled
-        // by stack discipline, so each loop replays its own body.
-        self.control_flow.forever_stack.push(ForeverLoopFrame {
-            body: body.clone(),
-            exit_requested: false,
-            is_for_loop: false,
-            remaining_iterations: Vec::new(),
-        });
-
-        // Push the first iteration with a RepeatLoop sentinel at the end
-        let mut iteration = body;
+        // Scan the loop body, append RepeatLoop sentinel, and freeze.
+        let mut body = self.scan_loop_body();
         let repeat_sym = self.symbols.lookup("__repeat_loop__");
         self.symbols.set(
             repeat_sym,
@@ -476,8 +471,20 @@ impl Interpreter {
                 modifier: 0,
             },
         );
-        iteration.push(StoredToken::Symbol(repeat_sym));
-        self.input.push_loop_body(iteration, Vec::new());
+        body.push(StoredToken::Symbol(repeat_sym));
+        let body: SharedTokenList = body.into();
+
+        // Push a new forever-loop frame. Nested forever loops are handled
+        // by stack discipline, so each loop replays its own body.
+        self.control_flow.forever_stack.push(ForeverLoopFrame {
+            body: Arc::clone(&body),
+            exit_requested: false,
+            is_for_loop: false,
+            remaining_iterations: Vec::new(),
+        });
+
+        // Push the first iteration
+        self.input.push_loop_body(body, Vec::new());
 
         // Get the first token and continue — the RepeatLoop sentinel will
         // be caught by expand_current and re-push the body.
@@ -504,22 +511,17 @@ impl Interpreter {
             if frame.is_for_loop {
                 // `for`/`forsuffixes` loop — check for remaining iterations.
                 if let Some(params) = frame.remaining_iterations.pop() {
-                    let body = frame.body.clone();
-                    let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
-                    let mut iteration = body;
-                    iteration.push(StoredToken::Symbol(repeat_sym));
-                    self.state.input.push_loop_body(iteration, vec![params]);
+                    // Body already has RepeatLoop sentinel; Arc::clone is O(1).
+                    let body = Arc::clone(&frame.body);
+                    self.state.input.push_loop_body(body, vec![params]);
                 } else {
                     // No more iterations — loop is done.
                     self.control_flow.forever_stack.pop();
                 }
             } else {
                 // `forever` loop — replay unconditionally.
-                let body = frame.body.clone();
-                let repeat_sym = self.state.symbols.lookup("__repeat_loop__");
-                let mut iteration = body;
-                iteration.push(StoredToken::Symbol(repeat_sym));
-                self.state.input.push_loop_body(iteration, Vec::new());
+                let body = Arc::clone(&frame.body);
+                self.state.input.push_loop_body(body, Vec::new());
             }
         }
 
@@ -845,11 +847,7 @@ impl Interpreter {
             self.skip_to_enddef();
             return Ok(());
         };
-        let macro_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
-        } else {
-            String::new()
-        };
+        let macro_name = self.cur_symbolic_name().unwrap_or("").to_owned();
 
         self.get_next(); // skip macro name
 
@@ -888,6 +886,19 @@ impl Interpreter {
             param_types.push(ParamType::UndelimitedSuffix);
             param_groups.push(u16::MAX);
         }
+
+        // For vardefs, pre-bake begingroup/endgroup into the body.
+        let body: SharedTokenList = if is_vardef {
+            let bg = self.symbols.lookup("begingroup");
+            let eg = self.symbols.lookup("endgroup");
+            let mut wrapped = Vec::with_capacity(body.len() + 2);
+            wrapped.push(StoredToken::Symbol(bg));
+            wrapped.extend(body);
+            wrapped.push(StoredToken::Symbol(eg));
+            wrapped.into()
+        } else {
+            body.into()
+        };
 
         // Store the macro
         let info = MacroInfo {
@@ -933,8 +944,8 @@ impl Interpreter {
     /// Syntax: `primarydef <lhs_param> <op_name> <rhs_param> = body enddef`
     fn do_binary_macro_def(&mut self, def_op: MacroDefOp) -> InterpResult<()> {
         // Parse: <lhs_param> <op_name> <rhs_param>
-        let lhs_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
+        let lhs_name = if let Some(s) = self.cur_symbolic_name() {
+            s.to_owned()
         } else {
             self.report_error(
                 ErrorKind::MissingToken,
@@ -955,8 +966,8 @@ impl Interpreter {
         };
         self.get_next(); // skip op name
 
-        let rhs_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
+        let rhs_name = if let Some(s) = self.cur_symbolic_name() {
+            s.to_owned()
         } else {
             self.report_error(
                 ErrorKind::MissingToken,
@@ -979,7 +990,7 @@ impl Interpreter {
         let info = MacroInfo {
             params: vec![ParamType::Expr, ParamType::Expr],
             param_groups: vec![u16::MAX, u16::MAX],
-            body,
+            body: body.into(),
             is_vardef: false,
             has_at_suffix: false,
         };
@@ -1048,10 +1059,12 @@ impl Interpreter {
                         current_delimited_type
                     };
 
-                    // Get the parameter name
-                    let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
-                    {
-                        s.clone()
+                    // Get the parameter name.
+                    // Can't use map_or_else: cur_symbolic_name borrows self,
+                    // but report_error needs &mut self.
+                    #[allow(clippy::option_if_let_else)]
+                    let name = if let Some(s) = self.cur_symbolic_name() {
+                        s.to_owned()
                     } else {
                         self.report_error(ErrorKind::MissingToken, "Expected parameter name");
                         String::new()
@@ -1080,12 +1093,10 @@ impl Interpreter {
             let pt = Self::undelimited_param_type(self.cur.modifier);
             self.get_next(); // skip type keyword
 
-            let name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                s.clone()
-            } else {
+            let name = self.cur_symbolic_name().unwrap_or("").to_owned();
+            if name.is_empty() {
                 self.report_error(ErrorKind::MissingToken, "Expected parameter name");
-                String::new()
-            };
+            }
             self.get_next();
 
             params.push((name, pt, u16::MAX));
@@ -1093,12 +1104,7 @@ impl Interpreter {
             // Check for `of <name>` pattern (e.g., `expr t of p`)
             if self.cur.command == Command::OfToken {
                 self.get_next(); // skip `of`
-                let of_name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind
-                {
-                    s.clone()
-                } else {
-                    String::new()
-                };
+                let of_name = self.cur_symbolic_name().unwrap_or("").to_owned();
                 self.get_next();
                 params.push((of_name, ParamType::OfPrimary, u16::MAX));
             }
@@ -1237,7 +1243,7 @@ impl Interpreter {
                     // (inside nested def..enddef too), matching mp.web behaviour.
                     // The depth counter only tracks def/enddef pairs to find the
                     // outer body boundary.
-                    if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
+                    if let Some(name) = self.cur_symbolic_name() {
                         if let Some(idx) = param_names.iter().position(|p| p == name) {
                             body.push(StoredToken::Param(idx));
                             self.get_next();
@@ -1300,12 +1306,13 @@ impl Interpreter {
         self.store_current_token(&mut saved);
         if !saved.is_empty() {
             self.input
-                .push_token_list(saved, Vec::new(), "binary-mac-saved".into());
+                .push_token_list(saved, Vec::new(), "binary-mac-saved");
         }
 
         // Push the body on top — it will be read before the saved token.
+        let args: Vec<SharedTokenList> = args.into_iter().map(Into::into).collect();
         self.input
-            .push_token_list(macro_info.body, args, "binary macro".into());
+            .push_token_list(Arc::clone(&macro_info.body), args, "binary macro");
 
         // Get next token from expansion and evaluate the body
         self.get_x_next();
@@ -1537,24 +1544,15 @@ impl Interpreter {
             self.store_current_token(&mut trailing);
             if !trailing.is_empty() {
                 self.input
-                    .push_token_list(trailing, Vec::new(), "trailing token".into());
+                    .push_token_list(trailing, Vec::new(), "trailing token");
             }
         }
 
-        // Build the expansion token list
-        let mut expansion = macro_info.body.clone();
-
-        // For vardef, wrap in begingroup/endgroup
-        if macro_info.is_vardef {
-            let bg = self.symbols.lookup("begingroup");
-            let eg = self.symbols.lookup("endgroup");
-            expansion.insert(0, StoredToken::Symbol(bg));
-            expansion.push(StoredToken::Symbol(eg));
-        }
-
-        // Push the body expansion on top of the trailing token level
+        // Push the body expansion on top of the trailing token level.
+        // begingroup/endgroup are pre-baked for vardefs; Arc::clone is O(1).
+        let args: Vec<SharedTokenList> = args.into_iter().map(Into::into).collect();
         self.input
-            .push_token_list(expansion, args, "macro expansion".into());
+            .push_token_list(Arc::clone(&macro_info.body), args, "macro expansion");
 
         true
     }
@@ -1581,7 +1579,9 @@ impl Interpreter {
 
         // Get the filename from the next token
         let filename = match &self.cur.token.kind {
-            crate::token::TokenKind::Symbolic(s) => s.clone(),
+            crate::token::TokenKind::Symbolic(_) => {
+                self.cur_symbolic_name().unwrap_or("").to_owned()
+            }
             crate::token::TokenKind::StringLit(s) => s.clone(),
             _ => {
                 self.report_error(ErrorKind::MissingToken, "Expected filename after `input`");
@@ -1628,12 +1628,16 @@ impl Interpreter {
                 _ => {
                     // Reconstruct text from token content.
                     match &self.cur.token.kind {
-                        crate::token::TokenKind::Symbolic(s) => parts.push(s.clone()),
+                        crate::token::TokenKind::Symbolic(_) => {
+                            if let Some(name) = self.cur_symbolic_name() {
+                                parts.push(name.to_owned());
+                            }
+                        }
                         crate::token::TokenKind::Numeric(v) => parts.push(v.to_string()),
                         crate::token::TokenKind::StringLit(s) => {
                             parts.push(format!("\"{s}\""));
                         }
-                        crate::token::TokenKind::Eof => break,
+                        crate::token::TokenKind::Capsule | crate::token::TokenKind::Eof => break,
                     }
                 }
             }
@@ -1705,7 +1709,7 @@ impl Interpreter {
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
                     self.input
-                        .push_token_list(saved, Vec::new(), "scantokens-saved".into());
+                        .push_token_list(saved, Vec::new(), "scantokens-saved");
                 }
 
                 if !source.is_empty() {
@@ -1749,7 +1753,7 @@ impl Interpreter {
             crate::token::TokenKind::Symbolic(_) => self.cur.sym.map(StoredToken::Symbol),
             crate::token::TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
             crate::token::TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
-            crate::token::TokenKind::Eof => None,
+            crate::token::TokenKind::Capsule | crate::token::TokenKind::Eof => None,
         }
     }
 
@@ -1793,14 +1797,14 @@ impl Interpreter {
             self.store_current_token(&mut saved_b);
             if !saved_b.is_empty() {
                 self.input
-                    .push_token_list(saved_b, Vec::new(), "expandafter-b".into());
+                    .push_token_list(saved_b, Vec::new(), "expandafter-b");
             }
         }
 
         // Push A in front of whatever B produced.
         if !saved_a.is_empty() {
             self.input
-                .push_token_list(saved_a, Vec::new(), "expandafter-a".into());
+                .push_token_list(saved_a, Vec::new(), "expandafter-a");
         }
 
         // Do NOT call get_next/expand_current — caller handles continuation.
@@ -1828,7 +1832,7 @@ impl Interpreter {
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
                     self.input
-                        .push_token_list(saved, Vec::new(), "expandafter-if".into());
+                        .push_token_list(saved, Vec::new(), "expandafter-if");
                 }
             }
             Command::Input => {
@@ -1837,7 +1841,7 @@ impl Interpreter {
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
                     self.input
-                        .push_token_list(saved, Vec::new(), "expandafter-input".into());
+                        .push_token_list(saved, Vec::new(), "expandafter-input");
                 }
             }
             _ => {
@@ -1849,7 +1853,7 @@ impl Interpreter {
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
                     self.input
-                        .push_token_list(saved, Vec::new(), "expandafter-other".into());
+                        .push_token_list(saved, Vec::new(), "expandafter-other");
                 }
             }
         }

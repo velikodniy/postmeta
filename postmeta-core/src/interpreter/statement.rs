@@ -214,8 +214,8 @@ impl Interpreter {
 
         loop {
             // Expect a variable name (possibly compound with suffixes)
-            if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
-                let mut name = name.clone();
+            if let Some(sym_name) = self.cur_symbolic_name() {
+                let mut name = sym_name.to_owned();
                 let root_sym = self.cur.sym;
                 let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
@@ -246,12 +246,10 @@ impl Interpreter {
                         || self.cur.command == Command::InternalQuantity
                     {
                         // Suffix part (e.g. `l` in `path_.l`, `lft` in `laboff.lft`)
-                        if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                            if let Some(sym) = self.cur.sym {
-                                suffix_segs.push(SuffixSegment::Attr(sym));
-                            }
+                        if let Some(sym) = self.cur.sym {
+                            suffix_segs.push(SuffixSegment::Attr(sym));
                             name.push('.');
-                            name.push_str(s);
+                            name.push_str(self.symbols.name(sym));
                         }
                         self.get_next();
                     } else {
@@ -545,9 +543,9 @@ impl Interpreter {
             || self.cur.command == Command::DefinedMacro
             || self.cur.command == Command::InternalQuantity
         {
-            if let crate::token::TokenKind::Symbolic(ref suffix) = self.cur.token.kind {
+            if let Some(s) = self.cur_symbolic_name() {
                 name.push('.');
-                name.push_str(suffix);
+                name.push_str(s);
             }
             self.get_next();
         }
@@ -763,8 +761,7 @@ impl Interpreter {
         self.get_x_next();
 
         loop {
-            if let crate::token::TokenKind::Symbolic(ref name) = self.cur.token.kind {
-                let name = name.clone();
+            if let Some(name) = self.cur_symbolic_name().map(str::to_owned) {
                 // Register the new internal
                 let Some(idx) = self.internals.new_internal(&name) else {
                     self.report_error(

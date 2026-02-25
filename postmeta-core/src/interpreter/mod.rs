@@ -331,7 +331,9 @@ impl Interpreter {
     fn get_x_next(&mut self) {
         // Expansion is token-oriented; it should not overwrite the current
         // expression value that the parser may already have computed.
-        let saved = self.cur_expr.clone();
+        // Use take+restore instead of clone to avoid deep-copying expensive
+        // values (paths, pictures, dep lists).
+        let saved = std::mem::replace(&mut self.cur_expr, ExprResultValue::vacuous());
         self.get_next();
         self.expand_current();
         self.cur_expr = saved;
@@ -385,7 +387,7 @@ impl Interpreter {
             crate::token::TokenKind::StringLit(s) => {
                 list.push(StoredToken::StringLit(s.clone()));
             }
-            crate::token::TokenKind::Eof => {}
+            crate::token::TokenKind::Capsule | crate::token::TokenKind::Eof => {}
         }
     }
 
@@ -418,11 +420,7 @@ impl Interpreter {
     }
 
     fn cur_symbolic_name(&self) -> Option<&str> {
-        if let crate::token::TokenKind::Symbolic(name) = &self.cur.token.kind {
-            Some(name)
-        } else {
-            None
-        }
+        self.cur.sym.map(|id| self.symbols.name(id))
     }
 
     fn alloc_pair_value(&mut self, name: &str) -> VarValue {

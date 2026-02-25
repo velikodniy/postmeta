@@ -578,12 +578,10 @@ impl Interpreter {
                 && (self.cur.command == Command::TagToken
                     || self.cur.command == Command::InternalQuantity)
             {
-                if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-                    if let Some(sym) = self.cur.sym {
-                        suffix_segs.push(SuffixSegment::Attr(sym));
-                    }
+                if let Some(sym) = self.cur.sym {
+                    suffix_segs.push(SuffixSegment::Attr(sym));
                     name.push('.');
-                    name.push_str(s);
+                    name.push_str(self.symbols.name(sym));
                 }
                 has_suffixes = true;
                 self.get_x_next();
@@ -622,7 +620,7 @@ impl Interpreter {
                     })];
                     self.store_current_token(&mut tl);
                     self.input
-                        .push_token_list(tl, Vec::new(), "mediation backtrack".into());
+                        .push_token_list(tl, Vec::new(), "mediation backtrack");
                     self.cur.command = Command::LeftBracket;
                     break;
                 }
@@ -638,7 +636,7 @@ impl Interpreter {
             self.store_current_token(&mut trailing);
             if !trailing.is_empty() {
                 self.input
-                    .push_token_list(trailing, Vec::new(), "vardef trailing".into());
+                    .push_token_list(trailing, Vec::new(), "vardef trailing");
             }
             self.cur.command = Command::DefinedMacro;
             self.cur.sym = root_sym;
@@ -651,8 +649,8 @@ impl Interpreter {
 
     /// Parse suffix text after `str` and return its string form.
     fn scan_str_suffix(&mut self) -> InterpResult<String> {
-        let mut name = if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
-            s.clone()
+        let mut name = if let Some(s) = self.cur_symbolic_name() {
+            s.to_owned()
         } else {
             return Ok(String::new());
         };
@@ -662,7 +660,7 @@ impl Interpreter {
             if self.cur.command == Command::TagToken
                 || self.cur.command == Command::InternalQuantity
             {
-                if let crate::token::TokenKind::Symbolic(ref s) = self.cur.token.kind {
+                if let Some(s) = self.cur_symbolic_name() {
                     name.push('.');
                     name.push_str(s);
                 }

@@ -5,6 +5,8 @@
 //! bodies, and `scantokens` strings. These are managed as a stack of
 //! input levels, matching `mp.web`'s input stack.
 
+use std::sync::Arc;
+
 use crate::command::Command;
 use crate::equation::DepList;
 use crate::scanner::ScanError;
@@ -69,8 +71,15 @@ pub enum StoredToken {
     Capsule(CapsulePayload),
 }
 
-/// A token list (macro body, loop body, etc.).
+/// A mutable token list used while building macro/loop bodies.
 pub type TokenList = Vec<StoredToken>;
+
+/// A shared, immutable token list for efficient cloning.
+///
+/// Macro bodies, loop bodies, and parameter token lists are cloned on
+/// every invocation. Using `Arc` makes those clones O(1) reference-count
+/// increments instead of O(n) deep copies.
+pub type SharedTokenList = Arc<[StoredToken]>;
 
 // ---------------------------------------------------------------------------
 // Input level
@@ -85,12 +94,12 @@ enum InputLevel {
     },
     /// Reading from a token list (macro body, loop, scantokens).
     TokenList {
-        /// The tokens to read.
-        tokens: TokenList,
+        /// The tokens to read (shared via `Arc` for cheap cloning).
+        tokens: SharedTokenList,
         /// Current position in the list.
         pos: usize,
-        /// Parameters for macro expansion.
-        params: Vec<TokenList>,
+        /// Parameters for macro expansion (shared via `Arc`).
+        params: Vec<SharedTokenList>,
         /// Whether this is a loop body iteration (forever/for/forsuffixes).
         /// Used by `exitif` to find and pop the current loop's input level.
         is_loop_body: bool,
@@ -110,7 +119,7 @@ enum LevelAction {
     /// Skip current stored token and continue reading same level.
     Continue,
     /// A parameter expansion needs to be pushed.
-    PushParam(TokenList, usize),
+    PushParam(SharedTokenList, usize),
 }
 
 /// The token input system, managing a stack of input sources.
@@ -151,9 +160,14 @@ impl InputSystem {
     }
 
     /// Push a token list as a new input level (for macro expansion).
-    pub fn push_token_list(&mut self, tokens: TokenList, params: Vec<TokenList>, _name: String) {
+    pub fn push_token_list(
+        &mut self,
+        tokens: impl Into<SharedTokenList>,
+        params: Vec<SharedTokenList>,
+        _name: &'static str,
+    ) {
         self.levels.push(InputLevel::TokenList {
-            tokens,
+            tokens: tokens.into(),
             pos: 0,
             params,
             is_loop_body: false,
@@ -163,7 +177,7 @@ impl InputSystem {
     /// Push a token list that is a loop body iteration.
     ///
     /// Marked so that `exitif` can find and pop it during premature exit.
-    pub fn push_loop_body(&mut self, tokens: TokenList, params: Vec<TokenList>) {
+    pub fn push_loop_body(&mut self, tokens: SharedTokenList, params: Vec<SharedTokenList>) {
         self.levels.push(InputLevel::TokenList {
             tokens,
             pos: 0,
@@ -216,7 +230,8 @@ impl InputSystem {
         if let Some(prev) = self.backed_up.take()
             && let Some(stored) = resolved_to_stored_token(&prev)
         {
-            self.push_token_list(vec![stored], Vec::new(), "backed-up spill".into());
+            let tokens: SharedTokenList = vec![stored].into();
+            self.push_token_list(tokens, Vec::new(), "backed-up spill");
         }
         self.backed_up = Some(token);
     }
@@ -235,16 +250,14 @@ impl InputSystem {
         dep: Option<DepList>,
         pair_dep: Option<(DepList, DepList)>,
     ) {
-        self.push_token_list(
-            vec![StoredToken::Capsule(CapsulePayload {
-                value,
-                ty,
-                dep,
-                pair_dep,
-            })],
-            Vec::new(),
-            "backed-up expr".into(),
-        );
+        let tokens: SharedTokenList = vec![StoredToken::Capsule(CapsulePayload {
+            value,
+            ty,
+            dep,
+            pair_dep,
+        })]
+        .into();
+        self.push_token_list(tokens, Vec::new(), "backed-up expr");
     }
 
     /// Get the next raw token from the input.
@@ -326,12 +339,14 @@ impl InputSystem {
                     StoredToken::Symbol(id) => {
                         let id = *id;
                         let entry = symbols.get(id);
+                        // Avoid allocating a String for the name on the hot path.
+                        // Consumers that need the name use `symbols.name(sym)`.
                         LevelAction::Token(ResolvedToken {
                             command: entry.command,
                             modifier: entry.modifier,
                             sym: Some(id),
                             token: Token {
-                                kind: TokenKind::Symbolic(symbols.name(id).to_owned()),
+                                kind: TokenKind::Symbolic(String::new()),
                                 span: crate::token::Span::at(0),
                             },
                             capsule: None,
@@ -370,7 +385,7 @@ impl InputSystem {
                             modifier: 0,
                             sym: None,
                             token: Token {
-                                kind: TokenKind::Symbolic("<capsule>".to_owned()),
+                                kind: TokenKind::Capsule,
                                 span: crate::token::Span::at(0),
                             },
                             capsule: Some(payload),
@@ -437,7 +452,7 @@ fn resolve_token(token: &Token, symbols: &mut SymbolTable) -> ResolvedToken {
             token: token.clone(),
             capsule: None,
         },
-        TokenKind::Eof => ResolvedToken {
+        TokenKind::Capsule | TokenKind::Eof => ResolvedToken {
             command: Command::Stop,
             modifier: 0,
             sym: None,
@@ -459,7 +474,7 @@ fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
         TokenKind::Symbolic(_) => tok.sym.map(StoredToken::Symbol),
         TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
         TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
-        TokenKind::Eof => None,
+        TokenKind::Capsule | TokenKind::Eof => None,
     }
 }
 
@@ -497,7 +512,7 @@ mod tests {
 
         let x_id = symbols.lookup("x");
         let tokens = vec![StoredToken::Symbol(x_id), StoredToken::Numeric(42.0)];
-        input.push_token_list(tokens, Vec::new(), "test".into());
+        input.push_token_list(tokens, Vec::new(), "test");
 
         let t1 = input.next_raw_token(&mut symbols);
         assert_eq!(t1.command, Command::TagToken);
@@ -745,8 +760,8 @@ mod tests {
                 StoredToken::Symbol(x),
                 StoredToken::Symbol(y),
             ],
-            vec![vec![StoredToken::Numeric(7.0)]],
-            "bad param ref".into(),
+            vec![SharedTokenList::from(vec![StoredToken::Numeric(7.0)])],
+            "bad param ref",
         );
 
         // Invalid Param(1) should be skipped, not pop the whole level.
