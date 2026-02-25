@@ -65,7 +65,7 @@ impl Interpreter {
             Command::ModeCommand => self.do_mode_command(),
             Command::RandomSeed => self.do_randomseed(),
             Command::EveryJob => self.do_unimplemented_statement("everyjob"),
-            Command::Special => self.do_unimplemented_statement("special"),
+            Command::Special => self.do_special(),
             Command::Write => self.do_unimplemented_statement("write"),
             Command::DoubleColon => {
                 self.report_error(ErrorKind::UnexpectedToken, "Unexpected `::`");
@@ -852,6 +852,31 @@ impl Interpreter {
                 ErrorKind::TypeError,
                 "randomseed must be a finite numeric value",
             );
+        }
+
+        self.eat_semicolon();
+        Ok(())
+    }
+
+    fn do_special(&mut self) -> InterpResult<()> {
+        // PostScript specials are ignored by the SVG backend.
+        self.get_x_next();
+
+        // Parse and discard the payload expression if present.
+        if self.cur.command != Command::Semicolon
+            && self.cur.command != Command::Stop
+            && self.cur.command != Command::EndGroup
+        {
+            self.lhs_tracking.equals_means_equation = false;
+            if let Err(err) = self.scan_expression() {
+                self.errors.push(err);
+                while self.cur.command != Command::Semicolon
+                    && self.cur.command != Command::Stop
+                    && self.cur.command != Command::EndGroup
+                {
+                    self.get_x_next();
+                }
+            }
         }
 
         self.eat_semicolon();

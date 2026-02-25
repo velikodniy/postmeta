@@ -3994,7 +3994,7 @@ fn randomseed_statement_sets_seed() {
 }
 
 #[test]
-fn special_statement_reports_unimplemented() {
+fn special_statement_is_accepted_as_noop() {
     let mut interp = Interpreter::new();
     interp.run("special \"x\";").unwrap();
 
@@ -4004,10 +4004,8 @@ fn special_statement_reports_unimplemented() {
         .filter(|e| e.severity == crate::error::Severity::Error)
         .collect();
     assert!(
-        errors
-            .iter()
-            .any(|e| e.kind == crate::error::ErrorKind::InvalidExpression),
-        "expected unimplemented diagnostic, got: {errors:?}"
+        errors.is_empty(),
+        "expected no diagnostics, got: {errors:?}"
     );
 }
 
