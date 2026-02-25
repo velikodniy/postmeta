@@ -587,6 +587,54 @@ impl Interpreter {
         self.variables.set(var_id, val);
     }
 
+    /// Fast path for root-only variable references. Avoids String allocation
+    /// entirely when the sym cache hits.
+    fn resolve_variable_root(&mut self, sym: Option<SymbolId>) -> InterpResult<ExprResultValue> {
+        let var_id = if let Some(s) = sym {
+            // Try the sym cache first — no string allocation needed on hit.
+            let idx = s.raw() as usize;
+            let cached = if idx < self.variables.sym_cache.len() {
+                let c = self.variables.sym_cache[idx];
+                if c == Variables::SYM_CACHE_EMPTY {
+                    None
+                } else {
+                    Some(c)
+                }
+            } else {
+                None
+            };
+            if let Some(id) = cached {
+                id
+            } else {
+                // Cache miss — need the name string for HashMap lookup.
+                let name = self.symbols.name(s).to_owned();
+                self.variables.lookup_by_sym(s, &name)
+            }
+        } else {
+            // No symbol — shouldn't happen for tag tokens, but handle gracefully.
+            self.variables.lookup("")
+        };
+        // For root-only lookups, initialize_declared_variable needs the name
+        // only when creating compound sub-parts (pair.x, pair.y, etc.).
+        // Check if initialization is needed before allocating the name.
+        let needs_init = matches!(
+            self.variables.get(var_id),
+            VarValue::Undefined
+                | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
+        );
+        if needs_init {
+            if let Some(s) = sym {
+                let name = self.symbols.name(s).to_owned();
+                self.initialize_declared_variable(var_id, &name, sym, &[]);
+            }
+        }
+        self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
+            id: var_id,
+            negated: false,
+        });
+        self.resolve_var_id(var_id)
+    }
+
     /// Resolve a variable name to its value, returning the result.
     fn resolve_variable(
         &mut self,
@@ -594,46 +642,67 @@ impl Interpreter {
         name: &str,
         suffixes: &[SuffixSegment],
     ) -> InterpResult<ExprResultValue> {
-        let var_id = self.variables.lookup(name);
+        let var_id = if suffixes.is_empty() {
+            if let Some(s) = sym {
+                self.variables.lookup_by_sym(s, name)
+            } else {
+                self.variables.lookup(name)
+            }
+        } else {
+            self.variables.lookup(name)
+        };
         self.initialize_declared_variable(var_id, name, sym, suffixes);
         // Track last scanned variable for assignment LHS
         self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
             id: var_id,
             negated: false,
         });
+        self.resolve_var_id(var_id)
+    }
 
-        let result = match self.variables.get(var_id).clone() {
-            VarValue::Known(v) => {
-                let ty = v.ty();
-                let dep = match &v {
-                    Value::Numeric(n) => Some(const_dep(*n)),
-                    _ => None,
-                };
-                let pair_dep = if let Value::Pair(x, y) = &v {
-                    Some((const_dep(*x), const_dep(*y)))
-                } else {
-                    None
-                };
-                ExprResultValue {
-                    exp: v,
-                    ty,
-                    dep,
-                    pair_dep,
-                }
-            }
-            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue::numeric_known(v),
+    /// Turn a `VarId` into an `ExprResultValue` by reading the stored value.
+    ///
+    /// Borrows the variable storage to avoid cloning until actually needed.
+    fn resolve_var_id(&mut self, var_id: VarId) -> InterpResult<ExprResultValue> {
+        // Match on a borrow first to extract Copy data without cloning.
+        // Only clone for variants that need owned data (Known with heap values,
+        // Dependent with DepList).
+        let result = match self.variables.get(var_id) {
+            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue::numeric_known(*v),
             VarValue::NumericVar(NumericState::Independent { .. }) => {
                 ExprResultValue::numeric_independent(var_id)
             }
             VarValue::NumericVar(NumericState::Dependent(dep)) => {
-                ExprResultValue::numeric_dependent(dep)
+                ExprResultValue::numeric_dependent(dep.clone())
             }
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
                 self.variables.make_independent(var_id);
-                ExprResultValue::numeric_independent(var_id)
+                return Ok(ExprResultValue::numeric_independent(var_id));
+            }
+            VarValue::Known(Value::Numeric(v)) => ExprResultValue::numeric_known(*v),
+            VarValue::Known(Value::Pair(x, y)) => {
+                let (x, y) = (*x, *y);
+                ExprResultValue {
+                    exp: Value::Pair(x, y),
+                    ty: Type::PairType,
+                    dep: None,
+                    pair_dep: Some((const_dep(x), const_dep(y))),
+                }
+            }
+            VarValue::Known(v) => {
+                // Path, Pen, Picture, String, etc. — must clone.
+                let v = v.clone();
+                let ty = v.ty();
+                ExprResultValue {
+                    exp: v,
+                    ty,
+                    dep: None,
+                    pair_dep: None,
+                }
             }
             VarValue::Pair { x, y } => {
+                let (x, y) = (*x, *y);
                 let xv = self.variables.known_value(x).unwrap_or(0.0);
                 let yv = self.variables.known_value(y).unwrap_or(0.0);
                 ExprResultValue {
@@ -644,6 +713,7 @@ impl Interpreter {
                 }
             }
             VarValue::Color { r, g, b } => {
+                let (r, g, b) = (*r, *g, *b);
                 let rv = self.variables.known_value(r).unwrap_or(0.0);
                 let gv = self.variables.known_value(g).unwrap_or(0.0);
                 let bv = self.variables.known_value(b).unwrap_or(0.0);
@@ -657,7 +727,7 @@ impl Interpreter {
                 tyx,
                 tyy,
             } => {
-                let parts = [tx, ty, txx, txy, tyx, tyy]
+                let parts = [*tx, *ty, *txx, *txy, *tyx, *tyy]
                     .map(|id| self.variables.known_value(id).unwrap_or(0.0));
                 ExprResultValue::plain(Value::Transform(Transform {
                     tx: parts[0],

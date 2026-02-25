@@ -108,6 +108,13 @@ pub struct Variables {
     /// Enables O(k) lookup for `take_name_bindings_for_root` and
     /// `clear_name_bindings_for_root` instead of scanning all names.
     names_by_root: HashMap<String, HashSet<String>>,
+    /// `SymbolId` → `VarId` fast lookup for root-only variables.
+    ///
+    /// Indexed by `SymbolId::raw()`. Entries are `VarId(u32::MAX)` (sentinel)
+    /// when not cached. Only individual entries are invalidated (on save/restore
+    /// and type declarations), so the cache stays warm across scopes for
+    /// variables that are not re-bound.
+    pub(crate) sym_cache: Vec<VarId>,
 }
 
 impl Variables {
@@ -120,6 +127,7 @@ impl Variables {
             next_serial: 1,
             dep_index: HashMap::new(),
             names_by_root: HashMap::new(),
+            sym_cache: Vec::new(),
         }
     }
 
@@ -166,6 +174,36 @@ impl Variables {
         id
     }
 
+    /// Sentinel value for empty/invalid sym-cache slots.
+    pub const SYM_CACHE_EMPTY: VarId = VarId(u32::MAX);
+
+    /// Fast O(1) variable lookup by `SymbolId` for root-only variables.
+    ///
+    /// Uses a vec-indexed cache that avoids all string hashing. Falls back
+    /// to the standard string-based `lookup` on cache miss.
+    pub fn lookup_by_sym(&mut self, sym: SymbolId, name: &str) -> VarId {
+        let idx = sym.raw() as usize;
+        if idx < self.sym_cache.len() {
+            let cached = self.sym_cache[idx];
+            if cached != Self::SYM_CACHE_EMPTY {
+                return cached;
+            }
+        } else {
+            self.sym_cache.resize(idx + 64, Self::SYM_CACHE_EMPTY);
+        }
+        let id = self.lookup(name);
+        self.sym_cache[idx] = id;
+        id
+    }
+
+    /// Invalidate a single sym-cache entry for a specific symbol.
+    pub fn invalidate_sym_cache_entry(&mut self, sym: SymbolId) {
+        let idx = sym.raw() as usize;
+        if idx < self.sym_cache.len() {
+            self.sym_cache[idx] = Self::SYM_CACHE_EMPTY;
+        }
+    }
+
     /// Register a name for an existing variable id.
     ///
     /// Used when creating compound type sub-parts (e.g. `p.x`, `p.y` for a pair `p`).
@@ -181,6 +219,36 @@ impl Variables {
             self.remove_from_root_index(name);
         }
         result
+    }
+
+    /// Try the fast save path for a root variable.
+    ///
+    /// If the variable is root-only (no suffixed descendants), removes the
+    /// `name_to_id` entry and returns the `(root_name, VarId, old_value)`.
+    /// The caller pushes a `RootValueOnly` save entry.
+    ///
+    /// Returns `None` if the variable has descendants or doesn't exist,
+    /// in which case the caller should fall through to the slow path.
+    pub fn try_save_root_fast(&mut self, root: &str) -> Option<(String, VarId, VarValue)> {
+        // Check root-only: no suffixed descendants.
+        let has_descendants = self
+            .names_by_root
+            .get(root)
+            .is_some_and(|set| set.len() > 1);
+        if has_descendants {
+            return None;
+        }
+        // Remove name→id mapping so next reference creates a fresh variable.
+        // names_by_root is left untouched.
+        let (name, id) = self.name_to_id.remove_entry(root)?;
+        let value = std::mem::replace(&mut self.values[id.0 as usize], VarValue::Undefined);
+        Some((name, id, value))
+    }
+
+    /// Restore a root-only variable: put back both the value and the name→id mapping.
+    pub fn restore_root_value(&mut self, root: String, id: VarId, value: VarValue) {
+        self.values[id.0 as usize] = value;
+        self.name_to_id.insert(root, id);
     }
 
     /// Remove all bindings for a root name and its suffix/subscript descendants.
@@ -360,6 +428,33 @@ impl Variables {
         }
 
         self.values[idx] = value;
+    }
+
+    /// Take a variable's value, replacing it with `Undefined`.
+    ///
+    /// This is like `std::mem::take` — it moves the value out without cloning.
+    /// The dependency index is maintained: any dependent references from the old
+    /// value are removed.
+    pub fn take(&mut self, id: VarId) -> VarValue {
+        let idx = id.0 as usize;
+        if idx >= self.values.len() {
+            return VarValue::Undefined;
+        }
+        let old = std::mem::replace(&mut self.values[idx], VarValue::Undefined);
+        // Remove old dep-index entries.
+        if let VarValue::NumericVar(NumericState::Dependent(ref dep)) = old {
+            for term in dep {
+                if let Some(ref_id) = term.var_id {
+                    if let Some(set) = self.dep_index.get_mut(&ref_id) {
+                        set.remove(&id);
+                        if set.is_empty() {
+                            self.dep_index.remove(&ref_id);
+                        }
+                    }
+                }
+            }
+        }
+        old
     }
 
     /// Set a variable to a known value.
@@ -683,7 +778,19 @@ pub enum SaveEntry {
     /// Saved bindings for a root name and its descendants (`a`, `a[1]`, `a.x`, ...).
     NameBindings {
         root: String,
+        sym: crate::symbols::SymbolId,
         prev: Vec<(String, VarId)>,
+    },
+    /// Fast save for root-only variables (no suffixed descendants).
+    ///
+    /// Removes only the `name_to_id` mapping (not `names_by_root`),
+    /// so next reference creates a fresh variable. On restore, the
+    /// mapping is re-inserted and the old value restored.
+    RootValueOnly {
+        root: String,
+        sym: crate::symbols::SymbolId,
+        id: VarId,
+        value: VarValue,
     },
 }
 
@@ -727,8 +834,25 @@ impl SaveStack {
     }
 
     /// Save bindings for a root name and its descendants.
-    pub fn save_name_bindings(&mut self, root: String, prev: Vec<(String, VarId)>) {
-        self.entries.push(SaveEntry::NameBindings { root, prev });
+    pub fn save_name_bindings(&mut self, root: String, sym: SymbolId, prev: Vec<(String, VarId)>) {
+        self.entries
+            .push(SaveEntry::NameBindings { root, sym, prev });
+    }
+
+    /// Save a root-only variable (fast path — minimal `HashMap` churn).
+    pub fn save_root_value_only(
+        &mut self,
+        root: String,
+        sym: crate::symbols::SymbolId,
+        id: VarId,
+        value: VarValue,
+    ) {
+        self.entries.push(SaveEntry::RootValueOnly {
+            root,
+            sym,
+            id,
+            value,
+        });
     }
 
     /// Restore all entries back to the last boundary.

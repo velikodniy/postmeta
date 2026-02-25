@@ -262,6 +262,9 @@ impl Interpreter {
                 // Clear the variable and all its suffixed descendants so
                 // that re-declaring (e.g. `numeric t[]` inside a loop)
                 // resets subscripted forms like `t[0]`, `t[1]`, etc.
+                if let Some(sym) = root_sym {
+                    self.variables.invalidate_sym_cache_entry(sym);
+                }
                 self.variables.clear_variable_and_descendants(&name);
 
                 let var_id = self.variables.lookup(&name);
@@ -605,13 +608,31 @@ impl Interpreter {
     fn do_save(&mut self) -> InterpResult<()> {
         self.get_x_next();
         loop {
-            if let Some(id) = self.cur.sym {
-                let entry = self.symbols.get(id);
-                self.save_stack.save_symbol(id, entry);
-                let root = self.symbols.name(id).to_owned();
-                let prev = self.variables.take_name_bindings_for_root(&root);
-                self.save_stack.save_name_bindings(root, prev);
-                self.symbols.clear(id);
+            if let Some(sym_id) = self.cur.sym {
+                let entry = self.symbols.get(sym_id);
+                self.save_stack.save_symbol(sym_id, entry);
+
+                // Split borrows: access state fields directly to avoid
+                // Deref coercion that borrows all of self.state.
+                let root = self.state.symbols.name(sym_id);
+
+                // Fast path: root-only variable with no suffixed descendants.
+                // Avoids the full take_name_bindings_for_root cycle.
+                if let Some((root_name, var_id, value)) =
+                    self.state.variables.try_save_root_fast(root)
+                {
+                    self.state
+                        .save_stack
+                        .save_root_value_only(root_name, sym_id, var_id, value);
+                } else {
+                    // Slow path: variable has suffixed descendants — use full save.
+                    let root = root.to_owned();
+                    let prev = self.state.variables.take_name_bindings_for_root(&root);
+                    self.state.save_stack.save_name_bindings(root, sym_id, prev);
+                }
+
+                self.variables.invalidate_sym_cache_entry(sym_id);
+                self.symbols.clear(sym_id);
             }
             self.get_x_next();
             if self.cur.command != Command::Comma {
@@ -929,11 +950,21 @@ impl Interpreter {
                 SaveEntry::Symbol { id, entry } => {
                     self.symbols.set(id, entry);
                 }
-                SaveEntry::NameBindings { root, prev } => {
+                SaveEntry::NameBindings { root, sym, prev } => {
+                    self.variables.invalidate_sym_cache_entry(sym);
                     self.variables.clear_name_bindings_for_root(&root);
                     for (name, id) in prev {
                         self.variables.register_name(&name, id);
                     }
+                }
+                SaveEntry::RootValueOnly {
+                    root,
+                    sym,
+                    id,
+                    value,
+                } => {
+                    self.variables.invalidate_sym_cache_entry(sym);
+                    self.variables.restore_root_value(root, id, value);
                 }
                 SaveEntry::Boundary => {} // shouldn't happen
             }

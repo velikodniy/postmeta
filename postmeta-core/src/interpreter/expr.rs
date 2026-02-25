@@ -18,6 +18,7 @@ use crate::command::{
 };
 use crate::equation::{DepList, const_dep, constant_value, dep_add_scaled, dep_scale};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
+use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
@@ -569,11 +570,11 @@ impl Interpreter {
     fn scan_tag_token(&mut self) -> InterpResult<ExprResultValue> {
         // Variable reference — scan suffix parts to form compound name.
         let root_sym = self.cur.sym;
-        let mut name = self
-            .cur_symbolic_name()
-            .map_or_else(String::new, std::borrow::ToOwned::to_owned);
 
-        let mut has_suffixes = false;
+        // Defer String allocation: only build the name string when suffixes
+        // are found. For root-only variables (the common case in tight loops),
+        // resolve_variable uses lookup_by_sym which avoids string hashing.
+        let mut name: Option<String> = None;
         let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
         // Check early if this is a standalone vardef macro.
@@ -591,17 +592,17 @@ impl Interpreter {
             {
                 if let Some(sym) = self.cur.sym {
                     suffix_segs.push(SuffixSegment::Attr(sym));
-                    name.push('.');
-                    name.push_str(self.symbols.name(sym));
+                    let n = name.get_or_insert_with(|| self.cur_root_name(root_sym));
+                    n.push('.');
+                    n.push_str(self.symbols.name(sym));
                 }
-                has_suffixes = true;
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
-                    write_subscript_key(&mut name, v);
+                    let n = name.get_or_insert_with(|| self.cur_root_name(root_sym));
+                    write_subscript_key(n, v);
                     suffix_segs.push(SuffixSegment::Subscript);
                 }
-                has_suffixes = true;
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
                 self.get_x_next(); // skip `[`
@@ -612,10 +613,10 @@ impl Interpreter {
                         Value::Numeric(v) => *v,
                         _ => 0.0,
                     };
-                    write_subscript_key(&mut name, subscript);
+                    let n = name.get_or_insert_with(|| self.cur_root_name(root_sym));
+                    write_subscript_key(n, subscript);
                     suffix_segs.push(SuffixSegment::Subscript);
                     self.get_x_next();
-                    has_suffixes = true;
                 } else {
                     // Not a subscript — put the expression and
                     // the current token back, then restore `[`
@@ -640,6 +641,7 @@ impl Interpreter {
             }
         }
 
+        let has_suffixes = name.is_some();
         let is_vardef_call = !has_suffixes && is_root_vardef;
 
         if is_vardef_call {
@@ -655,7 +657,19 @@ impl Interpreter {
             return self.scan_primary();
         }
 
-        self.resolve_variable(root_sym, &name, &suffix_segs)
+        if let Some(ref name_str) = name {
+            // Suffixed variable — must use string-based lookup.
+            self.resolve_variable(root_sym, name_str, &suffix_segs)
+        } else {
+            // Root-only variable — use resolve_variable_root which avoids
+            // String allocation when the sym cache hits.
+            self.resolve_variable_root(root_sym)
+        }
+    }
+
+    /// Get the root variable name from a symbol, allocating a `String`.
+    fn cur_root_name(&self, sym: Option<SymbolId>) -> String {
+        sym.map_or_else(String::new, |s| self.symbols.name(s).to_owned())
     }
 
     /// Parse suffix text after `str` and return its string form.
