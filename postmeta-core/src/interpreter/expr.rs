@@ -110,7 +110,20 @@ impl Interpreter {
                     self.lhs_tracking.last_lhs_binding = None;
                     ExprResultValue::plain(Value::Boolean(result))
                 } else {
-                    self.do_unary(op, operand_result.exp, operand_result.pair_dep)?
+                    // `bad_unary` reports a diagnostic but keeps the
+                    // operand unchanged. We catch type errors
+                    // here so they don't abort the whole expression.
+                    match self.do_unary(
+                        op,
+                        operand_result.exp.clone(),
+                        operand_result.pair_dep.clone(),
+                    ) {
+                        Ok(r) => r,
+                        Err(e) => {
+                            self.report_error(e.kind, e.message);
+                            operand_result
+                        }
+                    }
                 }
             }
 
