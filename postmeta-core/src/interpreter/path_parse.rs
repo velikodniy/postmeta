@@ -39,6 +39,7 @@ impl Interpreter {
         let (mut knots, mut is_cyclic) = match first_expr {
             Value::Pair(x, y) => (vec![Knot::new(Point::new(x, y))], false),
             Value::Path(p) => (p.knots, p.is_cyclic),
+            Value::Numeric(v) if v.abs() <= f64::EPSILON => (Vec::new(), false),
             Value::Numeric(v) => {
                 return Err(InterpreterError::new(
                     ErrorKind::TypeError,
