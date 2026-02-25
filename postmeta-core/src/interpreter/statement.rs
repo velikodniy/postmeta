@@ -60,6 +60,22 @@ impl Interpreter {
             Command::MacroDef => self.do_macro_def(),
             Command::Delimiters => self.do_delimiters(),
             Command::NewInternal => self.do_new_internal(),
+            Command::IfTest => {
+                self.expand_if();
+                Ok(())
+            }
+            Command::FiOrElse => {
+                self.expand_fi_or_else();
+                Ok(())
+            }
+            Command::Iteration => {
+                self.expand_iteration();
+                Ok(())
+            }
+            Command::Input => {
+                self.expand_input();
+                Ok(())
+            }
             Command::Show => self.do_show(),
             Command::MessageCommand => self.do_message(),
             Command::ModeCommand => self.do_mode_command(),

@@ -175,7 +175,7 @@ impl Interpreter {
     ///
     /// On return, `self.cur` is the first non-expandable token of the
     /// active branch (or the token after `fi` if no branch is taken).
-    fn expand_if(&mut self) {
+    pub(super) fn expand_if(&mut self) {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
         self.lhs_tracking.equals_means_equation = false;
@@ -213,7 +213,7 @@ impl Interpreter {
     /// Handle `fi`, `else`, `elseif` encountered during active execution.
     ///
     /// On return, `self.cur` is the next non-expandable token.
-    fn expand_fi_or_else(&mut self) {
+    pub(super) fn expand_fi_or_else(&mut self) {
         let Some(modifier) = FiOrElseOp::from_modifier(self.cur.modifier) else {
             self.report_error(ErrorKind::UnexpectedToken, "Invalid fi/else modifier");
             self.get_next();
@@ -336,7 +336,7 @@ impl Interpreter {
     ///   `forever: <body> endfor`
     ///
     /// On return, `self.cur` is the first non-expandable token after the loop.
-    fn expand_iteration(&mut self) {
+    pub(super) fn expand_iteration(&mut self) {
         let Some(op) = IterationOp::from_modifier(self.cur.modifier) else {
             self.report_error(ErrorKind::UnexpectedToken, "Invalid iteration modifier");
             self.get_next();
@@ -1576,7 +1576,7 @@ impl Interpreter {
     ///
     /// Reads the named file via the filesystem trait and pushes it as a new
     /// source input level.
-    fn expand_input(&mut self) {
+    pub(super) fn expand_input(&mut self) {
         self.get_next(); // skip `input`
 
         // Get the filename from the next token
