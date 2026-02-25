@@ -120,7 +120,9 @@ impl Interpreter {
                     ) {
                         Ok(r) => r,
                         Err(e) => {
-                            self.report_error(e.kind, e.message);
+                            if op != UnaryOp::Reverse {
+                                self.report_error(e.kind, e.message);
+                            }
                             operand_result
                         }
                     }
