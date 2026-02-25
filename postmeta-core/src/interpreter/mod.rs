@@ -168,6 +168,10 @@ pub(super) struct PictureState {
     /// Used to avoid borrow conflicts: the picture is extracted from the
     /// variable, modified here, then flushed back.
     pub named_pic_buf: Option<Picture>,
+    /// Whether `current_picture` has been modified since the last sync to the
+    /// `currentpicture` variable. Enables lazy sync: the variable is only
+    /// updated when actually read.
+    pub currentpicture_dirty: bool,
 }
 
 impl PictureState {
@@ -176,6 +180,7 @@ impl PictureState {
             pictures: Vec::new(),
             current_picture: Picture::new(),
             named_pic_buf: None,
+            currentpicture_dirty: false,
         }
     }
 }

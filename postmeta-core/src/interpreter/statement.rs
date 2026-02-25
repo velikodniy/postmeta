@@ -24,7 +24,13 @@ use super::helpers::{value_to_path_owned, value_to_scalar};
 use super::{Interpreter, LhsBinding};
 
 impl Interpreter {
+    /// Sync `picture_state.current_picture` to the `currentpicture` variable
+    /// if it has been modified since the last sync.
     fn sync_currentpicture_variable(&mut self) {
+        if !self.state.picture_state.currentpicture_dirty {
+            return;
+        }
+        self.state.picture_state.currentpicture_dirty = false;
         if let Some(var_id) = self.state.variables.lookup_existing("currentpicture") {
             let picture = self.state.picture_state.current_picture.clone();
             self.state
@@ -323,12 +329,12 @@ impl Interpreter {
         if pic_name == "currentpicture" {
             &mut self.picture_state.current_picture
         } else {
-            // Extract picture from the named variable (or create empty).
+            // Take the picture out of the variable (move, not clone).
+            // This avoids O(n) cloning on every addto for large pictures.
             let pic = if let Some(var_id) = self.variables.lookup_existing(pic_name) {
-                if let VarValue::Known(Value::Picture(p)) = self.variables.get(var_id) {
-                    p.clone()
-                } else {
-                    Picture::default()
+                match self.variables.take(var_id) {
+                    VarValue::Known(Value::Picture(p)) => p,
+                    _ => Picture::default(),
                 }
             } else {
                 Picture::default()
@@ -345,7 +351,8 @@ impl Interpreter {
     /// Write the temporary named picture buffer back to the variable.
     fn flush_target_picture(&mut self, pic_name: &str) {
         if pic_name == "currentpicture" {
-            self.sync_currentpicture_variable();
+            // Mark dirty — the variable will be synced lazily on next read.
+            self.picture_state.currentpicture_dirty = true;
         } else if let Some(pic) = self.picture_state.named_pic_buf.take() {
             let var_id = self.variables.lookup(pic_name);
             self.variables.set_known(var_id, Value::Picture(pic));
@@ -561,6 +568,7 @@ impl Interpreter {
 
     /// Execute `shipout` statement.
     fn do_shipout(&mut self) -> InterpResult<()> {
+        self.sync_currentpicture_variable();
         self.get_x_next();
         let val = self.scan_expression()?.exp;
 
@@ -611,6 +619,13 @@ impl Interpreter {
             if let Some(sym_id) = self.cur.sym {
                 let entry = self.symbols.get(sym_id);
                 self.save_stack.save_symbol(sym_id, entry);
+
+                // If saving currentpicture, flush the live picture first.
+                if self.state.picture_state.currentpicture_dirty
+                    && self.state.symbols.name(sym_id) == "currentpicture"
+                {
+                    self.sync_currentpicture_variable();
+                }
 
                 // Split borrows: access state fields directly to avoid
                 // Deref coercion that borrows all of self.state.
