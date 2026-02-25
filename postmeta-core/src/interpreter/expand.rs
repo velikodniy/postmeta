@@ -145,17 +145,27 @@ impl Interpreter {
                 Command::IfTest => self.expand_if(),
                 Command::FiOrElse => self.expand_fi_or_else(),
                 Command::Iteration => self.expand_iteration(),
-                Command::ExitTest => self.expand_exitif(),
+                // ExitTest and DefinedMacro handlers do NOT advance past
+                // their last token. The central loop calls get_next()
+                // afterwards.
+                // This prevents chain expansions inside the handler from
+                // crossing input-level boundaries and consuming sentinel
+                // tokens that belong to enclosing scopes (e.g. the
+                // look-ahead token saved by expand_binary_macro).
+                Command::ExitTest => {
+                    self.expand_exitif();
+                    self.get_next();
+                }
                 Command::RepeatLoop => self.expand_repeat_loop(),
-                Command::DefinedMacro => self.expand_defined_macro(),
+                Command::DefinedMacro => {
+                    self.expand_defined_macro_push_only();
+                    self.get_next();
+                }
                 Command::Input => self.expand_input(),
                 Command::ScanTokens => self.expand_scantokens(),
                 Command::StartTex => self.expand_start_tex(),
                 Command::ExpandAfter => self.expand_expandafter(),
-                Command::Relax => {
-                    self.get_next();
-                    self.expand_current();
-                }
+                Command::Relax => self.get_next(),
                 _ => break, // Other expandables not yet implemented
             }
         }
@@ -260,7 +270,6 @@ impl Interpreter {
                             *state = IfState::Active;
                         }
                         self.get_next(); // consume `else`
-                        // consume the `:` after `else`
                         if self.cur.command == Command::Colon {
                             self.get_next();
                         }
@@ -754,48 +763,43 @@ impl Interpreter {
         values
     }
 
-    /// Handle `exitif <boolean>;` — set the loop exit flag if condition is true.
+    /// Handle `exitif <boolean>;`.
     ///
-    /// On return, `self.cur` is the first non-expandable token after `exitif`.
+    /// This handler does NOT advance past the final token.
+    /// The caller (`expand_current` loop) calls `get_next()` afterwards.
     fn expand_exitif(&mut self) {
         self.get_x_next(); // skip `exitif`
         self.lhs_tracking.equals_means_equation = false;
-        let should_exit = if let Ok(result) = self.scan_expression() {
-            match result.exp {
+        let should_exit = match self.scan_expression() {
+            Ok(result) => match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,
                 _ => {
                     self.report_error(ErrorKind::TypeError, "exitif condition must be boolean");
                     false
                 }
+            },
+            Err(e) => {
+                self.errors.push(e);
+                false
             }
-        } else {
-            false
         };
-
         if should_exit {
             if self.control_flow.forever_stack.is_empty() {
                 self.report_error(ErrorKind::BadExitIf, "No loop is in progress");
-                // Expect `;` after the condition
-                if self.cur.command == Command::Semicolon {
-                    self.get_next();
-                    self.expand_current();
-                }
             } else {
                 // Premature exit: pop input levels until the loop body level
-                // is found, then pop the loop frame (mp.web §13020-13030).
+                // is found, then pop the loop frame.
                 self.input.pop_to_loop_body();
                 self.control_flow.forever_stack.pop();
-                self.get_next();
-                self.expand_current();
             }
-        } else {
-            // Condition was false — expect `;` after the condition and continue
-            if self.cur.command == Command::Semicolon {
-                self.get_next();
-                self.expand_current();
-            }
+        } else if self.cur.command != Command::Semicolon {
+            self.report_error(
+                ErrorKind::MissingToken,
+                "After `exitif <boolean exp>` I expect to see a semicolon",
+            );
         }
+        // Do NOT advance — the expand_current loop calls get_next().
     }
 
     // =======================================================================
@@ -1336,15 +1340,14 @@ impl Interpreter {
     /// Expand a user-defined macro.
     ///
     /// Scans arguments according to the macro's parameter types, then pushes
-    /// the body as a token list with parameter bindings.
+    /// the body as a token list with parameter bindings, and advances to
+    /// the first token of the expansion.
+    ///
+    /// NOTE: `expand_current` uses `expand_defined_macro_push_only` instead
+    /// so the central loop controls advancement.
     pub(super) fn expand_defined_macro(&mut self) {
-        if !self.expand_defined_macro_inner() {
-            self.get_next();
-            self.expand_current();
-            return;
-        }
+        self.expand_defined_macro_inner();
         self.get_next();
-        self.expand_current();
     }
 
     /// Core logic for expanding a user-defined macro: scan arguments and push
