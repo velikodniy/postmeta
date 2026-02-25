@@ -167,9 +167,12 @@ impl Interpreter {
                 // Expect statement terminator
                 if self.cur.command == Command::Semicolon {
                     self.get_x_next();
-                } else if self.cur.command == Command::EndGroup || self.cur.command == Command::Stop
+                } else if self.cur.command == Command::EndGroup
+                    || self.cur.command == Command::Stop
+                    || self.cur.command == Command::NewInternal
                 {
-                    // OK — endgroup or end terminates too
+                    // OK — some commands may begin immediately without an
+                    // explicit semicolon between statements.
                 } else if self.cur.command == Command::MacroSpecial
                     && MacroSpecialOp::from_modifier(self.cur.modifier)
                         == Some(MacroSpecialOp::EndDef)
