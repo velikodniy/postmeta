@@ -381,8 +381,8 @@ impl Interpreter {
             // TODO: Implement via FileSystem trait when I/O support is added.
             UnaryOp::ReadFrom => {
                 // In MetaPost, readfrom reads the next line from a file.
-                // Without filesystem access we return EOF sentinel.
-                Ok((Value::String(Arc::from("")), Type::String))
+                // Without filesystem access we return EOF sentinel (char 0).
+                Ok((Value::String(Arc::from("\0")), Type::String))
             }
             // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
             UnaryOp::CharExists => {
