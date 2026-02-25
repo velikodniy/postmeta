@@ -215,17 +215,28 @@ impl Interpreter {
             }
 
             Command::CapsuleToken => {
-                let result = if let Some(payload) = self.cur.capsule.take() {
-                    ExprResultValue {
-                        exp: payload.value,
-                        ty: payload.ty,
-                        dep: payload.dep,
-                        pair_dep: payload.pair_dep,
-                    }
-                } else {
-                    // CapsuleToken without payload — shouldn't happen, treat as vacuous
-                    ExprResultValue::vacuous()
-                };
+                let result =
+                    self.cur
+                        .capsule
+                        .take()
+                        .map_or_else(ExprResultValue::vacuous, |arc_payload| {
+                            // Try to unwrap the Arc to avoid cloning
+                            // (O(1) when refcount is 1).
+                            match Arc::try_unwrap(arc_payload) {
+                                Ok(p) => ExprResultValue {
+                                    exp: p.value,
+                                    ty: p.ty,
+                                    dep: p.dep,
+                                    pair_dep: p.pair_dep,
+                                },
+                                Err(arc) => ExprResultValue {
+                                    exp: arc.value.clone(),
+                                    ty: arc.ty,
+                                    dep: arc.dep.clone(),
+                                    pair_dep: arc.pair_dep.clone(),
+                                },
+                            }
+                        });
                 self.lhs_tracking.last_lhs_binding = None;
                 self.get_x_next();
                 result
@@ -612,12 +623,12 @@ impl Interpreter {
                     // check after variable resolution can see it.
                     use crate::input::{CapsulePayload, StoredToken};
                     let result = subscript_result;
-                    let mut tl = vec![StoredToken::Capsule(CapsulePayload {
+                    let mut tl = vec![StoredToken::Capsule(Arc::new(CapsulePayload {
                         value: result.exp,
                         ty: result.ty,
                         dep: result.dep,
                         pair_dep: result.pair_dep,
-                    })];
+                    }))];
                     self.store_current_token(&mut tl);
                     self.input
                         .push_token_list(tl, Vec::new(), "mediation backtrack");

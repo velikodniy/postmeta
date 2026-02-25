@@ -2,6 +2,8 @@
 //!
 //! Free functions used across all interpreter submodules.
 
+use std::sync::Arc;
+
 use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{Pen, Picture, Scalar, Transform};
 
@@ -88,7 +90,7 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             ]
         }
         Value::String(s) => vec![StoredToken::StringLit(s.to_string())],
-        _ => vec![StoredToken::Capsule(CapsulePayload {
+        _ => vec![StoredToken::Capsule(Arc::new(CapsulePayload {
             value: val.clone(),
             ty: match val {
                 Value::Numeric(_) => Type::Known,
@@ -103,6 +105,6 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             },
             dep: None,
             pair_dep: None,
-        })],
+        }))],
     }
 }

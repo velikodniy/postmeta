@@ -44,7 +44,7 @@ pub struct ResolvedToken {
     /// Present only when `command == CapsuleToken` and this token was produced
     /// by `back_expr`. The expression parser picks this up instead of
     /// evaluating the token normally.
-    pub capsule: Option<CapsulePayload>,
+    pub capsule: Option<Arc<CapsulePayload>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -68,7 +68,10 @@ pub enum StoredToken {
     /// When the expression parser needs to push a value back into the input
     /// stream (e.g., after discovering that `[` was not the start of a
     /// mediation), the value is wrapped in a capsule token.
-    Capsule(CapsulePayload),
+    ///
+    /// Wrapped in `Arc` for O(1) cloning — capsules are frequently cloned
+    /// when parameter token lists are expanded.
+    Capsule(Arc<CapsulePayload>),
 }
 
 /// A mutable token list used while building macro/loop bodies.
@@ -250,12 +253,12 @@ impl InputSystem {
         dep: Option<DepList>,
         pair_dep: Option<(DepList, DepList)>,
     ) {
-        let tokens: SharedTokenList = vec![StoredToken::Capsule(CapsulePayload {
+        let tokens: SharedTokenList = vec![StoredToken::Capsule(Arc::new(CapsulePayload {
             value,
             ty,
             dep,
             pair_dep,
-        })]
+        }))]
         .into();
         self.push_token_list(tokens, Vec::new(), "backed-up expr");
     }

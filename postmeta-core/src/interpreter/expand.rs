@@ -1865,10 +1865,10 @@ impl Interpreter {
 /// arguments to macros so that the equation solver can still track unknown
 /// variables passed through macro parameters.
 fn expr_result_to_capsule(result: ExprResultValue) -> TokenList {
-    vec![StoredToken::Capsule(CapsulePayload {
+    vec![StoredToken::Capsule(Arc::new(CapsulePayload {
         value: result.exp,
         ty: result.ty,
         dep: result.dep,
         pair_dep: result.pair_dep,
-    })]
+    }))]
 }
