@@ -4040,3 +4040,176 @@ fn makepen_accepts_pair() {
         .collect();
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 }
+
+// -----------------------------------------------------------------------
+// verbatimtex ... etex
+// -----------------------------------------------------------------------
+
+#[test]
+fn verbatimtex_is_skipped() {
+    // verbatimtex ... etex should be silently skipped without errors.
+    let mut interp = Interpreter::new();
+    interp
+        .run(r#"verbatimtex \documentstyle{article} \begin{document} etex show 42;"#)
+        .unwrap();
+    // The `show 42` after etex should execute normally.
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("42")),
+        "show 42 should produce output after verbatimtex block"
+    );
+    // No errors about unexpected tokens from the TeX content.
+    let real_errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(real_errors.is_empty(), "unexpected errors: {real_errors:?}");
+}
+
+// -----------------------------------------------------------------------
+// for ... within (picture iteration)
+// -----------------------------------------------------------------------
+
+#[test]
+fn for_within_iterates_picture_components() {
+    // Build a picture with two strokes, iterate with `for ... within`.
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             addto pic doublepath (0,0)..(1,1);
+             addto pic doublepath (2,2)..(3,3);
+             numeric n; n := 0;
+             for q within pic: n := n + 1; endfor
+             show n;",
+        )
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("2")),
+        "should iterate over 2 components"
+    );
+}
+
+#[test]
+fn for_within_extracts_pathpart() {
+    // Iterate and extract pathpart from each component.
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             addto pic doublepath (10,20)..(30,40);
+             for q within pic:
+               show xpart point 0 of pathpart q;
+               exitif true;
+             endfor",
+        )
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("10")),
+        "pathpart should yield the original path's first point x=10"
+    );
+}
+
+#[test]
+fn for_within_empty_picture() {
+    // Iterating over an empty picture should execute zero iterations.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             numeric n; n := 0;
+             for q within pic: n := n + 1; endfor
+             show n;",
+        )
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("0")),
+        "empty picture should produce 0 iterations"
+    );
+}
+
+// -----------------------------------------------------------------------
+// Picture part extraction on picture values
+// -----------------------------------------------------------------------
+
+#[test]
+fn xxpart_of_text_picture() {
+    // xxpart of a btex picture should return the xx component of the text transform.
+    // For default btex output, the transform is identity, so xxpart = 1.
+    let mut interp = Interpreter::new();
+    interp
+        .run("picture p; p = btex X etex; show xxpart p;")
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("1")),
+        "xxpart of btex picture should be 1 (identity transform)"
+    );
+}
+
+#[test]
+fn colormodel_of_stroke() {
+    // colormodel of an RGB stroked picture should return 5.
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             addto pic doublepath (0,0)..(1,1) withcolor (1,0,0);
+             for q within pic: show colormodel q; exitif true; endfor",
+        )
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("5")),
+        "colormodel of RGB stroke should be 5"
+    );
+}
+
+#[test]
+fn redpart_of_picture_component() {
+    // redpart of a picture component should extract the red channel.
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             addto pic doublepath (0,0)..(1,1) withcolor (0.75, 0.5, 0.25);
+             for q within pic: show redpart q; exitif true; endfor",
+        )
+        .unwrap();
+    assert!(
+        interp.errors.iter().any(|e| e.message.contains("0.75")),
+        "redpart should extract 0.75"
+    );
+}
+
+#[test]
+fn stroked_filled_textual_predicates() {
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "picture pic; pic := nullpicture;
+             addto pic doublepath (0,0)..(1,1);
+             for q within pic:
+               show stroked q;
+               show filled q;
+               show textual q;
+               exitif true;
+             endfor",
+        )
+        .unwrap();
+    // stroked should be true, filled/textual should be false.
+    let msgs: Vec<_> = interp.errors.iter().map(|e| &e.message).collect();
+    assert!(
+        msgs.iter().any(|m| m.contains("true")),
+        "stroked should be true: {msgs:?}"
+    );
+    // The two false results
+    let false_count = msgs.iter().filter(|m| m.contains("false")).count();
+    assert_eq!(
+        false_count, 2,
+        "filled and textual should be false: {msgs:?}"
+    );
+}

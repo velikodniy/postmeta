@@ -171,6 +171,7 @@ impl Interpreter {
                 Command::Input => self.expand_input(),
                 Command::ScanTokens => self.expand_scantokens(),
                 Command::StartTex => self.expand_start_tex(),
+                Command::VerbatimTex => self.expand_verbatimtex(),
                 Command::ExpandAfter => self.expand_expandafter(),
                 Command::Relax => self.get_next(),
                 _ => break, // Other expandables not yet implemented
@@ -374,6 +375,12 @@ impl Interpreter {
 
         self.get_next(); // skip the variable name
 
+        // Check for `within` (picture iteration)
+        if self.cur.command == Command::WithinToken {
+            self.expand_for_within(loop_var_sym);
+            return;
+        }
+
         // Expect `=` or `:=` (MetaPost accepts both forms for the loop variable)
         if self.cur.command != Command::Equals && self.cur.command != Command::Assignment {
             self.report_error(ErrorKind::MissingToken, "Expected `=` after loop variable");
@@ -444,6 +451,91 @@ impl Interpreter {
         self.input.push_loop_body(body, vec![first_params.into()]);
 
         // Get the first token and continue expanding
+        self.get_next();
+        self.expand_current();
+    }
+
+    /// Handle `for <var> within <picture expr>: <body> endfor`.
+    ///
+    /// Evaluates the picture expression, splits it into individual components
+    /// (treating ClipStart..ClipEnd and SetBoundsStart..SetBoundsEnd groups
+    /// as single components), and iterates with each component wrapped in
+    /// its own picture capsule.
+    fn expand_for_within(&mut self, loop_var_sym: SymbolId) {
+        // Skip `within` and evaluate the picture expression.
+        self.get_next();
+        self.expand_current();
+        let pic = if let Ok(result) = self.scan_expression() {
+            if let Value::Picture(p) = result.exp {
+                p
+            } else {
+                self.report_error(ErrorKind::TypeError, "Expected picture after `within`");
+                Picture::new()
+            }
+        } else {
+            self.report_error(
+                ErrorKind::InvalidExpression,
+                "Missing picture expression after `within`",
+            );
+            Picture::new()
+        };
+
+        // Expect `:` after picture expression.
+        if self.cur.command == Command::Colon {
+            self.get_next();
+        }
+
+        // Scan the loop body with parameter substitution.
+        let mut body = self.scan_loop_body_with_param(loop_var_sym);
+
+        // Split the picture into components.  Clip/SetBounds groups
+        // count as single components (the group start, all contents,
+        // and the group end).
+        let components = split_picture_components(&pic);
+
+        if components.is_empty() {
+            // No components — skip.
+            self.get_next();
+            self.expand_current();
+            return;
+        }
+
+        // Convert each component picture to a token list (capsule).
+        let value_token_lists: Vec<TokenList> = components
+            .into_iter()
+            .map(|comp| value_to_stored_tokens(&Value::Picture(comp), &mut self.symbols))
+            .collect();
+
+        let mut iter = value_token_lists.into_iter();
+        let Some(first_params) = iter.next() else {
+            // Unreachable: we checked non-empty above.
+            self.get_next();
+            self.expand_current();
+            return;
+        };
+        let remaining: Vec<SharedTokenList> = iter.map(Into::into).rev().collect();
+
+        // Append RepeatLoop sentinel.
+        let repeat_sym = self.symbols.lookup("__repeat_loop__");
+        self.symbols.set(
+            repeat_sym,
+            crate::symbols::SymbolEntry {
+                command: Command::RepeatLoop,
+                modifier: 0,
+            },
+        );
+        body.push(StoredToken::Symbol(repeat_sym));
+        let body: SharedTokenList = body.into();
+
+        self.control_flow.forever_stack.push(ForeverLoopFrame {
+            body: Arc::clone(&body),
+            exit_requested: false,
+            is_for_loop: true,
+            remaining_iterations: remaining,
+        });
+
+        self.input.push_loop_body(body, vec![first_params.into()]);
+
         self.get_next();
         self.expand_current();
     }
@@ -1607,6 +1699,23 @@ impl Interpreter {
         self.expand_current();
     }
 
+    /// Handle `verbatimtex ... etex`.
+    ///
+    /// Skips all tokens (without expansion) until `etex` or end of input.
+    /// In the original `MetaPost` this passes TeX preamble material to the
+    /// typesetter; `PostMeta` discards it since we don't invoke TeX.
+    fn expand_verbatimtex(&mut self) {
+        loop {
+            self.get_next();
+            match self.cur.command {
+                Command::EtexMarker | Command::Stop => break,
+                _ => {} // discard
+            }
+        }
+        // Advance past etex so caller sees the next real token.
+        self.get_next();
+    }
+
     /// Handle `btex ... etex`.
     ///
     /// Collects the raw text between `btex` and `etex` (without macro
@@ -1871,4 +1980,54 @@ fn expr_result_to_capsule(result: ExprResultValue) -> TokenList {
         dep: result.dep,
         pair_dep: result.pair_dep,
     }))]
+}
+
+/// Split a picture into its top-level components.
+///
+/// Each `Fill`, `Stroke`, or `Text` object becomes a single-element picture.
+/// `ClipStart`..`ClipEnd` and `SetBoundsStart`..`SetBoundsEnd` groups
+/// (including all nested content) become one picture each.
+fn split_picture_components(pic: &Picture) -> Vec<Picture> {
+    let mut result = Vec::new();
+    let objects = &pic.objects;
+    let mut i = 0;
+
+    while i < objects.len() {
+        match &objects[i] {
+            GraphicsObject::ClipStart(_) | GraphicsObject::SetBoundsStart(_) => {
+                // Collect the entire group: start, contents, and matching end.
+                let start = i;
+                let mut depth = 1u32;
+                i += 1;
+                while i < objects.len() && depth > 0 {
+                    match &objects[i] {
+                        GraphicsObject::ClipStart(_) | GraphicsObject::SetBoundsStart(_) => {
+                            depth += 1;
+                        }
+                        GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
+                            depth -= 1;
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                let mut comp = Picture::new();
+                comp.objects = objects[start..i].to_vec();
+                result.push(comp);
+            }
+            GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
+                // Stray end marker — skip it.
+                i += 1;
+            }
+            _ => {
+                // Single object: Fill, Stroke, or Text.
+                let mut comp = Picture::new();
+                comp.objects.push(objects[i].clone());
+                result.push(comp);
+                i += 1;
+            }
+        }
+    }
+
+    result
 }

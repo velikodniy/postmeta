@@ -26,6 +26,8 @@ pub enum Command {
     StartTex = 1,
     /// `etex` marker.
     EtexMarker = 2,
+    /// `verbatimtex ... etex` — skip TeX preamble material.
+    VerbatimTex = 3,
     /// `if` / `elseif` test.
     IfTest = 4,
     /// `fi` / `else` / `elseif`.
@@ -346,6 +348,13 @@ pub enum UnaryOp {
     // Type tests
     KnownOp = 90,
     UnknownOp = 91,
+    // Color model inspection
+    ColorModel = 92,
+    GreyPart = 93,
+    CyanPart = 94,
+    MagentaPart = 95,
+    YellowPart = 96,
+    BlackPart = 97,
 }
 
 /// Operation codes for [`Command::PlusOrMinus`].
@@ -613,6 +622,12 @@ impl_from_modifier!(UnaryOp {
     ReadFrom,
     KnownOp,
     UnknownOp,
+    ColorModel,
+    GreyPart,
+    CyanPart,
+    MagentaPart,
+    YellowPart,
+    BlackPart,
 });
 impl_from_modifier!(PlusMinusOp { Plus, Minus });
 impl_from_modifier!(SecondaryBinaryOp {
@@ -808,6 +823,11 @@ pub const PRIMITIVES: &[Primitive] = &[
     Primitive {
         name: "etex",
         command: Command::EtexMarker,
+        modifier: 0,
+    },
+    Primitive {
+        name: "verbatimtex",
+        command: Command::VerbatimTex,
         modifier: 0,
     },
     // -- Statement-level commands --
@@ -1250,6 +1270,36 @@ pub const PRIMITIVES: &[Primitive] = &[
         name: "bluepart",
         command: Command::Unary,
         modifier: UnaryOp::BluePart as u16,
+    },
+    Primitive {
+        name: "colormodel",
+        command: Command::Unary,
+        modifier: UnaryOp::ColorModel as u16,
+    },
+    Primitive {
+        name: "greypart",
+        command: Command::Unary,
+        modifier: UnaryOp::GreyPart as u16,
+    },
+    Primitive {
+        name: "cyanpart",
+        command: Command::Unary,
+        modifier: UnaryOp::CyanPart as u16,
+    },
+    Primitive {
+        name: "magentapart",
+        command: Command::Unary,
+        modifier: UnaryOp::MagentaPart as u16,
+    },
+    Primitive {
+        name: "yellowpart",
+        command: Command::Unary,
+        modifier: UnaryOp::YellowPart as u16,
+    },
+    Primitive {
+        name: "blackpart",
+        command: Command::Unary,
+        modifier: UnaryOp::BlackPart as u16,
     },
     Primitive {
         name: "fontpart",

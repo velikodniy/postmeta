@@ -281,6 +281,13 @@ impl Interpreter {
             UnaryOp::RedPart => Self::extract_color_part(input, 0),
             UnaryOp::GreenPart => Self::extract_color_part(input, 1),
             UnaryOp::BluePart => Self::extract_color_part(input, 2),
+            UnaryOp::ColorModel => Self::extract_color_model(input),
+            UnaryOp::GreyPart => Self::extract_grey_part(input),
+            UnaryOp::CyanPart | UnaryOp::MagentaPart | UnaryOp::YellowPart | UnaryOp::BlackPart => {
+                // CMYK not supported — always return 0.
+                // For color values (non-picture), this is still 0.
+                Ok((Value::Numeric(0.0), Type::Known))
+            }
             UnaryOp::MakePath => {
                 if let Value::Pen(p) = input {
                     Ok((Value::Path(pen::makepath(p)), Type::Path))
@@ -870,6 +877,23 @@ impl Interpreter {
                 }
                 Ok(super::ExprResultValue::numeric_known(v))
             }
+            Value::Picture(pic) => {
+                // For pictures, extract the transform part of the first text object.
+                // Non-text objects return 0 (matching MetaPost behavior).
+                let v = match pic.objects.first() {
+                    Some(GraphicsObject::Text(t)) => match part {
+                        0 => t.transform.tx,
+                        1 => t.transform.ty,
+                        2 => t.transform.txx,
+                        3 => t.transform.txy,
+                        4 => t.transform.tyx,
+                        5 => t.transform.tyy,
+                        _ => 0.0,
+                    },
+                    _ => 0.0,
+                };
+                Ok(super::ExprResultValue::numeric_known(v))
+            }
             _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
                 format!("{} has no xpart/ypart", input.ty()),
@@ -879,25 +903,69 @@ impl Interpreter {
 
     /// Extract a color part, returning `(Value::Numeric, Type::Known)`.
     fn extract_color_part(val: &Value, part: usize) -> InterpResult<(Value, Type)> {
-        if let Value::Color(c) = val {
-            let v = match part {
-                0 => c.r,
-                1 => c.g,
-                2 => c.b,
-                _ => {
-                    return Err(InterpreterError::new(
-                        ErrorKind::TypeError,
-                        "Invalid color part",
-                    ));
-                }
-            };
-            Ok((Value::Numeric(v), Type::Known))
-        } else {
-            Err(InterpreterError::new(
+        match val {
+            Value::Color(c) => {
+                let v = match part {
+                    0 => c.r,
+                    1 => c.g,
+                    2 => c.b,
+                    _ => {
+                        return Err(InterpreterError::new(
+                            ErrorKind::TypeError,
+                            "Invalid color part",
+                        ));
+                    }
+                };
+                Ok((Value::Numeric(v), Type::Known))
+            }
+            Value::Picture(pic) => {
+                // Extract color from the first graphical object that has color.
+                let color = match pic.objects.first() {
+                    Some(GraphicsObject::Fill(f)) => Some(&f.color),
+                    Some(GraphicsObject::Stroke(s)) => Some(&s.color),
+                    Some(GraphicsObject::Text(t)) => Some(&t.color),
+                    _ => None,
+                };
+                let v = color.map_or(0.0, |c| match part {
+                    0 => c.r,
+                    1 => c.g,
+                    2 => c.b,
+                    _ => 0.0,
+                });
+                Ok((Value::Numeric(v), Type::Known))
+            }
+            _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
                 format!("{} has no color parts", val.ty()),
-            ))
+            )),
         }
+    }
+
+    /// Return the color model of a picture component or color value.
+    ///
+    /// Returns 1 (no color), 3 (greyscale), 5 (RGB), or 7 (CMYK).
+    /// Since we only support RGB, fills/strokes return 5 and text
+    /// defaults to 5 as well. Objects without explicit color return 1.
+    fn extract_color_model(val: &Value) -> InterpResult<(Value, Type)> {
+        let model = match val {
+            Value::Color(_) => 5.0,
+            Value::Picture(pic) => match pic.objects.first() {
+                Some(GraphicsObject::Fill(_) | GraphicsObject::Stroke(_)) => 5.0,
+                Some(GraphicsObject::Text(_)) => 5.0,
+                _ => 1.0,
+            },
+            _ => 1.0,
+        };
+        Ok((Value::Numeric(model), Type::Known))
+    }
+
+    /// Return the grey part of a picture component or color value.
+    ///
+    /// Since we only support RGB, this returns 0 for everything
+    /// (greyscale is not a separate color model in our implementation).
+    const fn extract_grey_part(val: &Value) -> InterpResult<(Value, Type)> {
+        let _ = val;
+        Ok((Value::Numeric(0.0), Type::Known))
     }
 }
 
