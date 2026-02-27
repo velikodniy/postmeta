@@ -212,6 +212,13 @@ pub struct MachineState {
     picture_state: PictureState,
     /// Defined macros: `SymbolId` → macro info.
     macros: std::collections::HashMap<SymbolId, MacroInfo>,
+    /// Macro save stack for `begingroup`/`endgroup` scoping.
+    ///
+    /// `save x` must hide macro definitions (especially vardefs, whose
+    /// presence is checked via the `macros` map rather than the symbol
+    /// entry).  `None` marks a group boundary; `Some((id, info))` is a
+    /// macro entry removed by `save` that must be restored at `endgroup`.
+    macro_save_stack: Vec<Option<(SymbolId, MacroInfo)>>,
     /// Random seed.
     pub random_seed: u64,
     /// Error list.
@@ -286,6 +293,7 @@ impl Interpreter {
                 save_stack: SaveStack::new(),
                 picture_state: PictureState::new(),
                 macros: std::collections::HashMap::new(),
+                macro_save_stack: Vec::new(),
                 random_seed: 0,
                 errors: Vec::new(),
                 job_name: "output".into(),

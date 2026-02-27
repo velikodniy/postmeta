@@ -146,6 +146,7 @@ impl Interpreter {
 
             Command::BeginGroup => {
                 self.save_stack.push_boundary();
+                self.macro_save_stack.push(None);
                 self.get_x_next();
                 // Execute statements until endgroup
                 while self.cur.command != Command::EndGroup && self.cur.command != Command::Stop {

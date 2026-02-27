@@ -7,6 +7,7 @@ use std::sync::Arc;
 use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{Pen, Picture, Scalar, Transform};
 
+use crate::equation::const_dep;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::input::{CapsulePayload, StoredToken, TokenList};
 use crate::symbols::SymbolTable;
@@ -90,16 +91,27 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             ]
         }
         Value::String(s) => vec![StoredToken::StringLit(s.to_string())],
+        // Store plain numerics as Capsule with dep = const_dep(v).
+        // Using Capsule (not StoredToken::Numeric) preserves implicit
+        // multiplication behavior: `72i` in a for-loop body correctly
+        // treats the capsule as a primary that `72` multiplies.
+        // Setting dep = Some(const_dep(v)) fixes equations like
+        // `x = <loop-var>` which silently failed with dep:None.
+        Value::Numeric(v) => vec![StoredToken::Capsule(Arc::new(CapsulePayload {
+            value: val.clone(),
+            ty: Type::Known,
+            dep: Some(const_dep(*v)),
+            pair_dep: None,
+        }))],
         _ => vec![StoredToken::Capsule(Arc::new(CapsulePayload {
             value: val.clone(),
             ty: match val {
-                Value::Numeric(_) => Type::Known,
                 Value::Boolean(_) => Type::Boolean,
                 Value::Transform(..) => Type::TransformType,
                 Value::Path(..) => Type::Path,
                 Value::Pen(..) => Type::Pen,
                 Value::Picture(..) => Type::Picture,
-                // Pair and Color are handled above; String has its own arm.
+                // Pair, Color, String, and Numeric are handled above.
                 // Vacuous and any remaining variants fall here.
                 _ => Type::Vacuous,
             },

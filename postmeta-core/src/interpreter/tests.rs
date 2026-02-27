@@ -4213,3 +4213,163 @@ fn stroked_filled_textual_predicates() {
         "filled and textual should be false: {msgs:?}"
     );
 }
+
+// -----------------------------------------------------------------------
+// save hides macro definitions (especially vardefs)
+// -----------------------------------------------------------------------
+
+#[test]
+fn save_hides_vardef_in_group() {
+    // Regression: `save pic` inside a group must hide the vardef `pic`
+    // so that `picture pic; pic=p;` treats `pic` as a plain variable,
+    // not as the vardef.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef pic suffix $ = $ enddef; \
+             begingroup \
+               save pic; \
+               picture pic; \
+               pic := nullpicture; \
+               show pic; \
+             endgroup;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let msg = interp
+        .errors
+        .iter()
+        .find(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .unwrap_or_default();
+    assert!(
+        msg.contains("(picture)"),
+        "expected pic to be a picture, got: {msg}"
+    );
+}
+
+#[test]
+fn save_restores_vardef_after_endgroup() {
+    // After `endgroup`, the vardef should be restored and callable again.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef f = 42 enddef; \
+             show f; \
+             begingroup save f; numeric f; f := 99; show f; endgroup; \
+             show f;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(infos.len(), 3, "expected 3 show outputs: {infos:?}");
+    // First and third calls should invoke the vardef and produce 42.
+    assert!(
+        infos[0].contains("42"),
+        "before save, f should be 42: {}",
+        infos[0]
+    );
+    assert!(
+        infos[1].contains("99"),
+        "inside group, f should be 99: {}",
+        infos[1]
+    );
+    assert!(
+        infos[2].contains("42"),
+        "after endgroup, f should be vardef again (42): {}",
+        infos[2]
+    );
+}
+
+#[test]
+fn save_hides_defined_macro_in_group() {
+    // `save` should also hide non-vardef macros (def/primarydef/etc.).
+    // Inside the group, `greet` becomes an unknown tag so the macro body
+    // is NOT invoked (the `show 99` in its body does NOT fire).
+    // After endgroup the macro is restored.
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "def greet = show 99 enddef; \
+             greet; \
+             begingroup save greet; endgroup; \
+             greet;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    // Only the two calls outside the group should produce output.
+    assert_eq!(infos.len(), 2, "expected 2 show outputs: {infos:?}");
+    assert!(infos[0].contains("99"), "first greet: {}", infos[0]);
+    assert!(infos[1].contains("99"), "restored greet: {}", infos[1]);
+}
+
+// -----------------------------------------------------------------------
+// Regression: numeric equations inside for-loops must work.
+//
+// For-loop variables stored as capsules previously had dep:None, causing
+// the equation solver to silently skip `x = <loop-var>`.  Now capsules
+// carry dep = const_dep(v) so equations resolve correctly.
+// -----------------------------------------------------------------------
+
+#[test]
+fn for_loop_numeric_equation() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "for p=3, 7, 11: \
+               numeric a; a = p; \
+               show a; \
+             endfor;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let infos: Vec<_> = interp
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(infos.len(), 3, "expected 3 show outputs: {infos:?}");
+    assert!(infos[0].contains("3"), "first iteration: {}", infos[0]);
+    assert!(infos[1].contains("7"), "second iteration: {}", infos[1]);
+    assert!(infos[2].contains("11"), "third iteration: {}", infos[2]);
+}

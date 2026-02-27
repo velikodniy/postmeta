@@ -96,6 +96,7 @@ impl Interpreter {
             }
             Command::BeginGroup => {
                 self.save_stack.push_boundary();
+                self.macro_save_stack.push(None);
                 self.get_x_next();
                 Ok(())
             }
@@ -648,6 +649,13 @@ impl Interpreter {
 
                 self.variables.invalidate_sym_cache_entry(sym_id);
                 self.symbols.clear(sym_id);
+
+                // Also save and remove any macro definition (especially
+                // vardefs, whose presence is detected via the `macros` map
+                // rather than the symbol entry).
+                if let Some(info) = self.macros.remove(&sym_id) {
+                    self.macro_save_stack.push(Some((sym_id, info)));
+                }
             }
             self.get_x_next();
             if self.cur.command != Command::Comma {
@@ -953,6 +961,15 @@ impl Interpreter {
 
     /// Restore scope at `endgroup`.
     pub(super) fn do_endgroup(&mut self) {
+        // Restore macro definitions saved by `save` back to the group boundary.
+        while let Some(entry) = self.macro_save_stack.pop() {
+            if let Some((sym_id, info)) = entry {
+                self.macros.insert(sym_id, info);
+            } else {
+                break; // `None` = boundary marker
+            }
+        }
+
         let entries = self.save_stack.restore_to_boundary();
         for entry in entries {
             match entry {
