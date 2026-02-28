@@ -511,6 +511,44 @@ impl Transform {
     }
 }
 
+/// `Transform * Transform` — compose two transforms.
+///
+/// `a * b` applies `a` first, then `b` (equivalent to `a.then(&b)`).
+impl ops::Mul for Transform {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self {
+        self.then(&rhs)
+    }
+}
+
+/// `&Transform * Transform` — compose with borrowed left operand.
+impl ops::Mul<Transform> for &Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: Transform) -> Transform {
+        self.then(&rhs)
+    }
+}
+
+/// `Transform * &Transform` — compose with borrowed right operand.
+impl ops::Mul<&Self> for Transform {
+    type Output = Self;
+
+    fn mul(self, rhs: &Self) -> Self {
+        self.then(rhs)
+    }
+}
+
+/// `&Transform * &Transform` — compose with both operands borrowed.
+impl ops::Mul for &Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: &Transform) -> Transform {
+        self.then(rhs)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Picture and GraphicsObject
 // ---------------------------------------------------------------------------
@@ -722,6 +760,47 @@ mod tests {
         let p = t.apply(Point::new(1.0, 1.0));
         assert!((p.x - 12.0).abs() < EPSILON);
         assert!((p.y - 23.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn transform_mul_operator() {
+        use crate::transform::{scaled, shifted};
+
+        let a = Transform {
+            tx: 1.0,
+            ty: 2.0,
+            txx: 3.0,
+            txy: 4.0,
+            tyx: 5.0,
+            tyy: 6.0,
+        };
+        // Mul should be equivalent to `then`
+        let composed = a * Transform::IDENTITY;
+        assert_eq!(a, composed);
+        let composed = Transform::IDENTITY * a;
+        assert_eq!(a, composed);
+
+        // Test non-trivial composition with meaningful transforms
+        let translate = shifted(10.0, 20.0);
+        let scale = scaled(2.0);
+        let composed = translate * scale;
+        assert_eq!(composed, translate.then(&scale));
+
+        // Verify the composition actually transforms a point correctly
+        // Order: translate first (1,1) -> (11,21), then scale -> (22,42)
+        let p = Point::new(1.0, 1.0);
+        let result = composed.apply(p);
+        assert!((result.x - 22.0).abs() < EPSILON);
+        assert!((result.y - 42.0).abs() < EPSILON);
+
+        // Test reference operators work
+        let t1 = shifted(5.0, 5.0);
+        let t2 = scaled(3.0);
+        let result1 = &t1 * &t2;
+        let result2 = &t1 * t2;
+        let result3 = t1 * &scaled(3.0);
+        assert_eq!(result1, result2);
+        assert_eq!(result2, result3);
     }
 
     #[test]
