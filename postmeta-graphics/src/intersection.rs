@@ -58,11 +58,12 @@ pub fn intersection_times(path1: &Path, path2: &Path) -> Option<Intersection> {
 pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
     let n1 = path1.num_segments();
     let n2 = path2.num_segments();
-    let results = Vec::new();
 
     if n1 == 0 || n2 == 0 {
-        return results;
+        return Vec::new();
     }
+
+    let results = Vec::new();
 
     let mut ctx = FindAllContext {
         seg1_offset: 0.0,
