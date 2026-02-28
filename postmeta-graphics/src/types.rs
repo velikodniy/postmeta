@@ -180,6 +180,13 @@ impl From<Point> for Vec2 {
     }
 }
 
+/// Convert a [`Vec2`] to a point (treating it as a displacement from the origin).
+impl From<Vec2> for Point {
+    fn from(v: Vec2) -> Self {
+        Self { x: v.x, y: v.y }
+    }
+}
+
 /// `Vec2 + Vec2`.
 impl ops::Add for Vec2 {
     type Output = Self;
@@ -825,5 +832,13 @@ mod tests {
         p2.push(GraphicsObject::SetBoundsEnd);
         p1.merge(p2);
         assert_eq!(p1.objects.len(), 2);
+    }
+
+    #[test]
+    fn point_from_vec2() {
+        let v = Vec2::new(3.0, 4.0);
+        let p = Point::from(v);
+        assert_eq!(p.x, 3.0);
+        assert_eq!(p.y, 4.0);
     }
 }
