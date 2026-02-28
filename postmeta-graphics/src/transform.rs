@@ -137,7 +137,12 @@ impl Transformable for GraphicsObject {
                 pen: stroke.pen.transformed(t),
                 color: stroke.color,
                 dash: stroke.dash.clone().map(|mut d| {
-                    // Scale dash pattern by sqrt of determinant magnitude
+                    // Scale dash lengths by the "average linear scale factor" of
+                    // the transform.  For a uniform scale s the determinant is
+                    // s², so sqrt(|det|) = |s|, which is the correct 1-D length
+                    // scale.  For non-uniform transforms this is an approximation
+                    // (the exact scale depends on direction) but it matches
+                    // MetaPost's approach and is adequate for dash patterns.
                     let scale = determinant(t).abs().sqrt();
                     for v in &mut d.dashes {
                         *v *= scale;
