@@ -67,8 +67,8 @@ fn compile_program(source: &str) -> CompileOutput {
     }
 
     let run_failure = interpreter.run(source).err();
-    let diagnostics = collect_diagnostics(&interpreter.errors, run_failure.as_ref());
-    let has_error = has_errors(&interpreter.errors) || run_failure.is_some();
+    let diagnostics = collect_diagnostics(interpreter.diagnostics(), run_failure.as_ref());
+    let has_error = has_errors(interpreter.diagnostics()) || run_failure.is_some();
     let svg = render_svg_preview(&interpreter, fonts.as_deref());
 
     CompileOutput {
@@ -129,7 +129,7 @@ fn render_svg_preview(interpreter: &Interpreter, fonts: Option<&dyn FontProvider
         let opts = RenderOptions {
             margin: 1.0,
             precision: 4,
-            true_corners: interpreter.internals.get(InternalId::TrueCorners as u16) > 0.0,
+            true_corners: interpreter.internals().get(InternalId::TrueCorners as u16) > 0.0,
             ..RenderOptions::default()
         };
         render_with_fonts(picture, &opts, fonts).to_string()
