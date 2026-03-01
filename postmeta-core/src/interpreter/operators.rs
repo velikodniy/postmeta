@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use postmeta_fonts::FontProvider;
-use postmeta_graphics::bbox;
+use postmeta_graphics::bbox::BoundingBox;
 use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::path::Path;
@@ -345,10 +345,10 @@ impl Interpreter {
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 let bb = match input {
-                    Value::Picture(pic) => bbox::picture_bbox(pic, false),
-                    Value::Path(p) => bbox::path_bbox(p),
+                    Value::Picture(pic) => BoundingBox::of_picture(pic, false),
+                    Value::Path(p) => BoundingBox::of_path(p),
                     Value::Pen(p) => {
-                        let mut bb = bbox::BoundingBox::EMPTY;
+                        let mut bb = BoundingBox::EMPTY;
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
                                 for pt in [

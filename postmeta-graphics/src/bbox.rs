@@ -95,6 +95,73 @@ impl BoundingBox {
             self.max_y = self.max_y.max(other.max_y);
         }
     }
+
+    /// Compute the bounding box of a path (control-point hull).
+    ///
+    /// This is a conservative estimate using the convex hull of all control
+    /// points, not the tight bound. This matches `MetaPost`'s behavior.
+    #[must_use]
+    pub fn of_path(path: &Path) -> Self {
+        path.knots.iter().fold(Self::EMPTY, |mut bb, knot| {
+            bb.include_point(knot.point);
+            if let KnotDirection::Explicit(cp) = knot.left {
+                bb.include_point(cp);
+            }
+            if let KnotDirection::Explicit(cp) = knot.right {
+                bb.include_point(cp);
+            }
+            bb
+        })
+    }
+
+    /// Compute the bounding box of a picture.
+    ///
+    /// When `true_corners` is false, `SetBounds` regions override the
+    /// computed bbox. When true, they are ignored.
+    #[must_use]
+    pub fn of_picture(pic: &Picture, true_corners: bool) -> Self {
+        let mut bb = Self::EMPTY;
+        let mut bounds_stack: Vec<Self> = Vec::new();
+
+        for obj in &pic.objects {
+            match obj {
+                GraphicsObject::Fill(fill) => {
+                    let pbb = Self::of_path(&fill.path);
+                    bb.union(&pbb);
+                }
+                GraphicsObject::Stroke(stroke) => {
+                    let mut pbb = Self::of_path(&stroke.path);
+                    // Expand by pen extent (rough estimate)
+                    let pen_extent = pen_max_extent(&stroke.pen);
+                    pbb.min_x -= pen_extent;
+                    pbb.min_y -= pen_extent;
+                    pbb.max_x += pen_extent;
+                    pbb.max_y += pen_extent;
+                    bb.union(&pbb);
+                }
+                GraphicsObject::Text(text) => {
+                    expand_for_text(text, &mut bb);
+                }
+                GraphicsObject::SetBoundsStart(path) if !true_corners => {
+                    bounds_stack.push(bb);
+                    bb = Self::of_path(path);
+                }
+                GraphicsObject::SetBoundsEnd if !true_corners => {
+                    if let Some(prev) = bounds_stack.pop() {
+                        let current = bb;
+                        bb = prev;
+                        bb.union(&current);
+                    }
+                }
+                GraphicsObject::ClipStart(_)
+                | GraphicsObject::ClipEnd
+                | GraphicsObject::SetBoundsStart(_)
+                | GraphicsObject::SetBoundsEnd => {}
+            }
+        }
+
+        bb
+    }
 }
 
 impl Default for BoundingBox {
@@ -104,30 +171,11 @@ impl Default for BoundingBox {
 }
 
 // ---------------------------------------------------------------------------
-// Bounding box computation helpers
+// Private helpers
 // ---------------------------------------------------------------------------
 
-/// Compute the bounding box of a path (control-point hull).
-///
-/// This is a conservative estimate using the convex hull of all control
-/// points, not the tight bound. This matches `MetaPost`'s behavior.
-#[must_use]
-pub fn path_bbox(path: &Path) -> BoundingBox {
-    path.knots.iter().fold(BoundingBox::EMPTY, |mut bb, knot| {
-        bb.include_point(knot.point);
-        if let KnotDirection::Explicit(cp) = knot.left {
-            bb.include_point(cp);
-        }
-        if let KnotDirection::Explicit(cp) = knot.right {
-            bb.include_point(cp);
-        }
-        bb
-    })
-}
-
 /// Rough estimate of the maximum pen extent (half-width).
-#[must_use]
-pub fn pen_max_extent(pen: &Pen) -> Scalar {
+fn pen_max_extent(pen: &Pen) -> Scalar {
     match pen {
         Pen::Elliptical(t) => {
             // Max of the two basis vector lengths (columns of the 2×2 matrix)
@@ -142,61 +190,12 @@ pub fn pen_max_extent(pen: &Pen) -> Scalar {
     }
 }
 
-/// Compute the bounding box of a picture.
-///
-/// When `true_corners` is false, `SetBounds` regions override the
-/// computed bbox. When true, they are ignored.
-#[must_use]
-pub fn picture_bbox(pic: &Picture, true_corners: bool) -> BoundingBox {
-    let mut bb = BoundingBox::EMPTY;
-    let mut bounds_stack: Vec<BoundingBox> = Vec::new();
-
-    for obj in &pic.objects {
-        match obj {
-            GraphicsObject::Fill(fill) => {
-                let pbb = path_bbox(&fill.path);
-                bb.union(&pbb);
-            }
-            GraphicsObject::Stroke(stroke) => {
-                let mut pbb = path_bbox(&stroke.path);
-                // Expand by pen extent (rough estimate)
-                let pen_extent = pen_max_extent(&stroke.pen);
-                pbb.min_x -= pen_extent;
-                pbb.min_y -= pen_extent;
-                pbb.max_x += pen_extent;
-                pbb.max_y += pen_extent;
-                bb.union(&pbb);
-            }
-            GraphicsObject::Text(text) => {
-                text_bbox(text, &mut bb);
-            }
-            GraphicsObject::SetBoundsStart(path) if !true_corners => {
-                bounds_stack.push(bb);
-                bb = path_bbox(path);
-            }
-            GraphicsObject::SetBoundsEnd if !true_corners => {
-                if let Some(prev) = bounds_stack.pop() {
-                    let current = bb;
-                    bb = prev;
-                    bb.union(&current);
-                }
-            }
-            GraphicsObject::ClipStart(_)
-            | GraphicsObject::ClipEnd
-            | GraphicsObject::SetBoundsStart(_)
-            | GraphicsObject::SetBoundsEnd => {}
-        }
-    }
-
-    bb
-}
-
 /// Expand a bounding box to include a text object's extent.
 ///
 /// Uses the precomputed [`TextMetrics`] stored on the object.  If all
 /// metrics are zero (no font data available), the text contributes a
 /// single degenerate point at its origin.
-fn text_bbox(text: &TextObject, bb: &mut BoundingBox) {
+fn expand_for_text(text: &TextObject, bb: &mut BoundingBox) {
     let m = &text.metrics;
     let corners = [
         Point::new(0.0, -m.depth),
@@ -272,7 +271,7 @@ mod tests {
     #[test]
     fn test_path_bbox() {
         let path = make_unit_square();
-        let bb = path_bbox(&path);
+        let bb = BoundingBox::of_path(&path);
         assert!(bb.is_valid());
         assert!(bb.min_x < 0.1);
         assert!(bb.min_y < 0.1);
@@ -296,7 +295,7 @@ mod tests {
             },
         );
 
-        let bb = picture_bbox(&pic, true);
+        let bb = BoundingBox::of_picture(&pic, true);
         assert!(bb.is_valid());
         assert!(bb.width() > 9.0);
         assert!(bb.height() > 9.0);
@@ -351,7 +350,7 @@ mod tests {
         };
         let mut pic = Picture::new();
         pic.objects.push(GraphicsObject::Text(text));
-        let bb = picture_bbox(&pic, false);
+        let bb = BoundingBox::of_picture(&pic, false);
 
         assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
         assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
@@ -371,7 +370,7 @@ mod tests {
         };
         let mut pic = Picture::new();
         pic.objects.push(GraphicsObject::Text(text));
-        let bb = picture_bbox(&pic, false);
+        let bb = BoundingBox::of_picture(&pic, false);
 
         // Zero metrics → all four corners collapse to the origin.
         assert!(bb.min_x.abs() < EPSILON, "min_x: {}", bb.min_x);
