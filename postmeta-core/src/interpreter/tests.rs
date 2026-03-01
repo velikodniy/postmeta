@@ -28,8 +28,8 @@ fn eval_numeric_literal() {
     let mut interp = Interpreter::new();
     interp.run("show 42;").unwrap();
     // Should have a show message
-    assert!(!interp.errors.is_empty());
-    let msg = &interp.errors[0].message;
+    assert!(!interp.state.errors.is_empty());
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -37,7 +37,7 @@ fn eval_numeric_literal() {
 fn eval_arithmetic() {
     let mut interp = Interpreter::new();
     interp.run("show 3 + 4;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -45,7 +45,7 @@ fn eval_arithmetic() {
 fn eval_multiplication() {
     let mut interp = Interpreter::new();
     interp.run("show 3 * 5;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -56,7 +56,7 @@ fn division_by_variable() {
     // it when the denominator was a variable (not a numeric literal).
     let mut interp = Interpreter::new();
     interp.run("numeric n; n := 5; show 360/n;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("72"), "expected 72 in: {msg}");
 }
 
@@ -64,7 +64,7 @@ fn division_by_variable() {
 fn eval_string() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\";").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
@@ -72,7 +72,7 @@ fn eval_string() {
 fn eval_boolean() {
     let mut interp = Interpreter::new();
     interp.run("show true;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -80,7 +80,7 @@ fn eval_boolean() {
 fn eval_pair() {
     let mut interp = Interpreter::new();
     interp.run("show (3, 4);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("(3,4)"), "expected (3,4) in: {msg}");
 }
 
@@ -88,7 +88,7 @@ fn eval_pair() {
 fn eval_unary_minus() {
     let mut interp = Interpreter::new();
     interp.run("show -5;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("-5"), "expected -5 in: {msg}");
 }
 
@@ -96,7 +96,7 @@ fn eval_unary_minus() {
 fn eval_sqrt() {
     let mut interp = Interpreter::new();
     interp.run("show sqrt 9;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
@@ -104,7 +104,7 @@ fn eval_sqrt() {
 fn eval_sind() {
     let mut interp = Interpreter::new();
     interp.run("show sind 90;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -112,7 +112,7 @@ fn eval_sind() {
 fn eval_comparison() {
     let mut interp = Interpreter::new();
     interp.run("show 3 < 5;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -122,21 +122,21 @@ fn eval_operator_precedence_layers() {
     interp
         .run("show 1 + 2 * 3 = 7; show 1 + 2 * 3 > 6; show (1 + 2) * 3 = 9;")
         .unwrap();
-    assert_eq!(interp.errors.len(), 3);
+    assert_eq!(interp.state.errors.len(), 3);
     assert!(
-        interp.errors[0].message.contains("true"),
+        interp.state.errors[0].message.contains("true"),
         "expected true in: {}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     assert!(
-        interp.errors[1].message.contains("true"),
+        interp.state.errors[1].message.contains("true"),
         "expected true in: {}",
-        interp.errors[1].message
+        interp.state.errors[1].message
     );
     assert!(
-        interp.errors[2].message.contains("true"),
+        interp.state.errors[2].message.contains("true"),
         "expected true in: {}",
-        interp.errors[2].message
+        interp.state.errors[2].message
     );
 }
 
@@ -144,16 +144,16 @@ fn eval_operator_precedence_layers() {
 fn eval_left_associative_infix_ops() {
     let mut interp = Interpreter::new();
     interp.run("show 10 - 3 - 2; show 20 / 5 / 2;").unwrap();
-    assert_eq!(interp.errors.len(), 2);
+    assert_eq!(interp.state.errors.len(), 2);
     assert!(
-        interp.errors[0].message.contains("5"),
+        interp.state.errors[0].message.contains("5"),
         "expected 5 in: {}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     assert!(
-        interp.errors[1].message.contains("2"),
+        interp.state.errors[1].message.contains("2"),
         "expected 2 in: {}",
-        interp.errors[1].message
+        interp.state.errors[1].message
     );
 }
 
@@ -161,16 +161,16 @@ fn eval_left_associative_infix_ops() {
 fn eval_expression_rhs_parses_tighter_precedence() {
     let mut interp = Interpreter::new();
     interp.run("show 1 = 1 + 0; show 1 < 2 + 3 * 4;").unwrap();
-    assert_eq!(interp.errors.len(), 2);
+    assert_eq!(interp.state.errors.len(), 2);
     assert!(
-        interp.errors[0].message.contains("true"),
+        interp.state.errors[0].message.contains("true"),
         "expected true in: {}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     assert!(
-        interp.errors[1].message.contains("true"),
+        interp.state.errors[1].message.contains("true"),
         "expected true in: {}",
-        interp.errors[1].message
+        interp.state.errors[1].message
     );
 }
 
@@ -178,24 +178,42 @@ fn eval_expression_rhs_parses_tighter_precedence() {
 fn eval_expression_operators_are_left_associative() {
     let mut interp = Interpreter::new();
     interp.run("show 1 < 2 = true; show 3 > 2 = true;").unwrap();
-    assert_eq!(interp.errors.len(), 2);
+    assert_eq!(interp.state.errors.len(), 2);
     assert!(
-        interp.errors[0].message.contains("true"),
+        interp.state.errors[0].message.contains("true"),
         "expected true in: {}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     assert!(
-        interp.errors[1].message.contains("true"),
+        interp.state.errors[1].message.contains("true"),
         "expected true in: {}",
-        interp.errors[1].message
+        interp.state.errors[1].message
     );
+}
+
+#[test]
+fn parser_split_keeps_equation_vs_assignment_behavior() {
+    let mut interp = Interpreter::new();
+    interp.run("numeric a, b, c; a = 7; b := c := 9;").unwrap();
+
+    let a_sym = interp.state.symbols.lookup("a");
+    let b_sym = interp.state.symbols.lookup("b");
+    let c_sym = interp.state.symbols.lookup("c");
+
+    let a_id = interp.state.variables.lookup_by_sym(a_sym, "a");
+    let b_id = interp.state.variables.lookup_by_sym(b_sym, "b");
+    let c_id = interp.state.variables.lookup_by_sym(c_sym, "c");
+
+    assert_eq!(interp.state.variables.known_value(a_id), Some(7.0));
+    assert_eq!(interp.state.variables.known_value(b_id), Some(9.0));
+    assert_eq!(interp.state.variables.known_value(c_id), Some(9.0));
 }
 
 #[test]
 fn eval_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"hello\" & \" world\";").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         msg.contains("hello world"),
         "expected 'hello world' in: {msg}"
@@ -206,7 +224,7 @@ fn eval_string_concat() {
 fn chained_string_concat() {
     let mut interp = Interpreter::new();
     interp.run("show \"a\" & \"b\" & \"c\" & \"d\";").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("abcd"), "expected 'abcd' in: {msg}");
 }
 
@@ -214,14 +232,14 @@ fn chained_string_concat() {
 fn eval_multiple_statements() {
     let mut interp = Interpreter::new();
     interp.run("show 1; show 2; show 3;").unwrap();
-    assert_eq!(interp.errors.len(), 3);
+    assert_eq!(interp.state.errors.len(), 3);
 }
 
 #[test]
 fn eval_internal_quantity() {
     let mut interp = Interpreter::new();
     interp.run("show linecap;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 (round) in: {msg}");
 }
 
@@ -229,7 +247,7 @@ fn eval_internal_quantity() {
 fn eval_pencircle() {
     let mut interp = Interpreter::new();
     interp.run("show pencircle;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("pen"), "expected pen in: {msg}");
 }
 
@@ -237,7 +255,7 @@ fn eval_pencircle() {
 fn eval_if_true() {
     let mut interp = Interpreter::new();
     interp.run("show if true: 42 fi;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -245,7 +263,7 @@ fn eval_if_true() {
 fn eval_if_false_else() {
     let mut interp = Interpreter::new();
     interp.run("show if false: 1 else: 2 fi;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
@@ -255,12 +273,12 @@ fn eval_if_false_no_else() {
     // `if false: show 1; fi; show 2;` — only show 2 should execute
     interp.run("if false: show 1; fi; show 2;").unwrap();
     assert_eq!(
-        interp.errors.len(),
+        interp.state.errors.len(),
         1,
         "expected only 1 show, got {:?}",
-        interp.errors
+        interp.state.errors
     );
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
@@ -270,8 +288,8 @@ fn eval_if_elseif() {
     interp
         .run("if false: show 1; elseif true: show 2; fi;")
         .unwrap();
-    assert_eq!(interp.errors.len(), 1);
-    let msg = &interp.errors[0].message;
+    assert_eq!(interp.state.errors.len(), 1);
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
@@ -279,8 +297,8 @@ fn eval_if_elseif() {
 fn eval_if_nested() {
     let mut interp = Interpreter::new();
     interp.run("if true: if true: show 42; fi; fi;").unwrap();
-    assert_eq!(interp.errors.len(), 1);
-    let msg = &interp.errors[0].message;
+    assert_eq!(interp.state.errors.len(), 1);
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -289,14 +307,14 @@ fn eval_for_loop() {
     let mut interp = Interpreter::new();
     interp.run("for i = 1, 2, 3: show i; endfor;").unwrap();
     assert_eq!(
-        interp.errors.len(),
+        interp.state.errors.len(),
         3,
         "expected 3 shows: {:?}",
-        interp.errors
+        interp.state.errors
     );
-    assert!(interp.errors[0].message.contains("1"));
-    assert!(interp.errors[1].message.contains("2"));
-    assert!(interp.errors[2].message.contains("3"));
+    assert!(interp.state.errors[0].message.contains("1"));
+    assert!(interp.state.errors[1].message.contains("2"));
+    assert!(interp.state.errors[2].message.contains("3"));
 }
 
 #[test]
@@ -307,7 +325,7 @@ fn eval_for_loop_step() {
         .run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;")
         .unwrap();
     // s should be 1+2+3 = 6
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
@@ -317,7 +335,7 @@ fn eval_forever_exitif() {
     interp
         .run("numeric n; n := 0; forever: n := n + 1; exitif n > 3; endfor; show n;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("4"), "expected 4 in: {msg}");
 }
 
@@ -327,6 +345,7 @@ fn exitif_outside_loop_reports_error() {
     interp.run("exitif true;").unwrap();
 
     let errs: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -351,6 +370,7 @@ fn exitif_outside_loop_does_not_leak_into_future_forever() {
         .unwrap();
 
     let errs: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -362,6 +382,7 @@ fn exitif_outside_loop_does_not_leak_into_future_forever() {
     );
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -390,6 +411,7 @@ fn exitif_in_for_step_until_stops_loop() {
         ))
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -399,6 +421,7 @@ fn exitif_in_for_step_until_stops_loop() {
         "exitif in for-step-until should not produce errors: {errors:?}"
     );
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -425,6 +448,7 @@ fn nested_forever_loops_keep_outer_replay_state() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -438,7 +462,7 @@ fn filled_returns_true_for_fill_picture() {
     interp
         .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show filled p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -448,7 +472,7 @@ fn stroked_returns_true_for_stroke_picture() {
     interp
         .run("picture p; addto p doublepath ((0,0)..(10,0)); show stroked p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -456,7 +480,7 @@ fn stroked_returns_true_for_stroke_picture() {
 fn clipped_returns_false_for_empty_picture() {
     let mut interp = Interpreter::new();
     interp.run("picture p; show clipped p;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -466,7 +490,7 @@ fn textpart_extracts_text_from_picture() {
     interp
         .run(r#"picture p; p = "hello" infont "cmr10"; show textpart p;"#)
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
@@ -476,7 +500,7 @@ fn fontpart_extracts_font_from_picture() {
     interp
         .run(r#"picture p; p = "abc" infont "cmr10"; show fontpart p;"#)
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("cmr10"), "expected cmr10 in: {msg}");
 }
 
@@ -486,7 +510,7 @@ fn textpart_returns_empty_for_non_text_picture() {
     interp
         .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textpart p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // Empty string shows as ""
     assert!(msg.contains("\"\""), "expected empty string in: {msg}");
 }
@@ -497,7 +521,7 @@ fn pathpart_extracts_path_from_fill() {
     interp
         .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show pathpart p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // Should show a path, not an error
     assert!(
         !msg.contains("Unimplemented"),
@@ -511,7 +535,7 @@ fn penpart_returns_pen_for_stroke() {
     interp
         .run("picture p; addto p doublepath ((0,0)..(10,0)); show penpart p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         !msg.contains("Unimplemented"),
         "penpart should not error: {msg}"
@@ -524,7 +548,7 @@ fn dashpart_returns_picture_for_stroke() {
     interp
         .run("picture p; addto p doublepath ((0,0)..(10,0)); show dashpart p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         !msg.contains("Unimplemented"),
         "dashpart should not error: {msg}"
@@ -535,7 +559,7 @@ fn dashpart_returns_picture_for_stroke() {
 fn charexists_valid_code() {
     let mut interp = Interpreter::new();
     interp.run("show charexists 65;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -543,7 +567,7 @@ fn charexists_valid_code() {
 fn charexists_out_of_range() {
     let mut interp = Interpreter::new();
     interp.run("show charexists 256;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -551,7 +575,7 @@ fn charexists_out_of_range() {
 fn charexists_negative() {
     let mut interp = Interpreter::new();
     interp.run("show charexists -1;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -559,7 +583,7 @@ fn charexists_negative() {
 fn fontsize_returns_ten() {
     let mut interp = Interpreter::new();
     interp.run(r#"show fontsize "cmr10";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
@@ -570,7 +594,7 @@ fn directiontime_east_on_right_path() {
     interp
         .run("path p; p := (0,0)..(10,0); show directiontime (1,0) of p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
@@ -581,7 +605,7 @@ fn directiontime_not_found() {
     interp
         .run("path p; p := (0,0)..(10,0); show directiontime (-1,0) of p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("-1"), "expected -1 in: {msg}");
 }
 
@@ -593,7 +617,7 @@ fn turningnumber_counterclockwise() {
     interp
         .run("path p; p := (0,0)..(10,0)..(5,10)..cycle; show turningnumber p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -601,7 +625,7 @@ fn turningnumber_counterclockwise() {
 fn turningnumber_pair_returns_zero() {
     let mut interp = Interpreter::new();
     interp.run("show turningnumber (3,4);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
@@ -611,7 +635,7 @@ fn turningnumber_open_path_returns_zero() {
     interp
         .run("path p; p := (0,0)..(10,0); show turningnumber p;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
@@ -635,6 +659,7 @@ fn nested_forever_exitif_equals_is_comparison() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -642,6 +667,7 @@ fn nested_forever_exitif_equals_is_comparison() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -657,12 +683,12 @@ fn nested_forever_exitif_equals_is_comparison() {
 fn eval_xpart_ypart_pair() {
     let mut interp = Interpreter::new();
     interp.run("show xpart (3, 7);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 
     let mut interp = Interpreter::new();
     interp.run("show ypart (3, 7);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -670,7 +696,7 @@ fn eval_xpart_ypart_pair() {
 fn eval_assignment_numeric() {
     let mut interp = Interpreter::new();
     interp.run("numeric x; x := 42; show x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -678,7 +704,7 @@ fn eval_assignment_numeric() {
 fn eval_assignment_string() {
     let mut interp = Interpreter::new();
     interp.run("string s; s := \"hello\"; show s;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
@@ -686,7 +712,7 @@ fn eval_assignment_string() {
 fn eval_assignment_overwrite() {
     let mut interp = Interpreter::new();
     interp.run("numeric x; x := 10; x := 20; show x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("20"), "expected 20 in: {msg}");
 }
 
@@ -694,7 +720,7 @@ fn eval_assignment_overwrite() {
 fn eval_assignment_internal() {
     let mut interp = Interpreter::new();
     interp.run("linecap := 0; show linecap;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
@@ -702,7 +728,7 @@ fn eval_assignment_internal() {
 fn eval_assignment_expr() {
     let mut interp = Interpreter::new();
     interp.run("numeric x; x := 3 + 4; show x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -712,7 +738,7 @@ fn eval_def_simple() {
     interp
         .run("def double(expr x) = 2 * x enddef; show double(5);")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
@@ -720,7 +746,7 @@ fn eval_def_simple() {
 fn eval_def_no_params() {
     let mut interp = Interpreter::new();
     interp.run("def seven = 7 enddef; show seven;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -730,7 +756,7 @@ fn eval_def_two_params() {
     interp
         .run("def add(expr a, expr b) = a + b enddef; show add(3, 4);")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -740,9 +766,9 @@ fn eval_def_multiple_calls() {
     interp
         .run("def sq(expr x) = x * x enddef; show sq(3); show sq(5);")
         .unwrap();
-    assert_eq!(interp.errors.len(), 2);
-    assert!(interp.errors[0].message.contains("9"), "expected 9");
-    assert!(interp.errors[1].message.contains("25"), "expected 25");
+    assert_eq!(interp.state.errors.len(), 2);
+    assert!(interp.state.errors[0].message.contains("9"), "expected 9");
+    assert!(interp.state.errors[1].message.contains("25"), "expected 25");
 }
 
 #[test]
@@ -751,7 +777,7 @@ fn eval_def_nested_call() {
     interp
         .run("def double(expr x) = 2 * x enddef; show double(double(3));")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("12"), "expected 12 in: {msg}");
 }
 
@@ -761,7 +787,7 @@ fn eval_vardef() {
     interp
         .run("vardef triple(expr x) = 3 * x enddef; show triple(4);")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("12"), "expected 12 in: {msg}");
 }
 
@@ -774,6 +800,7 @@ fn eval_def_with_body_statements() {
         .unwrap();
     // Find the show message (skip any info/error messages before it)
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.message.contains(">>"))
@@ -781,7 +808,12 @@ fn eval_def_with_body_statements() {
     assert!(
         show_msg.is_some() && show_msg.unwrap().contains("42"),
         "expected show 42, got errors: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -793,6 +825,7 @@ fn eval_def_in_for_loop() {
         .unwrap();
     // inc(1) + inc(2) + inc(3) = 2 + 3 + 4 = 9
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.message.contains(">>"))
@@ -800,7 +833,12 @@ fn eval_def_in_for_loop() {
     assert!(
         show_msg.is_some() && show_msg.unwrap().contains("9"),
         "expected show 9, got errors: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -810,9 +848,9 @@ fn eval_def_with_conditional() {
     interp
         .run("def myabs(expr x) = if x < 0: -x else: x fi enddef; show myabs(-5); show myabs(3);")
         .unwrap();
-    assert_eq!(interp.errors.len(), 2);
-    assert!(interp.errors[0].message.contains("5"), "expected 5");
-    assert!(interp.errors[1].message.contains("3"), "expected 3");
+    assert_eq!(interp.state.errors.len(), 2);
+    assert!(interp.state.errors[0].message.contains("5"), "expected 5");
+    assert!(interp.state.errors[1].message.contains("3"), "expected 3");
 }
 
 #[test]
@@ -820,6 +858,7 @@ fn eval_scantokens_basic() {
     let mut interp = Interpreter::new();
     interp.run("show scantokens \"3 + 4\";").unwrap();
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.message.contains(">>"))
@@ -827,7 +866,12 @@ fn eval_scantokens_basic() {
     assert!(
         show_msg.is_some() && show_msg.unwrap().contains("7"),
         "expected show 7, got: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -838,6 +882,7 @@ fn eval_scantokens_define_and_use() {
         .run("scantokens \"def foo = 99 enddef\"; show foo;")
         .unwrap();
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.message.contains(">>"))
@@ -845,7 +890,12 @@ fn eval_scantokens_define_and_use() {
     assert!(
         show_msg.is_some() && show_msg.unwrap().contains("99"),
         "expected show 99, got: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -866,6 +916,7 @@ fn expandafter_text_macro_scantokens() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -884,6 +935,7 @@ fn expandafter_simple_token() {
     let mut interp = Interpreter::new();
     interp.run("expandafter message \"hello\"; end").unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -919,6 +971,7 @@ fn expandafter_triple_redefine_macro() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -949,6 +1002,7 @@ fn expandafter_triple_accumulate() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -978,6 +1032,7 @@ fn known_unknown_operators() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -996,11 +1051,17 @@ fn eval_input_file_not_found() {
     interp.run("input nonexistent;").unwrap();
     assert!(
         interp
+            .state
             .errors
             .iter()
             .any(|e| e.message.contains("not found")),
         "expected file-not-found error: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1023,6 +1084,7 @@ fn eval_input_with_filesystem() {
     interp.set_filesystem(Box::new(TestFs));
     interp.run("input testlib; show tripleplus(10);").unwrap();
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.message.contains(">>"))
@@ -1030,7 +1092,12 @@ fn eval_input_with_filesystem() {
     assert!(
         show_msg.is_some() && show_msg.unwrap().contains("31"),
         "expected show 31, got: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1040,7 +1107,7 @@ fn eval_primarydef() {
     interp
         .run("primarydef a dotprod b = xpart a * xpart b + ypart a * ypart b enddef; show (3,4) dotprod (1,2);")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // 3*1 + 4*2 = 11
     assert!(msg.contains("11"), "expected 11 in: {msg}");
 }
@@ -1050,12 +1117,12 @@ fn eval_xpart_shifted_pair() {
     // (3, 7) shifted (10, 20) = (13, 27)
     let mut interp = Interpreter::new();
     interp.run("show xpart ((3,7) shifted (10,20));").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("13"), "expected 13 in: {msg}");
 
     let mut interp = Interpreter::new();
     interp.run("show ypart ((3,7) shifted (10,20));").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("27"), "expected 27 in: {msg}");
 }
 
@@ -1067,7 +1134,7 @@ fn eval_xpart_shifted_pair() {
 fn type_declaration_numeric() {
     let mut interp = Interpreter::new();
     interp.run("numeric x; x := 42; show x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -1075,7 +1142,7 @@ fn type_declaration_numeric() {
 fn type_declaration_string() {
     let mut interp = Interpreter::new();
     interp.run("string s; s := \"hello\"; show s;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
@@ -1083,7 +1150,7 @@ fn type_declaration_string() {
 fn type_declaration_boolean() {
     let mut interp = Interpreter::new();
     interp.run("boolean b; b := true; show b;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -1091,7 +1158,7 @@ fn type_declaration_boolean() {
 fn type_declaration_pair() {
     let mut interp = Interpreter::new();
     interp.run("pair p; p := (3, 7); show p;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("(3,7)"), "expected (3,7) in: {msg}");
 }
 
@@ -1099,7 +1166,7 @@ fn type_declaration_pair() {
 fn type_declaration_color() {
     let mut interp = Interpreter::new();
     interp.run("color c; c := (1, 0, 0); show c;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("(1,0,0)"), "expected (1,0,0) in: {msg}");
 }
 
@@ -1109,7 +1176,7 @@ fn type_declaration_multiple() {
     interp
         .run("numeric a, b; a := 10; b := 20; show a + b;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("30"), "expected 30 in: {msg}");
 }
 
@@ -1121,7 +1188,7 @@ fn type_declaration_multiple() {
 fn delimiters_custom() {
     let mut interp = Interpreter::new();
     interp.run("delimiters {{ }}; show {{ 3 + 4 }};").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -1129,7 +1196,7 @@ fn delimiters_custom() {
 fn delimiters_pair() {
     let mut interp = Interpreter::new();
     interp.run("delimiters {{ }}; show {{ 2, 5 }};").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("(2,5)"), "expected (2,5) in: {msg}");
 }
 
@@ -1143,7 +1210,7 @@ fn newinternal_basic() {
     interp
         .run("newinternal myvar; myvar := 7; show myvar;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -1153,7 +1220,7 @@ fn newinternal_multiple() {
     interp
         .run("newinternal a, b; a := 3; b := 5; show a + b;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("8"), "expected 8 in: {msg}");
 }
 
@@ -1166,7 +1233,7 @@ fn mediation_basic() {
     let mut interp = Interpreter::new();
     // 0.5[10,20] = 15
     interp.run("show 0.5[10, 20];").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -1175,13 +1242,13 @@ fn mediation_endpoints() {
     let mut interp = Interpreter::new();
     // 0[a,b] = a
     interp.run("show 0[3, 7];").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 
     let mut interp = Interpreter::new();
     // 1[a,b] = b
     interp.run("show 1[3, 7];").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
@@ -1190,7 +1257,7 @@ fn mediation_fraction() {
     let mut interp = Interpreter::new();
     // 1/4[0,100] = 25
     interp.run("show 1/4[0, 100];").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("25"), "expected 25 in: {msg}");
 }
 
@@ -1202,6 +1269,7 @@ fn mediation_preserves_numeric_endpoint_dependencies() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -1221,6 +1289,7 @@ fn mediation_preserves_pair_endpoint_dependencies() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -1243,7 +1312,7 @@ fn for_step_until() {
     interp
         .run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -1254,7 +1323,7 @@ fn for_step_until_by_two() {
     interp
         .run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("30"), "expected 30 in: {msg}");
 }
 
@@ -1265,7 +1334,7 @@ fn for_step_until_negative() {
     interp
         .run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -1276,7 +1345,7 @@ fn for_step_until_accepts_assignment_syntax() {
     interp
         .run("numeric s; s := 0; for k:=1 step 1 until 5: s := s + k; endfor; show s;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -1288,7 +1357,7 @@ fn for_step_until_accepts_assignment_syntax() {
 fn str_operator() {
     let mut interp = Interpreter::new();
     interp.run("show str x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("x"), "expected x in: {msg}");
 }
 
@@ -1296,7 +1365,7 @@ fn str_operator() {
 fn str_operator_multi_char() {
     let mut interp = Interpreter::new();
     interp.run("show str foo;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("foo"), "expected foo in: {msg}");
 }
 
@@ -1304,7 +1373,7 @@ fn str_operator_multi_char() {
 fn str_operator_collects_suffix_chain() {
     let mut interp = Interpreter::new();
     interp.run("show str foo.bar.baz;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         msg.contains("foo.bar.baz"),
         "expected suffix chain in: {msg}"
@@ -1315,7 +1384,7 @@ fn str_operator_collects_suffix_chain() {
 fn str_operator_collects_subscript_suffix() {
     let mut interp = Interpreter::new();
     interp.run("show str z[1+1].x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         msg.contains("z[2].x"),
         "expected subscript suffix in: {msg}"
@@ -1332,7 +1401,7 @@ fn eval_def_undelimited_primary() {
     interp
         .run("vardef double primary x = 2*x enddef; show double 5;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
@@ -1342,7 +1411,7 @@ fn eval_def_undelimited_secondary() {
     interp
         .run("vardef neg secondary x = -x enddef; show neg 3;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("-3"), "expected -3 in: {msg}");
 }
 
@@ -1352,7 +1421,7 @@ fn eval_def_undelimited_expr() {
     interp
         .run("vardef id expr x = x enddef; show id 5+3;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("8"), "expected 8 in: {msg}");
 }
 
@@ -1370,7 +1439,7 @@ fn curl_direction_in_def() {
              path p; p = (0,0)--(1,0); show p;",
         )
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("path"), "expected path in: {msg}");
 }
 
@@ -1389,7 +1458,7 @@ fn let_does_not_expand_rhs() {
              let bar = foo; show 1;",
         )
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -1402,8 +1471,33 @@ fn let_copies_macro_info() {
              let on = _on_; show 5 on 3;",
         )
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("3"), "expected 3 in: {msg}");
+}
+
+#[test]
+fn let_rebinding_to_non_macro_clears_stale_vardef_metadata() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef f(expr x) = x + 1 enddef; \
+             let g = mitered; \
+             let f = g; \
+             show f 2;",
+        )
+        .unwrap();
+
+    let msg = interp
+        .state
+        .errors
+        .last()
+        .expect("expected at least one diagnostic")
+        .message
+        .clone();
+    assert!(
+        !msg.contains("3"),
+        "expected `f` to stop expanding as vardef, got: {msg}"
+    );
 }
 
 // -----------------------------------------------------------------------
@@ -1419,19 +1513,31 @@ fn chained_equation() {
         .unwrap();
     assert!(
         interp
+            .state
             .errors
             .iter()
             .any(|e| e.message.contains(">> (1,0)") || e.message.contains(">> (1,-0)")),
         "expected right=(1,0), got: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
     assert!(
         interp
+            .state
             .errors
             .iter()
             .any(|e| e.message.contains(">> (-1,0)") || e.message.contains(">> (-1,-0)")),
         "expected left=(-1,0), got: {:?}",
-        interp.errors.iter().map(|e| &e.message).collect::<Vec<_>>()
+        interp
+            .state
+            .errors
+            .iter()
+            .map(|e| &e.message)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -1442,7 +1548,12 @@ fn linear_equation_system_solves() {
         .run("numeric x,y; x+y=5; x-y=1; show x; show y;")
         .unwrap();
 
-    let messages: Vec<_> = interp.errors.iter().map(|e| e.message.as_str()).collect();
+    let messages: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .map(|e| e.message.as_str())
+        .collect();
     assert!(
         messages.iter().any(|m| m.contains(">> 3")),
         "expected x=3, got: {:?}",
@@ -1463,6 +1574,7 @@ fn chained_assignment() {
         .unwrap();
 
     let error_count = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1470,6 +1582,7 @@ fn chained_assignment() {
     assert!(error_count == 0, "expected 0 errors, got {error_count}");
 
     let shows: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.message.contains(">>"))
@@ -1508,13 +1621,13 @@ fn type_declaration_clears_subscripted_descendants() {
         .run("numeric t[]; t[0] := 10; t[1] := 20; show t[0];")
         .unwrap();
     assert!(
-        interp.errors[0].message.contains("10"),
+        interp.state.errors[0].message.contains("10"),
         "first assignment: expected 10 in {:?}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     // Re-declare: clears old subscripted values
     interp.run("numeric t[]; t[0] := 99; show t[0];").unwrap();
-    let msg = &interp.errors[1].message;
+    let msg = &interp.state.errors[1].message;
     assert!(
         msg.contains("99"),
         "after re-declaration: expected 99, got: {msg}"
@@ -1534,14 +1647,14 @@ fn type_declaration_generic_subscript_clears_existing() {
         ))
         .unwrap();
     assert!(
-        interp.errors[0].message.contains("false"),
+        interp.state.errors[0].message.contains("false"),
         "before: expected false, got {:?}",
-        interp.errors[0].message
+        interp.state.errors[0].message
     );
     assert!(
-        interp.errors[1].message.contains("true"),
+        interp.state.errors[1].message.contains("true"),
         "after: expected true, got {:?}",
-        interp.errors[1].message
+        interp.state.errors[1].message
     );
 }
 
@@ -1552,7 +1665,7 @@ fn type_declaration_generic_subscript_clears_existing() {
 #[test]
 fn back_input_rescans_token() {
     let mut interp = Interpreter::new();
-    interp.input.push_source("+ 3;");
+    interp.state.input.push_source("+ 3;");
     // Read "+"
     interp.get_next();
     assert_eq!(interp.cur.command, Command::PlusOrMinus);
@@ -1567,7 +1680,7 @@ fn back_input_rescans_token() {
 fn back_expr_capsule_roundtrip() {
     let mut interp = Interpreter::new();
     // Push source first (it goes on the bottom of the stack)
-    interp.input.push_source(";");
+    interp.state.input.push_source(";");
     // Set up a capsule with a pair value and push it back
     interp.back_expr_value(super::ExprResultValue {
         exp: Value::Pair(5.0, 10.0),
@@ -1584,11 +1697,42 @@ fn back_expr_capsule_roundtrip() {
 }
 
 #[test]
+fn expr_value_capsule_roundtrip_preserves_dependency_state() {
+    let mut interp = Interpreter::new();
+    interp.state.input.push_source(";");
+
+    let dep_x = crate::equation::const_dep(5.0);
+    let dep_y = crate::equation::const_dep(10.0);
+    interp.back_expr_value(super::ExprResultValue {
+        exp: Value::Pair(5.0, 10.0),
+        ty: Type::PairType,
+        dep: None,
+        pair_dep: Some((dep_x.clone(), dep_y.clone())),
+    });
+
+    interp.get_x_next();
+    assert_eq!(interp.cur.command, Command::CapsuleToken);
+
+    let result = interp.scan_primary().unwrap();
+    assert_eq!(result.ty, Type::PairType);
+    assert_eq!(result.exp.as_pair(), Some((5.0, 10.0)));
+    assert!(result.dep.is_none());
+    let (actual_x, actual_y) = result
+        .pair_dep
+        .as_ref()
+        .expect("expected pair dependency payload");
+    assert_eq!(crate::equation::constant_value(actual_x), Some(5.0));
+    assert_eq!(crate::equation::constant_value(actual_y), Some(10.0));
+    assert_eq!(crate::equation::constant_value(&dep_x), Some(5.0));
+    assert_eq!(crate::equation::constant_value(&dep_y), Some(10.0));
+}
+
+#[test]
 fn back_expr_numeric_in_expression() {
     // Push a numeric capsule and verify it can participate in arithmetic
     let mut interp = Interpreter::new();
     // Push source first (bottom of stack)
-    interp.input.push_source("+ 3;");
+    interp.state.input.push_source("+ 3;");
     // Then push capsule (top of stack)
     interp.back_expr_value(super::ExprResultValue {
         exp: Value::Numeric(7.0),
@@ -1613,7 +1757,7 @@ fn vardef_suffix_in_equation() {
     interp
         .run("vardef lft primary x = x enddef; pair laboff.lft; laboff.lft = (1,2); show 1;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -1624,7 +1768,7 @@ fn vardef_suffix_undeclared_equation() {
     interp
         .run("vardef lft primary x = x enddef; labxf.lft = 1; show 1;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -1646,6 +1790,7 @@ fn tertiarydef_with_picture() {
         )
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1663,6 +1808,7 @@ fn error_recovery_skips_to_semicolon() {
     interp.run(",,,; show 1;").unwrap();
     // Should have errors for the commas but still process "show 1"
     let show_msgs: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.message.contains("1"))
@@ -1676,6 +1822,7 @@ fn reports_missing_right_paren_in_parenthesized_expression() {
     interp.run("show (1+2; show 7;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1694,6 +1841,7 @@ fn reports_missing_right_bracket_in_mediation() {
     interp.run("show 0.5[(0,0),(2,2); show 9;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1714,6 +1862,7 @@ fn reports_missing_right_brace_in_path_direction() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1732,6 +1881,7 @@ fn scanner_unterminated_string_is_reported() {
     interp.run("show \"unterminated").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1751,6 +1901,7 @@ fn scanner_invalid_character_is_reported() {
     interp.run(&src).unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1796,6 +1947,7 @@ fn dashpattern_basic() {
         .unwrap();
     // Should produce a picture, not a "Cannot transform" error
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1842,6 +1994,7 @@ fn dashed_line_produces_dash_pattern() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1909,6 +2062,7 @@ fn dashed_withdots_uses_leading_offset() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -1938,17 +2092,17 @@ fn vardef_stays_tag_token() {
     // After defining a vardef, the symbol should remain TagToken
     let mut interp = Interpreter::new();
     interp.run("vardef foo primary x = x + 1 enddef;").unwrap();
-    let sym = interp.symbols.lookup("foo");
-    let entry = interp.symbols.get(sym);
+    let sym = interp.state.symbols.lookup("foo");
+    let entry = interp.state.symbols.get(sym);
     assert_eq!(entry.command, Command::TagToken);
-    assert!(interp.macros.contains_key(&sym));
+    assert!(interp.state.macros.get(sym).is_some());
 }
 
 #[test]
 fn implicit_multiplication() {
     let mut interp = Interpreter::new();
     interp.run("bp := 1; show 3bp;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
@@ -1956,7 +2110,7 @@ fn implicit_multiplication() {
 fn implicit_multiplication_pair() {
     let mut interp = Interpreter::new();
     interp.run("show 2(3,4);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("(6,8)"), "expected (6,8) in: {msg}");
 }
 
@@ -1968,7 +2122,7 @@ fn vardef_expands_in_expression() {
         .run("vardef foo primary x = x + 1 enddef; show foo 5;")
         .unwrap();
     // show produces an error with the value
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
@@ -1991,7 +2145,7 @@ fn vardef_at_suffix_parses() {
     interp
         .run("vardef foo@#(expr x) = x enddef; show 1;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -2005,7 +2159,7 @@ fn vardef_expr_of_pattern() {
     interp
         .run("vardef direction expr t of p = t enddef; show 1;")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -2020,6 +2174,7 @@ fn multiple_delimited_param_groups() {
         .run("vardef foo(expr u)(expr v) = show u; show v enddef; foo(1)(2);")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2044,6 +2199,7 @@ fn multiple_delimited_groups_allow_boundary_comma() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2051,6 +2207,7 @@ fn multiple_delimited_groups_allow_boundary_comma() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2074,6 +2231,7 @@ fn pair_equation_assigns_components() {
         .unwrap();
 
     let messages: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2105,6 +2263,7 @@ fn pair_equation_preserves_dep_when_length_minus_unknown() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2130,6 +2289,7 @@ fn vardef_expr_param_preserves_pair_deps() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2137,6 +2297,7 @@ fn vardef_expr_param_preserves_pair_deps() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2161,6 +2322,7 @@ fn vardef_expr_param_preserves_numeric_deps() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2168,6 +2330,7 @@ fn vardef_expr_param_preserves_numeric_deps() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2200,6 +2363,7 @@ fn vardef_expr_param_chained_pair_equations() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2208,6 +2372,7 @@ fn vardef_expr_param_chained_pair_equations() {
 
     // Verify that all three pairs are known (not (0,0) placeholders).
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2236,6 +2401,7 @@ fn def_expr_param_preserves_pair_deps() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2243,6 +2409,7 @@ fn def_expr_param_preserves_pair_deps() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2266,6 +2433,7 @@ fn undelimited_expr_param_preserves_pair_deps() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2273,6 +2441,7 @@ fn undelimited_expr_param_preserves_pair_deps() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2295,6 +2464,7 @@ fn plain_mp_error_count() {
     interp.run("input plain;").unwrap();
 
     let error_count = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2320,6 +2490,7 @@ fn plain_beginfig_draw_endfig() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2346,6 +2517,7 @@ fn plain_path_examples_39_and_56() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2363,6 +2535,7 @@ fn plain_fill_has_no_stroke_pen() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2392,6 +2565,7 @@ fn plain_filldraw_withpen_sets_stroke_pen() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2430,6 +2604,7 @@ fn plain_hide_postfix_preserves_left_expression() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2437,11 +2612,12 @@ fn plain_hide_postfix_preserves_left_expression() {
     assert!(errors == 0, "expected 0 errors, got {errors}");
 
     let pid = interp
+        .state
         .variables
         .lookup_existing("p")
         .expect("path variable p should exist");
     assert!(matches!(
-        interp.variables.get(pid),
+        interp.state.variables.get(pid),
         VarValue::Known(crate::types::Value::Path(_))
     ));
 }
@@ -2464,6 +2640,7 @@ fn plain_drawarrow_example_17() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2490,6 +2667,7 @@ fn plain_drawdblarrow_example_18() {
         .unwrap();
 
     let errors = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2506,7 +2684,7 @@ fn plain_drawdblarrow_example_18() {
 fn type_test_numeric() {
     let mut interp = Interpreter::new();
     interp.run("show numeric 5;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -2514,7 +2692,7 @@ fn type_test_numeric() {
 fn type_test_pen() {
     let mut interp = Interpreter::new();
     interp.run("show pen pencircle;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -2522,7 +2700,7 @@ fn type_test_pen() {
 fn type_test_numeric_on_pen() {
     let mut interp = Interpreter::new();
     interp.run("show numeric pencircle;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -2534,7 +2712,7 @@ fn type_test_numeric_on_pen() {
 fn subscript_bracket() {
     let mut interp = Interpreter::new();
     interp.run("numeric a[]; a[1] := 42; show a[1];").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -2551,12 +2729,14 @@ fn trailing_tokens_after_undelimited_expr() {
         .run("def greet primary x = show x enddef; greet 42;")
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     let show_msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info);
@@ -2573,7 +2753,7 @@ fn vardef_returns_value() {
     interp
         .run("vardef triple(expr x) = 3 * x enddef; show triple(7);")
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("21"), "expected 21 in: {msg}");
 }
 
@@ -2585,6 +2765,7 @@ fn save_restores_variable_binding() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2592,6 +2773,7 @@ fn save_restores_variable_binding() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -2614,6 +2796,7 @@ fn whatever_calls_are_independent() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2621,6 +2804,7 @@ fn whatever_calls_are_independent() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2652,6 +2836,7 @@ fn whatever_times_pair_preserves_dependency() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2674,6 +2859,7 @@ fn whatever_line_intersection_solves_point() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2681,16 +2867,17 @@ fn whatever_line_intersection_solves_point() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let mid = interp
+        .state
         .variables
         .lookup_existing("M")
         .expect("M should exist");
-    let (xid, yid) = match interp.variables.get(mid) {
+    let (xid, yid) = match interp.state.variables.get(mid) {
         crate::variables::VarValue::Pair { x, y } => (*x, *y),
         other => panic!("M should be a pair, got {other:?}"),
     };
 
-    let mx = interp.variables.known_value(xid).unwrap_or(0.0);
-    let my = interp.variables.known_value(yid).unwrap_or(0.0);
+    let mx = interp.state.variables.known_value(xid).unwrap_or(0.0);
+    let my = interp.state.variables.known_value(yid).unwrap_or(0.0);
 
     assert!((mx - 0.4).abs() < 0.01, "mx={mx}");
     assert!((my - 0.6).abs() < 0.01, "my={my}");
@@ -2710,6 +2897,7 @@ fn whatever_perpendicular_bisectors_solve_circumcenter() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2717,16 +2905,17 @@ fn whatever_perpendicular_bisectors_solve_circumcenter() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let oid = interp
+        .state
         .variables
         .lookup_existing("O")
         .expect("O should exist");
-    let (xid, yid) = match interp.variables.get(oid) {
+    let (xid, yid) = match interp.state.variables.get(oid) {
         crate::variables::VarValue::Pair { x, y } => (*x, *y),
         other => panic!("O should be a pair, got {other:?}"),
     };
 
-    let ox = interp.variables.known_value(xid).unwrap_or(0.0);
-    let oy = interp.variables.known_value(yid).unwrap_or(0.0);
+    let ox = interp.state.variables.known_value(xid).unwrap_or(0.0);
+    let oy = interp.state.variables.known_value(yid).unwrap_or(0.0);
 
     assert!((ox - 1.5).abs() < 0.01, "ox={ox}");
     assert!((oy - 0.5).abs() < 0.01, "oy={oy}");
@@ -2751,6 +2940,7 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -2758,6 +2948,7 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2788,7 +2979,7 @@ fn btex_etex_produces_picture() {
     interp
         .run(r#"picture p; p = btex Hello World etex; show p;"#)
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(
         msg.contains("(picture)"),
         "expected picture type in show output: {msg}"
@@ -2803,6 +2994,7 @@ fn btex_etex_picture_is_transformable() {
         .run("picture p; p = btex test etex shifted (10,20);")
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.message.contains("Cannot transform"))
@@ -2824,6 +3016,7 @@ fn btex_etex_draw_shifted_no_error() {
         .run("input plain; beginfig(1); draw btex Q etex shifted (5,5); endfig; end;")
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.message.contains("error") || e.message.contains("Cannot"))
@@ -2847,7 +3040,7 @@ fn infont_produces_picture() {
         .run(r#"picture p; p = "abc" infont "cmr10"; show p;"#)
         .unwrap();
     // The show output should indicate a picture value
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // A picture show typically shows the type or contents
     assert!(
         !msg.contains("error"),
@@ -2862,7 +3055,7 @@ fn infont_text_has_bbox() {
     interp
         .run(r#"picture p; p = "Hello" infont "cmr10"; show lrcorner p;"#)
         .unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // lrcorner should have positive x and negative y (descender)
     assert!(msg.contains(','), "expected a pair in: {msg}");
 }
@@ -2875,6 +3068,7 @@ fn corner_operators_on_picture() {
         .run("picture p; p = \"test\" infont \"cmr10\"; show llcorner p; show urcorner p;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2891,6 +3085,7 @@ fn corner_operators_on_path() {
         .run("path p; p = (0,0)..(10,20)..(30,5); show llcorner p; show urcorner p;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2907,6 +3102,7 @@ fn vardef_at_suffix_with_params() {
         .run(r#"vardef foo@#(expr s) = show str @#; show s enddef; foo.bar("hello");"#)
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -2934,7 +3130,7 @@ fn substring_of_basic() {
     // substring (1,3) of "hello" = "el"
     let mut interp = Interpreter::new();
     interp.run(r#"show substring (1,3) of "hello";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("el"), "expected 'el' in: {msg}");
 }
 
@@ -2943,7 +3139,7 @@ fn substring_of_full_range() {
     // substring (0,5) of "hello" = "hello"
     let mut interp = Interpreter::new();
     interp.run(r#"show substring (0,5) of "hello";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("hello"), "expected 'hello' in: {msg}");
 }
 
@@ -2952,7 +3148,7 @@ fn substring_of_empty() {
     // substring (2,2) of "hello" = ""
     let mut interp = Interpreter::new();
     interp.run(r#"show substring (2,2) of "hello";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     // Empty string shows as ""
     assert!(
         msg.contains("\"\"") || msg.contains(">>  ") || msg.ends_with(">> "),
@@ -2965,7 +3161,7 @@ fn substring_of_utf8_is_char_boundary_safe() {
     // Regression: substring used byte slicing and could panic on UTF-8.
     let mut interp = Interpreter::new();
     interp.run("show substring (1,2) of \"a😊b\";").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("😊"), "expected emoji substring in: {msg}");
 }
 
@@ -2973,7 +3169,7 @@ fn substring_of_utf8_is_char_boundary_safe() {
 fn length_of_utf8_counts_characters() {
     let mut interp = Interpreter::new();
     interp.run("show length \"a😊b\";").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains('3'), "expected length 3 in: {msg}");
 }
 
@@ -2981,12 +3177,12 @@ fn length_of_utf8_counts_characters() {
 fn length_of_numeric_returns_abs() {
     let mut interp = Interpreter::new();
     interp.run("show length -5;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains('5'), "expected abs value 5 in: {msg}");
 
     let mut interp2 = Interpreter::new();
     interp2.run("show length 3.7;").unwrap();
-    let msg2 = &interp2.errors[0].message;
+    let msg2 = &interp2.state.errors[0].message;
     assert!(msg2.contains("3.7"), "expected 3.7 in: {msg2}");
 }
 
@@ -2996,7 +3192,7 @@ fn abs_of_numeric_via_plain_mp_let() {
     // abs should work on numerics since length does
     let mut interp = Interpreter::new();
     interp.run("let abs = length; show abs(-42);").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -3015,6 +3211,7 @@ fn delimited_suffix_comma_shares_type() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3037,6 +3234,7 @@ fn delimited_suffix_in_def_endbox_pattern() {
         ))
         .unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3062,6 +3260,7 @@ fn cutbefore_after_path_construction() {
         ))
         .unwrap();
     let errors: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3083,6 +3282,7 @@ fn equals_as_comparison_in_if() {
     let mut interp = Interpreter::new();
     interp.run("if 3 = 3: message \"yes\"; fi").unwrap();
     let msgs: Vec<&str> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3104,6 +3304,7 @@ fn equals_as_comparison_in_exitif() {
         ))
         .unwrap();
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -3118,7 +3319,7 @@ fn equals_as_equation_in_statement() {
     // At statement level, `=` should be an equation
     let mut interp = Interpreter::new();
     interp.run("numeric x; x = 42; show x;").unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -3139,12 +3340,14 @@ fn tertiarydef_or_in_text_param() {
         ))
         .unwrap();
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -3161,7 +3364,7 @@ fn tertiarydef_or_in_text_param() {
 fn string_less_than() {
     let mut interp = Interpreter::new();
     interp.run(r#"show "a" < "b";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -3169,7 +3372,7 @@ fn string_less_than() {
 fn string_greater_than() {
     let mut interp = Interpreter::new();
     interp.run(r#"show "z" > "a";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -3177,7 +3380,7 @@ fn string_greater_than() {
 fn string_less_equal() {
     let mut interp = Interpreter::new();
     interp.run(r#"show "abc" <= "abd";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -3185,7 +3388,7 @@ fn string_less_equal() {
 fn string_greater_equal_same() {
     let mut interp = Interpreter::new();
     interp.run(r#"show "abc" >= "abc";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -3193,7 +3396,7 @@ fn string_greater_equal_same() {
 fn string_comparison_false() {
     let mut interp = Interpreter::new();
     interp.run(r#"show "b" < "a";"#).unwrap();
-    let msg = &interp.errors[0].message;
+    let msg = &interp.state.errors[0].message;
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -3207,6 +3410,7 @@ fn for_as_expression_sum() {
     let mut interp = Interpreter::new();
     interp.run("show for i=1,2,3: i + endfor 0;").unwrap();
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -3225,6 +3429,7 @@ fn nested_for_substitutes_outer_loop_variable() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3248,6 +3453,7 @@ fn nested_for_same_name_shadows_outer_loop_variable() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3270,6 +3476,7 @@ fn collective_pair_subscript_is_pair_typed() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3317,6 +3524,7 @@ fn forsuffixes_iterates_suffixes() {
         ))
         .unwrap();
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -3338,6 +3546,7 @@ fn for_loop_implicit_multiplication() {
         .run("for i=0 step 1 until 2: show 72i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3362,6 +3571,7 @@ fn equality_comparison_uses_interpreter_tolerance() {
     let mut interp = Interpreter::new();
     interp.run("if 1 = 1.00005: show 1; fi;").unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3376,6 +3586,7 @@ fn equality_comparison_detects_large_diff() {
     interp.run("if 1 = 1.001: show 1; fi;").unwrap();
     // Should NOT have any info messages if comparison is false
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3394,6 +3605,7 @@ fn undelimited_macro_arg_parse_error_does_not_reuse_stale_cur_expr() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3417,6 +3629,7 @@ fn for_step_until_zero_step_no_hang() {
         .run("for i=1 step 0 until 5: show i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3432,6 +3645,7 @@ fn for_step_until_inclusive_endpoint() {
         .run("for i=0 step 1 until 3: show i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3452,6 +3666,7 @@ fn for_step_until_negative_direction() {
         .run("for i=3 step -1 until 1: show i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3472,6 +3687,7 @@ fn for_step_until_fractional_inclusive() {
         .run("for i=0 step 0.1 until 0.3: show i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3492,6 +3708,7 @@ fn for_step_until_wrong_direction_no_iterations() {
         .run("for i=1 step -1 until 5: show i; endfor;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3510,6 +3727,7 @@ fn scantokens_preserves_terminator() {
     let mut interp = Interpreter::new();
     interp.run(r#"scantokens "show 42"; show 99;"#).unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3531,6 +3749,7 @@ fn expandafter_scantokens_same_as_direct() {
     let mut interp = Interpreter::new();
     interp.run(r#"expandafter show scantokens "42";"#).unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3549,13 +3768,14 @@ fn nested_source_levels_lifo_order() {
     // Verify that multiple push_source calls work in LIFO order
     let mut interp = Interpreter::new();
     // Push two source levels manually, then run the top-level source
-    interp.input.push_source("show 2;");
-    interp.input.push_source("show 1;");
+    interp.state.input.push_source("show 2;");
+    interp.state.input.push_source("show 1;");
     interp.get_x_next();
     while interp.cur.command != Command::Stop {
         interp.do_statement().unwrap();
     }
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3577,6 +3797,7 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
     interp.run("numeric x, y, z; z = x*y;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3589,12 +3810,13 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
     );
 
     let z_id = interp
+        .state
         .variables
         .lookup_existing("z")
         .expect("z should exist after declaration");
     assert!(
         !matches!(
-            interp.variables.get(z_id),
+            interp.state.variables.get(z_id),
             crate::variables::VarValue::NumericVar(crate::variables::NumericState::Known(_))
         ),
         "nonlinear equation must not force z to known value"
@@ -3609,6 +3831,7 @@ fn transitive_equations_solve_correctly() {
         .run("numeric x, y, z; x + y = 5; y + z = 7; x = 1; show y; show z;")
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3637,6 +3860,7 @@ fn save_root_does_not_affect_similar_prefix() {
         )
         .unwrap();
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3658,7 +3882,7 @@ fn save_root_does_not_affect_similar_prefix() {
 #[test]
 fn scan_expression_internal_usage() {
     let mut interp = Interpreter::new();
-    interp.input.push_source("3 + 4;");
+    interp.state.input.push_source("3 + 4;");
     interp.get_x_next();
     let result = interp.scan_expression().unwrap();
     assert_eq!(result.exp, Value::Numeric(7.0));
@@ -3676,6 +3900,7 @@ fn implicit_mul_scales_pair_dependencies() {
     interp.run("pair z; 3z = (6,9); show z;").unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3695,6 +3920,7 @@ fn addto_defaults_to_currentpicture_when_name_omitted() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3723,6 +3949,7 @@ fn clip_defaults_to_currentpicture_when_name_omitted() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3741,11 +3968,292 @@ fn clip_defaults_to_currentpicture_when_name_omitted() {
 }
 
 #[test]
+fn refactor_guard_save_hides_and_restores_vardef_across_group() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "vardef f = 42 enddef; \
+             show f; \
+             begingroup save f; numeric f; f := 99; show f; endgroup; \
+             show f;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let show_outputs: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(
+        show_outputs.len(),
+        3,
+        "expected 3 show outputs: {show_outputs:?}"
+    );
+    assert!(
+        show_outputs[0].contains(">> 42"),
+        "before group f should be 42: {}",
+        show_outputs[0]
+    );
+    assert!(
+        show_outputs[1].contains(">> 99"),
+        "inside group f should be 99: {}",
+        show_outputs[1]
+    );
+    assert!(
+        show_outputs[2].contains(">> 42"),
+        "after endgroup f should be restored to vardef: {}",
+        show_outputs[2]
+    );
+}
+
+#[test]
+fn refactor_guard_save_hides_and_restores_macro_across_group() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "def greet = show 77 enddef; \
+             greet; \
+             begingroup save greet; greet; endgroup; \
+             greet;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let show_outputs: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
+        .map(|e| e.message.clone())
+        .collect();
+    assert_eq!(
+        show_outputs.len(),
+        2,
+        "expected only outer greet calls to show output; inside-group greet after `save greet` must not show: {show_outputs:?}"
+    );
+    assert!(
+        show_outputs[0].contains("77"),
+        "before group greet macro should run: {}",
+        show_outputs[0]
+    );
+    assert!(
+        show_outputs[1].contains("77"),
+        "after endgroup greet macro should be restored: {}",
+        show_outputs[1]
+    );
+}
+
+#[test]
+fn refactor_guard_begingroup_expression_value_survives_endgroup() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "numeric y; \
+             y := begingroup numeric x; x := 4; x + 5 endgroup; \
+             show y;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let show_outputs: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info)
+        .map(|e| e.message.as_str())
+        .filter(|msg| msg.contains(">>"))
+        .collect();
+    assert_eq!(
+        show_outputs.len(),
+        1,
+        "expected exactly one show output, got: {show_outputs:?}"
+    );
+    assert!(
+        show_outputs[0].contains("9"),
+        "expected y=9 from group expression, got: {}",
+        show_outputs[0]
+    );
+}
+
+#[test]
+fn refactor_guard_nested_group_restore_order() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "numeric x; x := 1; \
+             begingroup \
+               save x; \
+               x := 2; \
+               show x; \
+               begingroup \
+                 save x; \
+                 x := 3; \
+                 show x; \
+               endgroup; \
+               show x; \
+             endgroup; \
+             show x;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let show_outputs: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
+        .map(|e| e.message.clone())
+        .collect();
+
+    assert_eq!(
+        show_outputs.len(),
+        4,
+        "expected 4 show outputs: {show_outputs:?}"
+    );
+    assert!(
+        show_outputs[0].contains(">> 2"),
+        "outer x should be 2: {}",
+        show_outputs[0]
+    );
+    assert!(
+        show_outputs[1].contains(">> 3"),
+        "inner x should be 3: {}",
+        show_outputs[1]
+    );
+    assert!(
+        show_outputs[2].contains(">> 2"),
+        "outer x should restore to 2: {}",
+        show_outputs[2]
+    );
+    assert!(
+        show_outputs[3].contains(">> 1"),
+        "global x should restore to 1: {}",
+        show_outputs[3]
+    );
+}
+
+#[test]
+fn refactor_guard_root_fast_save_discards_group_descendants() {
+    let mut interp = Interpreter::new();
+    interp
+        .run(
+            "numeric x; x := 1; \
+             begingroup \
+               save x; \
+               x := 2; \
+               x.foo := 3; \
+             endgroup; \
+             show x; \
+             show known x.foo;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    let show_outputs: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
+        .map(|e| e.message.clone())
+        .collect();
+
+    assert_eq!(
+        show_outputs.len(),
+        2,
+        "expected 2 show outputs: {show_outputs:?}"
+    );
+    assert!(
+        show_outputs[0].contains(">> 1"),
+        "x should restore to 1 after endgroup: {}",
+        show_outputs[0]
+    );
+    assert!(
+        show_outputs[1].contains(">> false"),
+        "x.foo should be discarded after endgroup: {}",
+        show_outputs[1]
+    );
+}
+
+#[test]
+fn refactor_guard_currentpicture_roundtrip_assignment_stays_stable() {
+    let mut interp = Interpreter::new();
+    interp
+        .run("addto contour ((0,0)..(1,0)..(1,1)..cycle);")
+        .unwrap();
+    let original_picture = interp.current_picture().clone();
+    assert!(
+        !original_picture.objects.is_empty(),
+        "precondition: currentpicture should be non-empty before roundtrip"
+    );
+
+    interp
+        .run(
+            "picture snap; \
+             snap := currentpicture; \
+             currentpicture := nullpicture; \
+             currentpicture := snap;",
+        )
+        .unwrap();
+
+    let errors: Vec<_> = interp
+        .state
+        .errors
+        .iter()
+        .filter(|e| e.severity == crate::error::Severity::Error)
+        .collect();
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+
+    assert!(
+        interp.current_picture().objects.is_empty(),
+        "current semantics are stable: after `snap := currentpicture; currentpicture := nullpicture; currentpicture := snap;`, currentpicture remains nullpicture"
+    );
+}
+
+#[test]
 fn shipout_non_picture_reports_type_error() {
     let mut interp = Interpreter::new();
     interp.run("shipout 123;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3765,6 +4273,7 @@ fn empty_path_cycle_reports_error_without_panic() {
     interp.run("path p; p := p .. cycle; show 1;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3795,6 +4304,7 @@ fn undelimited_text_macro_stops_at_endgroup() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3820,6 +4330,7 @@ fn vardef_at_suffix_only_preserves_trailing_token() {
         .unwrap();
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3841,6 +4352,7 @@ fn mismatched_custom_delimiters_report_error() {
     let _ = interp.run("delimiters {{ }}; show {{ 3 + 4 );");
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3859,6 +4371,7 @@ fn known_equation_reports_inconsistency_without_assignment() {
     interp.run("numeric x; x := 1; x = 2; show x;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3871,10 +4384,11 @@ fn known_equation_reports_inconsistency_without_assignment() {
     );
 
     let x_id = interp
+        .state
         .variables
         .lookup_existing("x")
         .expect("x should exist after declaration");
-    let x = interp.variables.known_value(x_id).unwrap_or(f64::NAN);
+    let x = interp.state.variables.known_value(x_id).unwrap_or(f64::NAN);
     assert!((x - 1.0).abs() < 1e-12, "x should remain 1, got {x}");
 }
 
@@ -3886,10 +4400,11 @@ fn addto_picture_target_accepts_symbolic_suffixes() {
         .unwrap();
 
     let layer_id = interp
+        .state
         .variables
         .lookup_existing("pic.layer")
         .expect("pic.layer should exist");
-    let layer_pic = match interp.variables.get(layer_id) {
+    let layer_pic = match interp.state.variables.get(layer_id) {
         crate::variables::VarValue::Known(Value::Picture(p)) => p,
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
@@ -3912,10 +4427,11 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
         .unwrap();
 
     let layer_id = interp
+        .state
         .variables
         .lookup_existing("pic.layer")
         .expect("pic.layer should exist");
-    let layer_pic = match interp.variables.get(layer_id) {
+    let layer_pic = match interp.state.variables.get(layer_id) {
         crate::variables::VarValue::Known(Value::Picture(p)) => p,
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
@@ -3936,6 +4452,7 @@ fn nonlinear_equation_without_bindable_lhs_reports_error() {
     interp.run("numeric x, y; x*x = y;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3968,6 +4485,7 @@ fn relax_command_is_accepted_as_noop() {
     interp.run("relax; show 1;").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -3975,6 +4493,7 @@ fn relax_command_is_accepted_as_noop() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -3990,7 +4509,7 @@ fn relax_command_is_accepted_as_noop() {
 fn randomseed_statement_sets_seed() {
     let mut interp = Interpreter::new();
     interp.run("randomseed := 123;").unwrap();
-    assert_eq!(interp.random_seed, 123);
+    assert_eq!(interp.state.random_seed, 123);
 }
 
 #[test]
@@ -3999,6 +4518,7 @@ fn special_statement_is_accepted_as_noop() {
     interp.run("special \"x\";").unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4018,6 +4538,7 @@ fn makepen_accepts_non_cyclic_path() {
         .expect("makepen should accept non-cyclic path");
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4034,6 +4555,7 @@ fn makepen_accepts_pair() {
         .expect("makepen should accept a pair");
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4054,11 +4576,12 @@ fn verbatimtex_is_skipped() {
         .unwrap();
     // The `show 42` after etex should execute normally.
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("42")),
+        interp.state.errors.iter().any(|e| e.message.contains("42")),
         "show 42 should produce output after verbatimtex block"
     );
     // No errors about unexpected tokens from the TeX content.
     let real_errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4086,7 +4609,7 @@ fn for_within_iterates_picture_components() {
         )
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("2")),
+        interp.state.errors.iter().any(|e| e.message.contains("2")),
         "should iterate over 2 components"
     );
 }
@@ -4107,7 +4630,7 @@ fn for_within_extracts_pathpart() {
         )
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("10")),
+        interp.state.errors.iter().any(|e| e.message.contains("10")),
         "pathpart should yield the original path's first point x=10"
     );
 }
@@ -4125,7 +4648,7 @@ fn for_within_empty_picture() {
         )
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("0")),
+        interp.state.errors.iter().any(|e| e.message.contains("0")),
         "empty picture should produce 0 iterations"
     );
 }
@@ -4143,7 +4666,7 @@ fn xxpart_of_text_picture() {
         .run("picture p; p = btex X etex; show xxpart p;")
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("1")),
+        interp.state.errors.iter().any(|e| e.message.contains("1")),
         "xxpart of btex picture should be 1 (identity transform)"
     );
 }
@@ -4161,7 +4684,7 @@ fn colormodel_of_stroke() {
         )
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("5")),
+        interp.state.errors.iter().any(|e| e.message.contains("5")),
         "colormodel of RGB stroke should be 5"
     );
 }
@@ -4179,7 +4702,11 @@ fn redpart_of_picture_component() {
         )
         .unwrap();
     assert!(
-        interp.errors.iter().any(|e| e.message.contains("0.75")),
+        interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("0.75")),
         "redpart should extract 0.75"
     );
 }
@@ -4201,7 +4728,7 @@ fn stroked_filled_textual_predicates() {
         )
         .unwrap();
     // stroked should be true, filled/textual should be false.
-    let msgs: Vec<_> = interp.errors.iter().map(|e| &e.message).collect();
+    let msgs: Vec<_> = interp.state.errors.iter().map(|e| &e.message).collect();
     assert!(
         msgs.iter().any(|m| m.contains("true")),
         "stroked should be true: {msgs:?}"
@@ -4237,6 +4764,7 @@ fn save_hides_vardef_in_group() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4244,6 +4772,7 @@ fn save_hides_vardef_in_group() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let msg = interp
+        .state
         .errors
         .iter()
         .find(|e| e.severity == crate::error::Severity::Info)
@@ -4269,6 +4798,7 @@ fn save_restores_vardef_after_endgroup() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4276,6 +4806,7 @@ fn save_restores_vardef_after_endgroup() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -4317,6 +4848,7 @@ fn save_hides_defined_macro_in_group() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4324,6 +4856,7 @@ fn save_hides_defined_macro_in_group() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)
@@ -4356,6 +4889,7 @@ fn for_loop_numeric_equation() {
         .unwrap();
 
     let errors: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Error)
@@ -4363,6 +4897,7 @@ fn for_loop_numeric_equation() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let infos: Vec<_> = interp
+        .state
         .errors
         .iter()
         .filter(|e| e.severity == crate::error::Severity::Info)

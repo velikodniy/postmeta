@@ -22,8 +22,10 @@ use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 use crate::variables::{SuffixSegment, VarValue};
 
-use super::helpers::{value_to_bool, value_to_pair, value_to_scalar, value_to_transform};
-use super::{ExprResultValue, Interpreter, LhsBinding};
+use crate::interpreter::helpers::{
+    value_to_bool, value_to_pair, value_to_scalar, value_to_transform,
+};
+use crate::interpreter::{ExprResultValue, Interpreter, LhsBinding};
 
 /// Format a numeric subscript into a variable name string.
 ///
@@ -35,6 +37,10 @@ use super::{ExprResultValue, Interpreter, LhsBinding};
 fn write_subscript_key(name: &mut String, v: f64) {
     let rounded = v.round();
     if (v - rounded).abs() < 1e-10 {
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "subscript formatting uses rounded integer representation"
+        )]
         let _ = write!(name, "[{}]", rounded as i64);
     } else {
         let _ = write!(name, "[{v}]");
@@ -52,7 +58,8 @@ enum InfixAction {
 
 impl Interpreter {
     /// Parse and evaluate a primary expression, returning the result.
-    pub(super) fn scan_primary(&mut self) -> InterpResult<ExprResultValue> {
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::interpreter) fn scan_primary(&mut self) -> InterpResult<ExprResultValue> {
         let primary = match self.cur.command {
             Command::NumericToken => self.scan_primary_numeric()?,
 
@@ -114,11 +121,7 @@ impl Interpreter {
                     // `bad_unary` reports a diagnostic but keeps the
                     // operand unchanged. We catch type errors
                     // here so they don't abort the whole expression.
-                    match self.do_unary(
-                        op,
-                        operand_result.exp.clone(),
-                        operand_result.pair_dep.clone(),
-                    ) {
+                    match self.do_unary(op, &operand_result.exp, operand_result.pair_dep.clone()) {
                         Ok(r) => r,
                         Err(e) => {
                             if op != UnaryOp::Reverse {
@@ -145,8 +148,7 @@ impl Interpreter {
             Command::LeftDelimiter => self.scan_primary_delimited()?,
 
             Command::BeginGroup => {
-                self.save_stack.push_boundary();
-                self.macro_save_stack.push(None);
+                self.state.scope_manager.begin_group(&mut self.state.macros);
                 self.get_x_next();
                 // Execute statements until endgroup
                 while self.cur.command != Command::EndGroup && self.cur.command != Command::Stop {
@@ -167,7 +169,7 @@ impl Interpreter {
 
             Command::InternalQuantity => {
                 let idx = self.cur.modifier;
-                let v = self.internals.get(idx);
+                let v = self.state.internals.get(idx);
                 // Track for assignment LHS
                 self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
@@ -225,18 +227,8 @@ impl Interpreter {
                             // Try to unwrap the Arc to avoid cloning
                             // (O(1) when refcount is 1).
                             match Arc::try_unwrap(arc_payload) {
-                                Ok(p) => ExprResultValue {
-                                    exp: p.value,
-                                    ty: p.ty,
-                                    dep: p.dep,
-                                    pair_dep: p.pair_dep,
-                                },
-                                Err(arc) => ExprResultValue {
-                                    exp: arc.value.clone(),
-                                    ty: arc.ty,
-                                    dep: arc.dep.clone(),
-                                    pair_dep: arc.pair_dep.clone(),
-                                },
+                                Ok(payload) => payload,
+                                Err(arc) => arc.as_ref().clone(),
                             }
                         });
                 self.lhs_tracking.last_lhs_binding = None;
@@ -427,6 +419,7 @@ impl Interpreter {
     }
 
     /// Check for and evaluate mediation: `a[b,c] = (1-a)*b + a*c`.
+    #[allow(clippy::too_many_lines)]
     fn scan_mediation(&mut self, primary: ExprResultValue) -> InterpResult<ExprResultValue> {
         if self.cur.command != Command::LeftBracket {
             return Ok(primary);
@@ -579,8 +572,9 @@ impl Interpreter {
         let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
         // Check early if this is a standalone vardef macro.
-        let is_root_vardef =
-            root_sym.is_some_and(|s| self.macros.get(&s).is_some_and(|m| m.is_vardef));
+        let is_root_vardef = root_sym
+            .and_then(|symbol| self.state.macros.get(symbol))
+            .is_some_and(|info| info.is_vardef);
 
         self.get_x_next();
 
@@ -595,7 +589,7 @@ impl Interpreter {
                     suffix_segs.push(SuffixSegment::Attr(sym));
                     let n = name.get_or_insert_with(|| self.cur_root_name(root_sym));
                     n.push('.');
-                    n.push_str(self.symbols.name(sym));
+                    n.push_str(self.state.symbols.name(sym));
                 }
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::NumericToken {
@@ -623,16 +617,12 @@ impl Interpreter {
                     // the current token back, then restore `[`
                     // as the current command so the mediation
                     // check after variable resolution can see it.
-                    use crate::input::{CapsulePayload, StoredToken};
+                    use crate::input::StoredToken;
                     let result = subscript_result;
-                    let mut tl = vec![StoredToken::Capsule(Arc::new(CapsulePayload {
-                        value: result.exp,
-                        ty: result.ty,
-                        dep: result.dep,
-                        pair_dep: result.pair_dep,
-                    }))];
+                    let mut tl = vec![StoredToken::Capsule(Arc::new(result))];
                     self.store_current_token(&mut tl);
-                    self.input
+                    self.state
+                        .input
                         .push_token_list(tl, Vec::new(), "mediation backtrack");
                     self.cur.command = Command::LeftBracket;
                     break;
@@ -649,7 +639,8 @@ impl Interpreter {
             let mut trailing = crate::input::TokenList::new();
             self.store_current_token(&mut trailing);
             if !trailing.is_empty() {
-                self.input
+                self.state
+                    .input
                     .push_token_list(trailing, Vec::new(), "vardef trailing");
             }
             self.cur.command = Command::DefinedMacro;
@@ -660,17 +651,17 @@ impl Interpreter {
 
         if let Some(ref name_str) = name {
             // Suffixed variable — must use string-based lookup.
-            self.resolve_variable(root_sym, name_str, &suffix_segs)
+            Ok(self.resolve_variable(root_sym, name_str, &suffix_segs))
         } else {
             // Root-only variable — use resolve_variable_root which avoids
             // String allocation when the sym cache hits.
-            self.resolve_variable_root(root_sym)
+            Ok(self.resolve_variable_root(root_sym))
         }
     }
 
     /// Get the root variable name from a symbol, allocating a `String`.
     fn cur_root_name(&self, sym: Option<SymbolId>) -> String {
-        sym.map_or_else(String::new, |s| self.symbols.name(s).to_owned())
+        sym.map_or_else(String::new, |s| self.state.symbols.name(s).to_owned())
     }
 
     /// Parse suffix text after `str` and return its string form.
@@ -693,6 +684,10 @@ impl Interpreter {
                 self.get_x_next();
             } else if self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "legacy str suffix integer rendering follows MetaPost style"
+                    )]
                     let _ = write!(name, "[{}]", v as i64);
                 }
                 self.get_x_next();
@@ -700,6 +695,10 @@ impl Interpreter {
                 self.get_x_next(); // skip `[`
                 let subscript_result = self.scan_expression()?;
                 let subscript = match subscript_result.exp {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "legacy str suffix integer rendering follows MetaPost style"
+                    )]
                     Value::Numeric(v) => v as i64,
                     _ => 0,
                 };
@@ -754,12 +753,12 @@ impl Interpreter {
     }
 
     /// Parse and evaluate a secondary expression, returning the result.
-    pub(super) fn scan_secondary(&mut self) -> InterpResult<ExprResultValue> {
+    pub(in crate::interpreter) fn scan_secondary(&mut self) -> InterpResult<ExprResultValue> {
         self.scan_infix_bp(Command::BP_SECONDARY, false)
     }
 
     /// Parse and evaluate a tertiary expression, returning the result.
-    pub(super) fn scan_tertiary(&mut self) -> InterpResult<ExprResultValue> {
+    pub(in crate::interpreter) fn scan_tertiary(&mut self) -> InterpResult<ExprResultValue> {
         self.scan_infix_bp(Command::BP_TERTIARY, false)
     }
 
@@ -777,6 +776,7 @@ impl Interpreter {
     // =====================================================================
 
     /// Single led dispatch for all infix operators.
+    #[allow(clippy::too_many_lines)]
     fn scan_infix_led(
         &mut self,
         left: ExprResultValue,
@@ -830,7 +830,7 @@ impl Interpreter {
                         &left_val,
                         left_pair_dep,
                         &right,
-                        right_binding,
+                        right_binding.as_ref(),
                     )
                 };
                 Ok(InfixAction::Continue(result))
@@ -843,7 +843,7 @@ impl Interpreter {
                 self.get_x_next();
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                let result = self.div_deps(left_val, left_dep, left_pair_dep, &right)?;
+                let result = self.div_deps(&left_val, left_dep, left_pair_dep, &right)?;
                 Ok(InfixAction::Continue(result))
             }
 
@@ -978,6 +978,7 @@ impl Interpreter {
     // =====================================================================
 
     /// Compute dependency info for multiplication (`*`).
+    #[allow(clippy::too_many_lines)]
     fn mul_deps(
         &mut self,
         val: Value,
@@ -1113,7 +1114,7 @@ impl Interpreter {
     /// Compute dependency info for division (`/`).
     fn div_deps(
         &mut self,
-        left_val: Value,
+        left_val: &Value,
         left_dep: Option<DepList>,
         left_pair_dep: Option<(DepList, DepList)>,
         right: &ExprResultValue,
@@ -1157,7 +1158,7 @@ impl Interpreter {
             }
             Value::Pair(x, y) => {
                 let (mut dx, mut dy) =
-                    left_pair_dep.unwrap_or_else(|| (const_dep(x), const_dep(y)));
+                    left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
                 dep_scale(&mut dx, 1.0 / b);
                 dep_scale(&mut dy, 1.0 / b);
                 ExprResultValue {
@@ -1256,7 +1257,7 @@ impl Interpreter {
         left_val: &Value,
         left_pair_dep: Option<(DepList, DepList)>,
         right: &ExprResultValue,
-        right_binding: Option<LhsBinding>,
+        right_binding: Option<&LhsBinding>,
     ) -> ExprResultValue {
         let pair_dep = if matches!(val, Value::Pair(_, _)) {
             let base_dep = left_pair_dep.or_else(|| {
@@ -1278,7 +1279,7 @@ impl Interpreter {
                         txy,
                         tyx,
                         tyy,
-                    } = self.variables.get(id).clone()
+                    } = self.state.variables.get(*id).clone()
                 {
                     let (lx, ly) = if let Value::Pair(lx, ly) = left_val {
                         (*lx, *ly)

@@ -9,20 +9,12 @@ use std::sync::Arc;
 
 use crate::command::Command;
 use crate::equation::DepList;
+use crate::expr_value::ExprValue;
 use crate::scanner::ScanError;
 use crate::scanner::Scanner;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::token::{Token, TokenKind};
 use crate::types::{Type, Value};
-
-/// Captured expression state used by capsule tokens.
-#[derive(Debug, Clone)]
-pub struct CapsulePayload {
-    pub value: Value,
-    pub ty: Type,
-    pub dep: Option<DepList>,
-    pub pair_dep: Option<(DepList, DepList)>,
-}
 
 // ---------------------------------------------------------------------------
 // Resolved token — what the parser sees after hash lookup
@@ -44,7 +36,7 @@ pub struct ResolvedToken {
     /// Present only when `command == CapsuleToken` and this token was produced
     /// by `back_expr`. The expression parser picks this up instead of
     /// evaluating the token normally.
-    pub capsule: Option<Arc<CapsulePayload>>,
+    pub capsule: Option<Arc<ExprValue>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -71,7 +63,7 @@ pub enum StoredToken {
     ///
     /// Wrapped in `Arc` for O(1) cloning — capsules are frequently cloned
     /// when parameter token lists are expanded.
-    Capsule(Arc<CapsulePayload>),
+    Capsule(Arc<ExprValue>),
 }
 
 /// A mutable token list used while building macro/loop bodies.
@@ -253,8 +245,8 @@ impl InputSystem {
         dep: Option<DepList>,
         pair_dep: Option<(DepList, DepList)>,
     ) {
-        let tokens: SharedTokenList = vec![StoredToken::Capsule(Arc::new(CapsulePayload {
-            value,
+        let tokens: SharedTokenList = vec![StoredToken::Capsule(Arc::new(ExprValue {
+            exp: value,
             ty,
             dep,
             pair_dep,
@@ -617,7 +609,7 @@ mod tests {
         assert!(t.capsule.is_some());
         let payload = t.capsule.unwrap();
         assert_eq!(payload.ty, Type::Known);
-        assert_eq!(payload.value.as_numeric(), Some(99.0));
+        assert_eq!(payload.exp.as_numeric(), Some(99.0));
         assert!(payload.dep.is_none());
         assert!(payload.pair_dep.is_none());
     }
@@ -638,7 +630,7 @@ mod tests {
         assert_eq!(t.command, Command::CapsuleToken);
         let payload = t.capsule.unwrap();
         assert_eq!(payload.ty, Type::PairType);
-        assert_eq!(payload.value.as_pair(), Some((3.0, 7.0)));
+        assert_eq!(payload.exp.as_pair(), Some((3.0, 7.0)));
         assert!(payload.dep.is_none());
         assert!(payload.pair_dep.is_none());
 

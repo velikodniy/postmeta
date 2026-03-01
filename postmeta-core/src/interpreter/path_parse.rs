@@ -31,6 +31,7 @@ enum PendingJoin {
 
 impl Interpreter {
     /// Parse a path expression starting from the given left-hand value.
+    #[allow(clippy::too_many_lines)]
     pub(super) fn scan_path_construction(
         &mut self,
         left: super::ExprResultValue,
@@ -433,10 +434,11 @@ mod tests {
             .expect("path construction should parse");
 
         let pid = interp
+            .state
             .variables
             .lookup_existing("p")
             .expect("path variable p should exist");
-        let path = match interp.variables.get(pid) {
+        let path = match interp.state.variables.get(pid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
@@ -477,10 +479,11 @@ mod tests {
             .expect("tension path should parse");
 
         let pid = interp
+            .state
             .variables
             .lookup_existing("p")
             .expect("path variable p should exist");
-        let path = match interp.variables.get(pid) {
+        let path = match interp.state.variables.get(pid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
@@ -505,10 +508,11 @@ mod tests {
             .expect("controls path should parse");
 
         let pid = interp
+            .state
             .variables
             .lookup_existing("p")
             .expect("path variable p should exist");
-        let path = match interp.variables.get(pid) {
+        let path = match interp.state.variables.get(pid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
@@ -545,10 +549,11 @@ mod tests {
             .expect("path concatenation should parse");
 
         let rid = interp
+            .state
             .variables
             .lookup_existing("r")
             .expect("path variable r should exist");
-        let path = match interp.variables.get(rid) {
+        let path = match interp.state.variables.get(rid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
@@ -573,10 +578,11 @@ mod tests {
             .expect("path and pair concatenation should parse");
 
         let qid = interp
+            .state
             .variables
             .lookup_existing("q")
             .expect("path variable q should exist");
-        let path = match interp.variables.get(qid) {
+        let path = match interp.state.variables.get(qid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
@@ -599,10 +605,11 @@ mod tests {
             .expect("path join with path rhs should parse");
 
         let cid = interp
+            .state
             .variables
             .lookup_existing("c")
             .expect("path variable c should exist");
-        let path = match interp.variables.get(cid) {
+        let path = match interp.state.variables.get(cid) {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };

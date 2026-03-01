@@ -9,7 +9,8 @@ use postmeta_graphics::types::{Pen, Picture, Scalar, Transform};
 
 use crate::equation::const_dep;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
-use crate::input::{CapsulePayload, StoredToken, TokenList};
+use crate::expr_value::ExprValue;
+use crate::input::{StoredToken, TokenList};
 use crate::symbols::SymbolTable;
 use crate::types::{Type, Value};
 
@@ -97,14 +98,14 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
         // treats the capsule as a primary that `72` multiplies.
         // Setting dep = Some(const_dep(v)) fixes equations like
         // `x = <loop-var>` which silently failed with dep:None.
-        Value::Numeric(v) => vec![StoredToken::Capsule(Arc::new(CapsulePayload {
-            value: val.clone(),
+        Value::Numeric(v) => vec![StoredToken::Capsule(Arc::new(ExprValue {
+            exp: val.clone(),
             ty: Type::Known,
             dep: Some(const_dep(*v)),
             pair_dep: None,
         }))],
-        _ => vec![StoredToken::Capsule(Arc::new(CapsulePayload {
-            value: val.clone(),
+        _ => vec![StoredToken::Capsule(Arc::new(ExprValue {
+            exp: val.clone(),
             ty: match val {
                 Value::Boolean(_) => Type::Boolean,
                 Value::Transform(..) => Type::TransformType,

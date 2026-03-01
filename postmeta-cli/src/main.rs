@@ -139,7 +139,7 @@ fn main() {
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("output");
-        stem.clone_into(&mut interp.job_name);
+        interp.set_job_name(stem);
 
         if let Some(parent) = Path::new(file).parent() {
             search_dirs.push(parent.to_path_buf());
@@ -223,7 +223,7 @@ fn run_and_output(
 }
 
 fn print_diagnostics(interp: &Interpreter) {
-    for err in &interp.errors {
+    for err in interp.diagnostics() {
         match err.severity {
             postmeta_core::error::Severity::Info => {
                 println!("{}", err.message);
@@ -248,7 +248,7 @@ fn write_output(
         margin: 1.0,
         precision: 4,
         true_corners: interp
-            .internals
+            .internals()
             .get(postmeta_core::internals::InternalId::TrueCorners as u16)
             > 0.0,
         text_mode: cli.text_mode,
@@ -257,9 +257,9 @@ fn write_output(
     for (i, pic) in interp.output().iter().enumerate() {
         let svg_str = render_with_fonts(pic, &opts, fonts).to_string();
         let filename = if interp.output().len() == 1 {
-            format!("{}.svg", interp.job_name)
+            format!("{}.svg", interp.job_name())
         } else {
-            format!("{}.{}.svg", interp.job_name, i + 1)
+            format!("{}.{}.svg", interp.job_name(), i + 1)
         };
         write_svg(output_dir, &filename, &svg_str);
     }
@@ -267,7 +267,7 @@ fn write_output(
     // If no pictures shipped but current picture has content, output it
     if interp.output().is_empty() && !interp.current_picture().objects.is_empty() {
         let svg_str = render_with_fonts(interp.current_picture(), &opts, fonts).to_string();
-        let filename = format!("{}.svg", interp.job_name);
+        let filename = format!("{}.svg", interp.job_name());
         write_svg(output_dir, &filename, &svg_str);
     }
 }

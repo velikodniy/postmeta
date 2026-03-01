@@ -1,8 +1,7 @@
 //! Statement execution.
 //!
-//! Implements `do_statement` (the top-level statement dispatcher) and all
-//! individual statement handlers: type declarations, `addto`, `clip`,
-//! `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`,
+//! Implements individual statement handlers: type declarations, `addto`,
+//! `clip`, `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`,
 //! `newinternal`, `show`, `message`, and `endgroup`.
 
 use postmeta_graphics::picture;
@@ -12,203 +11,30 @@ use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Pen, Picture, StrokeObject,
 };
 
-use crate::command::{
-    BoundsOp, Command, MacroSpecialOp, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp,
-};
+use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
 use crate::error::{ErrorKind, InterpResult};
 use crate::internals::InternalId;
 use crate::types::{DrawingState, Type, Value};
-use crate::variables::{SaveEntry, SuffixSegment, VarValue};
+use crate::variables::{SuffixSegment, VarValue};
 
+use super::Interpreter;
 use super::helpers::{value_to_path_owned, value_to_scalar};
-use super::{Interpreter, LhsBinding};
+
+enum DoublePathTarget {
+    Dot { x: f64, y: f64 },
+    Path(postmeta_graphics::path::Path),
+}
 
 impl Interpreter {
-    /// Sync `picture_state.current_picture` to the `currentpicture` variable
-    /// if it has been modified since the last sync.
-    fn sync_currentpicture_variable(&mut self) {
-        if !self.state.picture_state.currentpicture_dirty {
-            return;
-        }
-        self.state.picture_state.currentpicture_dirty = false;
-        if let Some(var_id) = self.state.variables.lookup_existing("currentpicture") {
-            let picture = self.state.picture_state.current_picture.clone();
-            self.state
-                .variables
-                .set_known(var_id, Value::Picture(picture));
-        }
-    }
-
-    fn eat_semicolon(&mut self) {
+    pub(super) fn eat_semicolon(&mut self) {
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
         }
     }
 
-    /// Execute one statement.
-    pub fn do_statement(&mut self) -> InterpResult<()> {
-        match self.cur.command {
-            Command::Semicolon => {
-                // Empty statement
-                self.get_x_next();
-                Ok(())
-            }
-            Command::Stop => Ok(()), // End of input
-
-            Command::TypeName => self.do_type_declaration(),
-            Command::AddTo => self.do_addto(),
-            Command::Bounds => self.do_bounds(),
-            Command::ShipOut => self.do_shipout(),
-            Command::Outer => self.do_outer(),
-            Command::Save => self.do_save(),
-            Command::Interim => self.do_interim(),
-            Command::Let => self.do_let(),
-            Command::MacroDef => self.do_macro_def(),
-            Command::Delimiters => self.do_delimiters(),
-            Command::NewInternal => self.do_new_internal(),
-            Command::IfTest => {
-                self.expand_if();
-                Ok(())
-            }
-            Command::FiOrElse => {
-                self.expand_fi_or_else();
-                Ok(())
-            }
-            Command::Iteration => {
-                self.expand_iteration();
-                Ok(())
-            }
-            Command::Input => {
-                self.expand_input();
-                Ok(())
-            }
-            Command::Show => self.do_show(),
-            Command::MessageCommand => self.do_message(),
-            Command::ModeCommand => self.do_mode_command(),
-            Command::RandomSeed => self.do_randomseed(),
-            Command::EveryJob => self.do_unimplemented_statement("everyjob"),
-            Command::Special => self.do_special(),
-            Command::Write => self.do_unimplemented_statement("write"),
-            Command::DoubleColon => {
-                self.report_error(ErrorKind::UnexpectedToken, "Unexpected `::`");
-                self.get_x_next();
-                Ok(())
-            }
-            Command::BeginGroup => {
-                self.save_stack.push_boundary();
-                self.macro_save_stack.push(None);
-                self.get_x_next();
-                Ok(())
-            }
-            Command::EndGroup => {
-                self.do_endgroup();
-                self.get_x_next();
-                Ok(())
-            }
-
-            _ => {
-                // Expression or equation — `=` should be treated as an
-                // equation delimiter, not as comparison (mp.web: var_flag = assignment).
-                self.lhs_tracking.equals_means_equation = true;
-                let mut cur_result = self.scan_expression()?;
-
-                if self.cur.command == Command::Equals {
-                    // Equation chain: lhs = mid = ... = rhs.
-                    // All left-hand sides are equated to the FINAL rightmost value.
-                    type PendingEquationLhs = (
-                        Value,
-                        Option<LhsBinding>,
-                        Option<crate::equation::DepList>,
-                        Option<(crate::equation::DepList, crate::equation::DepList)>,
-                    );
-
-                    let mut pending_lhs: Vec<PendingEquationLhs> = Vec::new();
-                    while self.cur.command == Command::Equals {
-                        let lhs_binding = self.lhs_tracking.last_lhs_binding.clone();
-                        pending_lhs.push((
-                            cur_result.exp,
-                            lhs_binding,
-                            cur_result.dep,
-                            cur_result.pair_dep,
-                        ));
-                        self.get_x_next();
-                        self.lhs_tracking.equals_means_equation = true;
-                        cur_result = self.scan_expression()?;
-                    }
-
-                    let rhs_clone = cur_result.exp;
-                    let rhs_dep = cur_result.dep;
-                    let rhs_pair_dep = cur_result.pair_dep;
-                    for (lhs, lhs_binding, lhs_dep, lhs_pair_dep) in &pending_lhs {
-                        self.do_equation(
-                            lhs,
-                            &rhs_clone,
-                            lhs_binding.clone(),
-                            (lhs_dep.clone(), lhs_pair_dep.clone()),
-                            (rhs_dep.clone(), rhs_pair_dep.clone()),
-                        )?;
-                    }
-                } else if self.cur.command == Command::Assignment {
-                    // Assignment chain: a := b := ... := rhs
-                    // All left-hand sides receive the final rhs value.
-                    let mut pending_lhs: Vec<Option<LhsBinding>> = Vec::new();
-                    while self.cur.command == Command::Assignment {
-                        pending_lhs.push(self.lhs_tracking.last_lhs_binding.clone());
-                        self.get_x_next();
-                        self.lhs_tracking.equals_means_equation = true;
-                        cur_result = self.scan_expression()?;
-                    }
-
-                    let rhs = cur_result.exp;
-                    for lhs_binding in pending_lhs {
-                        self.assign_binding(lhs_binding, &rhs)?;
-                    }
-                } else {
-                    // Bare expression-statement (no `=` or `:=`).
-                    // Preserve the result in cur_expr so that
-                    // begingroup/endgroup can return the last expression
-                    // as the group's value (mp.web's "stash_cur_exp").
-                    self.set_cur_result(cur_result);
-                }
-
-                // Expect statement terminator
-                if self.cur.command == Command::Semicolon {
-                    self.get_x_next();
-                } else if self.cur.command == Command::EndGroup
-                    || self.cur.command == Command::Stop
-                    || self.cur.command == Command::NewInternal
-                {
-                    // OK — some commands may begin immediately without an
-                    // explicit semicolon between statements.
-                } else if self.cur.command == Command::MacroSpecial
-                    && MacroSpecialOp::from_modifier(self.cur.modifier)
-                        == Some(MacroSpecialOp::EndDef)
-                {
-                    // Allow an implicit terminator before `enddef` in macro bodies.
-                    self.get_x_next();
-                } else {
-                    self.report_error(
-                        ErrorKind::MissingToken,
-                        format!(
-                            "Missing `;` (got {:?} {:?})",
-                            self.cur.command, self.cur.token.kind
-                        ),
-                    );
-                    // Skip to the next semicolon (or end) to recover.
-                    while self.cur.command != Command::Semicolon
-                        && self.cur.command != Command::Stop
-                        && self.cur.command != Command::EndGroup
-                    {
-                        self.get_x_next();
-                    }
-                }
-                Ok(())
-            }
-        }
-    }
-
     /// Execute a type declaration (`numeric x, y;`).
-    fn do_type_declaration(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_type_declaration(&mut self) -> InterpResult<()> {
         let Some(type_op) = TypeNameOp::from_modifier(self.cur.modifier) else {
             self.report_error(
                 ErrorKind::UnexpectedToken,
@@ -256,7 +82,7 @@ impl Interpreter {
                         if let Some(sym) = self.cur.sym {
                             suffix_segs.push(SuffixSegment::Attr(sym));
                             name.push('.');
-                            name.push_str(self.symbols.name(sym));
+                            name.push_str(self.state.symbols.name(sym));
                         }
                         self.get_next();
                     } else {
@@ -270,11 +96,11 @@ impl Interpreter {
                 // that re-declaring (e.g. `numeric t[]` inside a loop)
                 // resets subscripted forms like `t[0]`, `t[1]`, etc.
                 if let Some(sym) = root_sym {
-                    self.variables.invalidate_sym_cache_entry(sym);
+                    self.state.variables.invalidate_sym_cache_entry(sym);
                 }
-                self.variables.clear_variable_and_descendants(&name);
+                self.state.variables.clear_variable_and_descendants(&name);
 
-                let var_id = self.variables.lookup(&name);
+                let var_id = self.state.variables.lookup(&name);
 
                 // Determine the MetaPost type for the trie registration
                 let mp_type = Self::type_op_to_type(type_op);
@@ -283,11 +109,11 @@ impl Interpreter {
                 let val = self
                     .default_var_value_for_type(mp_type, &name)
                     .unwrap_or(VarValue::Undefined);
-                self.variables.set(var_id, val);
+                self.state.variables.set(var_id, val);
 
                 // Register in the variable type trie
                 if let Some(root) = root_sym {
-                    self.var_trie.declare(root, &suffix_segs, mp_type);
+                    self.state.var_trie.declare(root, &suffix_segs, mp_type);
                 }
             } else {
                 // Non-symbolic token — skip it
@@ -320,48 +146,9 @@ impl Interpreter {
         }
     }
 
-    /// Get a mutable reference to the target picture for `addto`/`clip`/`setbounds`.
-    ///
-    /// For `currentpicture`, returns `&mut self.picture_state.current_picture` directly.
-    /// For named pictures, extracts the picture from the variable into
-    /// `self.picture_state.named_pic_buf`, returning a mutable reference to it.
-    /// After modification, call [`Self::flush_target_picture`] to write it back.
-    fn get_target_picture(&mut self, pic_name: &str) -> &mut Picture {
-        if pic_name == "currentpicture" {
-            &mut self.picture_state.current_picture
-        } else {
-            // Take the picture out of the variable (move, not clone).
-            // This avoids O(n) cloning on every addto for large pictures.
-            let pic = if let Some(var_id) = self.variables.lookup_existing(pic_name) {
-                match self.variables.take(var_id) {
-                    VarValue::Known(Value::Picture(p)) => p,
-                    _ => Picture::default(),
-                }
-            } else {
-                Picture::default()
-            };
-            self.picture_state.named_pic_buf = Some(pic);
-            // SAFETY: we just assigned `Some` above, so `unwrap` cannot fail.
-            // This pattern avoids holding a borrow on `self.variables` across
-            // the mutable return.
-            #[allow(clippy::unwrap_used)]
-            self.picture_state.named_pic_buf.as_mut().unwrap()
-        }
-    }
-
-    /// Write the temporary named picture buffer back to the variable.
-    fn flush_target_picture(&mut self, pic_name: &str) {
-        if pic_name == "currentpicture" {
-            // Mark dirty — the variable will be synced lazily on next read.
-            self.picture_state.currentpicture_dirty = true;
-        } else if let Some(pic) = self.picture_state.named_pic_buf.take() {
-            let var_id = self.variables.lookup(pic_name);
-            self.variables.set_known(var_id, Value::Picture(pic));
-        }
-    }
-
     /// Execute `addto` statement.
-    fn do_addto(&mut self) -> InterpResult<()> {
+    #[allow(clippy::too_many_lines)]
+    pub(in crate::interpreter) fn do_addto(&mut self) -> InterpResult<()> {
         self.get_x_next();
 
         // Optional target picture name. If omitted, default to currentpicture.
@@ -383,15 +170,20 @@ impl Interpreter {
                 let path = value_to_path_owned(path_val)?;
                 let (ds, pen_specified) = self.scan_with_options()?;
 
-                let target = self.get_target_picture(&pic_name);
-                picture::addto_contour(
-                    target,
-                    FillObject {
-                        path,
-                        color: ds.color,
-                        pen: if pen_specified { Some(ds.pen) } else { None },
-                        line_join: ds.line_join,
-                        miter_limit: ds.miter_limit,
+                self.state.picture_manager.with_target_picture(
+                    &mut self.state.variables,
+                    &pic_name,
+                    |target| {
+                        picture::addto_contour(
+                            target,
+                            FillObject {
+                                path,
+                                color: ds.color,
+                                pen: if pen_specified { Some(ds.pen) } else { None },
+                                line_join: ds.line_join,
+                                miter_limit: ds.miter_limit,
+                            },
+                        );
                     },
                 );
             }
@@ -399,47 +191,57 @@ impl Interpreter {
                 let path_val = self.scan_expression()?.exp;
                 let (ds, _) = self.scan_with_options()?;
 
-                let target = self.get_target_picture(&pic_name);
-                match path_val {
-                    Value::Pair(x, y) => {
-                        // `draw <pair> withpen <pen>` draws a dot-like mark.
-                        // Emulate this via the pen outline path shifted to the
-                        // pair position, then filled.
-                        let dot = postmeta_graphics::pen::makepath(&ds.pen);
-                        let shifted = dot.transformed(&transform::shifted(x, y));
-                        picture::addto_contour(
-                            target,
-                            FillObject {
-                                path: shifted,
-                                color: ds.color,
-                                pen: None,
-                                line_join: ds.line_join,
-                                miter_limit: ds.miter_limit,
-                            },
-                        );
-                    }
-                    other => {
-                        let path = value_to_path_owned(other)?;
-                        picture::addto_doublepath(
-                            target,
-                            StrokeObject {
-                                path,
-                                pen: ds.pen,
-                                color: ds.color,
-                                dash: ds.dash,
-                                line_cap: ds.line_cap,
-                                line_join: ds.line_join,
-                                miter_limit: ds.miter_limit,
-                            },
-                        );
-                    }
-                }
+                let target_path = match path_val {
+                    Value::Pair(x, y) => DoublePathTarget::Dot { x, y },
+                    other => DoublePathTarget::Path(value_to_path_owned(other)?),
+                };
+
+                self.state.picture_manager.with_target_picture(
+                    &mut self.state.variables,
+                    &pic_name,
+                    |target| match target_path {
+                        DoublePathTarget::Dot { x, y } => {
+                            // `draw <pair> withpen <pen>` draws a dot-like mark.
+                            // Emulate this via the pen outline path shifted to the
+                            // pair position, then filled.
+                            let dot = postmeta_graphics::pen::makepath(&ds.pen);
+                            let shifted = dot.transformed(&transform::shifted(x, y));
+                            picture::addto_contour(
+                                target,
+                                FillObject {
+                                    path: shifted,
+                                    color: ds.color,
+                                    pen: None,
+                                    line_join: ds.line_join,
+                                    miter_limit: ds.miter_limit,
+                                },
+                            );
+                        }
+                        DoublePathTarget::Path(path) => {
+                            picture::addto_doublepath(
+                                target,
+                                StrokeObject {
+                                    path,
+                                    pen: ds.pen,
+                                    color: ds.color,
+                                    dash: ds.dash,
+                                    line_cap: ds.line_cap,
+                                    line_join: ds.line_join,
+                                    miter_limit: ds.miter_limit,
+                                },
+                            );
+                        }
+                    },
+                );
             }
             Some(ThingToAddOp::Also) => {
                 let pic_val = self.scan_expression()?.exp;
                 if let Value::Picture(p) = pic_val {
-                    let target = self.get_target_picture(&pic_name);
-                    target.merge(p);
+                    self.state.picture_manager.with_target_picture(
+                        &mut self.state.variables,
+                        &pic_name,
+                        |target| target.merge(p),
+                    );
                 } else {
                     self.report_error(
                         ErrorKind::TypeError,
@@ -455,8 +257,6 @@ impl Interpreter {
             }
         }
 
-        self.flush_target_picture(&pic_name);
-
         self.eat_semicolon();
         Ok(())
     }
@@ -467,9 +267,9 @@ impl Interpreter {
             pen: Pen::default(),
             color: Color::BLACK,
             dash: None,
-            line_cap: LineCap::from(self.internals.get_id(InternalId::LineCap)),
-            line_join: LineJoin::from(self.internals.get_id(InternalId::LineJoin)),
-            miter_limit: self.internals.get_id(InternalId::MiterLimit),
+            line_cap: LineCap::from(self.state.internals.get_id(InternalId::LineCap)),
+            line_join: LineJoin::from(self.state.internals.get_id(InternalId::LineJoin)),
+            miter_limit: self.state.internals.get_id(InternalId::MiterLimit),
         };
         let mut pen_specified = false;
 
@@ -505,7 +305,7 @@ impl Interpreter {
     }
 
     /// Execute `clip`/`setbounds` statement.
-    fn do_bounds(&mut self) -> InterpResult<()> {
+    pub(in crate::interpreter) fn do_bounds(&mut self) -> InterpResult<()> {
         let is_clip = BoundsOp::from_modifier(self.cur.modifier) == Some(BoundsOp::Clip);
         self.get_x_next();
 
@@ -527,14 +327,17 @@ impl Interpreter {
         let val = self.scan_expression()?.exp;
         let clip_path = value_to_path_owned(val)?;
 
-        let target = self.get_target_picture(&pic_name);
-        if is_clip {
-            picture::clip(target, clip_path);
-        } else {
-            picture::setbounds(target, clip_path);
-        }
-
-        self.flush_target_picture(&pic_name);
+        self.state.picture_manager.with_target_picture(
+            &mut self.state.variables,
+            &pic_name,
+            |target| {
+                if is_clip {
+                    picture::clip(target, clip_path);
+                } else {
+                    picture::setbounds(target, clip_path);
+                }
+            },
+        );
 
         self.eat_semicolon();
         Ok(())
@@ -568,14 +371,16 @@ impl Interpreter {
     }
 
     /// Execute `shipout` statement.
-    fn do_shipout(&mut self) -> InterpResult<()> {
-        self.sync_currentpicture_variable();
+    pub(in crate::interpreter) fn do_shipout(&mut self) -> InterpResult<()> {
+        self.state
+            .picture_manager
+            .sync_currentpicture_variable(&mut self.state.variables);
         self.get_x_next();
         let val = self.scan_expression()?.exp;
 
         let pic = match val {
             Value::Picture(p) => p,
-            Value::Vacuous => self.picture_state.current_picture.clone(),
+            Value::Vacuous => self.state.picture_manager.clone_current_picture(),
             other => {
                 self.report_error(
                     ErrorKind::TypeError,
@@ -586,7 +391,7 @@ impl Interpreter {
             }
         };
 
-        self.picture_state.pictures.push(pic);
+        self.state.picture_manager.push_output(pic);
 
         self.eat_semicolon();
         Ok(())
@@ -599,7 +404,8 @@ impl Interpreter {
     /// do not enforce the restriction.
     ///
     /// Syntax: `outer <token> [, <token>]* ;`
-    fn do_outer(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_outer(&mut self) -> InterpResult<()> {
         // Read token names separated by commas until semicolon.
         // Use get_next (non-expanding) to avoid triggering `end`/`bye`.
         loop {
@@ -614,48 +420,18 @@ impl Interpreter {
     }
 
     /// Execute `save` statement.
-    fn do_save(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_save(&mut self) -> InterpResult<()> {
         self.get_x_next();
         loop {
             if let Some(sym_id) = self.cur.sym {
-                let entry = self.symbols.get(sym_id);
-                self.save_stack.save_symbol(sym_id, entry);
-
-                // If saving currentpicture, flush the live picture first.
-                if self.state.picture_state.currentpicture_dirty
-                    && self.state.symbols.name(sym_id) == "currentpicture"
-                {
-                    self.sync_currentpicture_variable();
-                }
-
-                // Split borrows: access state fields directly to avoid
-                // Deref coercion that borrows all of self.state.
-                let root = self.state.symbols.name(sym_id);
-
-                // Fast path: root-only variable with no suffixed descendants.
-                // Avoids the full take_name_bindings_for_root cycle.
-                if let Some((root_name, var_id, value)) =
-                    self.state.variables.try_save_root_fast(root)
-                {
-                    self.state
-                        .save_stack
-                        .save_root_value_only(root_name, sym_id, var_id, value);
-                } else {
-                    // Slow path: variable has suffixed descendants — use full save.
-                    let root = root.to_owned();
-                    let prev = self.state.variables.take_name_bindings_for_root(&root);
-                    self.state.save_stack.save_name_bindings(root, sym_id, prev);
-                }
-
-                self.variables.invalidate_sym_cache_entry(sym_id);
-                self.symbols.clear(sym_id);
-
-                // Also save and remove any macro definition (especially
-                // vardefs, whose presence is detected via the `macros` map
-                // rather than the symbol entry).
-                if let Some(info) = self.macros.remove(&sym_id) {
-                    self.macro_save_stack.push(Some((sym_id, info)));
-                }
+                self.state.scope_manager.save_name(
+                    sym_id,
+                    &mut self.state.symbols,
+                    &mut self.state.variables,
+                    &mut self.state.picture_manager,
+                    &mut self.state.macros,
+                );
             }
             self.get_x_next();
             if self.cur.command != Command::Comma {
@@ -668,7 +444,7 @@ impl Interpreter {
     }
 
     /// Execute `interim` statement.
-    fn do_interim(&mut self) -> InterpResult<()> {
+    pub(in crate::interpreter) fn do_interim(&mut self) -> InterpResult<()> {
         self.get_x_next();
         if self.cur.command != Command::InternalQuantity {
             self.report_error(
@@ -687,7 +463,7 @@ impl Interpreter {
 
         let idx = self.cur.modifier;
         let prev = self.state.internals.get(idx);
-        self.state.save_stack.save_internal(idx, prev);
+        self.state.scope_manager.save_internal(idx, prev);
         self.get_x_next();
 
         if self.cur.command != Command::Assignment {
@@ -714,7 +490,8 @@ impl Interpreter {
     }
 
     /// Execute `let` statement.
-    fn do_let(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_let(&mut self) -> InterpResult<()> {
         // LHS: get_symbol (non-expanding), like mp.web's do_let
         self.get_next();
         let lhs = self.cur.sym;
@@ -737,12 +514,10 @@ impl Interpreter {
         self.get_next();
         let rhs = self.cur.sym;
         if let (Some(l), Some(r)) = (lhs, rhs) {
-            let entry = self.symbols.get(r);
-            self.symbols.set(l, entry);
-            // Also copy macro info if the RHS is a macro
-            if let Some(macro_info) = self.macros.get(&r).cloned() {
-                self.macros.insert(l, macro_info);
-            }
+            let entry = self.state.symbols.get(r);
+            self.state.symbols.set(l, entry);
+            // Rebind macro metadata: clear stale LHS, then copy RHS if macro.
+            self.state.macros.rebind(l, r);
         } else {
             self.report_error(
                 ErrorKind::UnexpectedToken,
@@ -758,7 +533,8 @@ impl Interpreter {
     /// Syntax: `delimiters <left> <right>;`
     /// Declares a pair of matching delimiters (like `(` and `)`).
     /// Each pair gets a unique modifier so the parser can match them.
-    fn do_delimiters(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_delimiters(&mut self) -> InterpResult<()> {
         self.get_x_next();
 
         // Get left delimiter symbol
@@ -770,12 +546,12 @@ impl Interpreter {
         self.get_x_next();
 
         // Allocate a unique delimiter id for this pair
-        let delim_id = self.next_delimiter_id;
-        self.next_delimiter_id += 1;
+        let delim_id = self.state.next_delimiter_id;
+        self.state.next_delimiter_id += 1;
 
         // Set the symbols as delimiter commands with matching modifier
         if let Some(l) = left_sym {
-            self.symbols.set(
+            self.state.symbols.set(
                 l,
                 crate::symbols::SymbolEntry {
                     command: Command::LeftDelimiter,
@@ -784,7 +560,7 @@ impl Interpreter {
             );
         }
         if let Some(r) = right_sym {
-            self.symbols.set(
+            self.state.symbols.set(
                 r,
                 crate::symbols::SymbolEntry {
                     command: Command::RightDelimiter,
@@ -801,13 +577,14 @@ impl Interpreter {
     ///
     /// Syntax: `newinternal <name>, <name>, ...;`
     /// Declares new internal numeric quantities.
-    fn do_new_internal(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_new_internal(&mut self) -> InterpResult<()> {
         self.get_x_next();
 
         loop {
             if let Some(name) = self.cur_symbolic_name().map(str::to_owned) {
                 // Register the new internal
-                let Some(idx) = self.internals.new_internal(&name) else {
+                let Some(idx) = self.state.internals.new_internal(&name) else {
                     self.report_error(
                         ErrorKind::Overflow,
                         format!("Too many internal quantities while adding `{name}`"),
@@ -817,7 +594,7 @@ impl Interpreter {
 
                 // Set the symbol to InternalQuantity
                 if let Some(sym) = self.cur.sym {
-                    self.symbols.set(
+                    self.state.symbols.set(
                         sym,
                         crate::symbols::SymbolEntry {
                             command: Command::InternalQuantity,
@@ -840,7 +617,7 @@ impl Interpreter {
     }
 
     /// Execute `show` statement.
-    fn do_show(&mut self) -> InterpResult<()> {
+    pub(in crate::interpreter) fn do_show(&mut self) -> InterpResult<()> {
         // show_type distinguishes show/showtoken/showdependencies — used later
         let _ = self.cur.modifier;
         self.get_x_next();
@@ -852,7 +629,7 @@ impl Interpreter {
     }
 
     /// Execute `message` / `errmessage` statement.
-    fn do_message(&mut self) -> InterpResult<()> {
+    pub(in crate::interpreter) fn do_message(&mut self) -> InterpResult<()> {
         let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
         let val = self.scan_expression()?.exp;
@@ -870,7 +647,8 @@ impl Interpreter {
     }
 
     /// Execute mode-setting commands (`batchmode`, `nonstopmode`, etc.).
-    fn do_mode_command(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_mode_command(&mut self) -> InterpResult<()> {
         // Mode commands affect terminal interaction in original MetaPost.
         // PostMeta runs non-interactively, so these are accepted as no-ops.
         self.get_x_next();
@@ -879,7 +657,7 @@ impl Interpreter {
     }
 
     /// Execute `randomseed` statement.
-    fn do_randomseed(&mut self) -> InterpResult<()> {
+    pub(in crate::interpreter) fn do_randomseed(&mut self) -> InterpResult<()> {
         self.get_x_next();
         if self.cur.command != Command::Assignment {
             self.report_error(ErrorKind::MissingToken, "Expected `:=` after `randomseed`");
@@ -905,7 +683,7 @@ impl Interpreter {
                 reason = "seed is an implementation-defined integer state"
             )]
             {
-                self.random_seed = seed_val.round().max(0.0) as u64;
+                self.state.random_seed = seed_val.round().max(0.0) as u64;
             }
         } else {
             self.report_error(
@@ -918,7 +696,8 @@ impl Interpreter {
         Ok(())
     }
 
-    fn do_special(&mut self) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_special(&mut self) -> InterpResult<()> {
         // PostScript specials are ignored by the SVG backend.
         self.get_x_next();
 
@@ -929,7 +708,7 @@ impl Interpreter {
         {
             self.lhs_tracking.equals_means_equation = false;
             if let Err(err) = self.scan_expression() {
-                self.errors.push(err);
+                self.state.errors.push(err);
                 while self.cur.command != Command::Semicolon
                     && self.cur.command != Command::Stop
                     && self.cur.command != Command::EndGroup
@@ -943,7 +722,11 @@ impl Interpreter {
         Ok(())
     }
 
-    fn do_unimplemented_statement(&mut self, name: &str) -> InterpResult<()> {
+    #[allow(clippy::unnecessary_wraps)]
+    pub(in crate::interpreter) fn do_unimplemented_statement(
+        &mut self,
+        name: &str,
+    ) -> InterpResult<()> {
         self.report_error(
             ErrorKind::InvalidExpression,
             format!("`{name}` is not implemented"),
@@ -961,46 +744,12 @@ impl Interpreter {
 
     /// Restore scope at `endgroup`.
     pub(super) fn do_endgroup(&mut self) {
-        // Restore macro definitions saved by `save` back to the group boundary.
-        while let Some(entry) = self.macro_save_stack.pop() {
-            if let Some((sym_id, info)) = entry {
-                self.macros.insert(sym_id, info);
-            } else {
-                break; // `None` = boundary marker
-            }
-        }
-
-        let entries = self.save_stack.restore_to_boundary();
-        for entry in entries {
-            match entry {
-                SaveEntry::Variable { id, value } => {
-                    self.variables.set(id, value);
-                }
-                SaveEntry::Internal { index, value } => {
-                    self.internals.set(index, value);
-                }
-                SaveEntry::Symbol { id, entry } => {
-                    self.symbols.set(id, entry);
-                }
-                SaveEntry::NameBindings { root, sym, prev } => {
-                    self.variables.invalidate_sym_cache_entry(sym);
-                    self.variables.clear_name_bindings_for_root(&root);
-                    for (name, id) in prev {
-                        self.variables.register_name(&name, id);
-                    }
-                }
-                SaveEntry::RootValueOnly {
-                    root,
-                    sym,
-                    id,
-                    value,
-                } => {
-                    self.variables.invalidate_sym_cache_entry(sym);
-                    self.variables.restore_root_value(root, id, value);
-                }
-                SaveEntry::Boundary => {} // shouldn't happen
-            }
-        }
+        self.state.scope_manager.end_group(
+            &mut self.state.symbols,
+            &mut self.state.variables,
+            &mut self.state.internals,
+            &mut self.state.macros,
+        );
     }
 }
 

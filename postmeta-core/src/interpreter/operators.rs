@@ -55,11 +55,11 @@ impl Interpreter {
             NullaryOp::NullPen => (Value::Pen(Pen::null()), Type::Pen),
             NullaryOp::PenCircle => (Value::Pen(Pen::circle(1.0)), Type::Pen),
             NullaryOp::NormalDeviate => (
-                Value::Numeric(math::normal_deviate(&mut self.random_seed)),
+                Value::Numeric(math::normal_deviate(&mut self.state.random_seed)),
                 Type::Known,
             ),
             NullaryOp::JobName => (
-                Value::String(Arc::from(self.job_name.as_str())),
+                Value::String(Arc::from(self.state.job_name.as_str())),
                 Type::String,
             ),
             NullaryOp::ReadString => (Value::Vacuous, Type::Vacuous),
@@ -75,7 +75,7 @@ impl Interpreter {
     pub(super) fn do_unary(
         &mut self,
         op: UnaryOp,
-        input: Value,
+        input: &Value,
         pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
     ) -> InterpResult<super::ExprResultValue> {
         // Save the operand binding before clearing — part-extraction operators
@@ -84,12 +84,24 @@ impl Interpreter {
 
         // Part-extraction operators need pair_dep access — handle them here.
         match op {
-            UnaryOp::XPart => return self.extract_part(&input, 0, pair_dep, operand_binding),
-            UnaryOp::YPart => return self.extract_part(&input, 1, pair_dep, operand_binding),
-            UnaryOp::XXPart => return self.extract_part(&input, 2, pair_dep, operand_binding),
-            UnaryOp::XYPart => return self.extract_part(&input, 3, pair_dep, operand_binding),
-            UnaryOp::YXPart => return self.extract_part(&input, 4, pair_dep, operand_binding),
-            UnaryOp::YYPart => return self.extract_part(&input, 5, pair_dep, operand_binding),
+            UnaryOp::XPart => {
+                return self.extract_part(input, 0, pair_dep, operand_binding.as_ref());
+            }
+            UnaryOp::YPart => {
+                return self.extract_part(input, 1, pair_dep, operand_binding.as_ref());
+            }
+            UnaryOp::XXPart => {
+                return self.extract_part(input, 2, pair_dep, operand_binding.as_ref());
+            }
+            UnaryOp::XYPart => {
+                return self.extract_part(input, 3, pair_dep, operand_binding.as_ref());
+            }
+            UnaryOp::YXPart => {
+                return self.extract_part(input, 4, pair_dep, operand_binding.as_ref());
+            }
+            UnaryOp::YYPart => {
+                return self.extract_part(input, 5, pair_dep, operand_binding.as_ref());
+            }
             _ => {}
         }
 
@@ -97,7 +109,7 @@ impl Interpreter {
         // Access both fields through `self.state` so the borrow checker can
         // see they are disjoint (Deref would borrow all of `self`).
         let fonts = self.state.font_provider.as_deref();
-        let (val, ty) = Self::eval_unary(op, &input, &mut self.state.random_seed, fonts)?;
+        let (val, ty) = Self::eval_unary(op, input, &mut self.state.random_seed, fonts)?;
         // Synthesize const_dep for known numeric results so that dependency
         // tracking is preserved through subsequent arithmetic (e.g.,
         // `alpha = angle(A) - angle(B)` where both angle calls return known
@@ -120,6 +132,7 @@ impl Interpreter {
     /// Returns the result `(Value, Type)`.  Does NOT handle part-extraction
     /// operators (xpart, ypart, etc.) — those need pair dependency propagation
     /// and are handled by [`Self::do_unary`] directly.
+    #[allow(clippy::too_many_lines)]
     fn eval_unary(
         op: UnaryOp,
         input: &Value,
@@ -217,6 +230,10 @@ impl Interpreter {
                     reason = "character code is computed from rounded numeric"
                 )]
                 let rounded = v.round() as i64;
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "value is constrained to 0..=255 via rem_euclid"
+                )]
                 let code = rounded.rem_euclid(256) as u32;
                 let ch = char::from_u32(code).unwrap_or('\0');
                 Ok((Value::String(Arc::from(ch.to_string())), Type::String))
@@ -366,7 +383,6 @@ impl Interpreter {
                     UnaryOp::LLCorner => (bb.min_x, bb.min_y),
                     UnaryOp::LRCorner => (bb.max_x, bb.min_y),
                     UnaryOp::ULCorner => (bb.min_x, bb.max_y),
-                    UnaryOp::URCorner => (bb.max_x, bb.max_y),
                     _ => (bb.max_x, bb.max_y),
                 };
                 Ok((Value::Pair(px, py), Type::PairType))
@@ -550,6 +566,10 @@ impl Interpreter {
                     #[expect(
                         clippy::cast_possible_truncation,
                         reason = "index is clamped to [0, len] before cast"
+                    )]
+                    #[expect(
+                        clippy::cast_sign_loss,
+                        reason = "index is clamped to non-negative range before cast"
                     )]
                     {
                         v.round().max(0.0).min(char_len_f64) as usize
@@ -764,12 +784,13 @@ impl Interpreter {
     /// binding from before the unary operator cleared it, allowing us to
     /// look up the sub-part `VarId` for equation solving (e.g.
     /// `xxpart T = 1`).
+    #[allow(clippy::too_many_lines)]
     fn extract_part(
         &mut self,
         input: &Value,
         part: usize,
         pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
-        operand_binding: Option<LhsBinding>,
+        operand_binding: Option<&LhsBinding>,
     ) -> InterpResult<super::ExprResultValue> {
         match input {
             Value::Pair(x, y) => {
@@ -840,7 +861,7 @@ impl Interpreter {
                         txy,
                         tyx,
                         tyy,
-                    } = self.variables.get(id).clone()
+                    } = self.state.variables.get(*id).clone()
                     {
                         let sub_id = match part {
                             0 => tx,
@@ -946,12 +967,14 @@ impl Interpreter {
     /// Returns 1 (no color), 3 (greyscale), 5 (RGB), or 7 (CMYK).
     /// Since we only support RGB, fills/strokes return 5 and text
     /// defaults to 5 as well. Objects without explicit color return 1.
+    #[allow(clippy::unnecessary_wraps)]
     fn extract_color_model(val: &Value) -> InterpResult<(Value, Type)> {
         let model = match val {
             Value::Color(_) => 5.0,
             Value::Picture(pic) => match pic.objects.first() {
-                Some(GraphicsObject::Fill(_) | GraphicsObject::Stroke(_)) => 5.0,
-                Some(GraphicsObject::Text(_)) => 5.0,
+                Some(
+                    GraphicsObject::Fill(_) | GraphicsObject::Stroke(_) | GraphicsObject::Text(_),
+                ) => 5.0,
                 _ => 1.0,
             },
             _ => 1.0,
@@ -963,6 +986,7 @@ impl Interpreter {
     ///
     /// Since we only support RGB, this returns 0 for everything
     /// (greyscale is not a separate color model in our implementation).
+    #[allow(clippy::unnecessary_wraps)]
     const fn extract_grey_part(val: &Value) -> InterpResult<(Value, Type)> {
         let _ = val;
         Ok((Value::Numeric(0.0), Type::Known))

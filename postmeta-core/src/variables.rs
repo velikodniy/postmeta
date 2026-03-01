@@ -157,6 +157,7 @@ impl Variables {
     }
 
     /// Allocate a new variable slot and return its id.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn alloc(&mut self) -> VarId {
         let id = VarId(self.values.len() as u32);
         self.values.push(VarValue::Undefined);
@@ -624,6 +625,7 @@ impl Variables {
     }
 
     /// Iterate over all variable ids and their values.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn iter(&self) -> impl Iterator<Item = (VarId, &VarValue)> {
         self.values
             .iter()

@@ -26,7 +26,7 @@ impl Interpreter {
             let mut substitutions = Vec::new();
             for term in &reduced {
                 let Some(id) = term.var_id else { continue };
-                match self.variables.get(id) {
+                match self.state.variables.get(id) {
                     VarValue::NumericVar(NumericState::Known(v)) => {
                         substitutions.push((id, const_dep(*v)));
                     }
@@ -57,7 +57,7 @@ impl Interpreter {
     fn apply_solve_result(&mut self, result: SolveResult, inconsistent_context: &str) {
         match result {
             SolveResult::Solved { var_id, dep } => {
-                self.variables.apply_linear_solution(var_id, &dep);
+                self.state.variables.apply_linear_solution(var_id, &dep);
             }
             SolveResult::Redundant => {}
             SolveResult::Inconsistent(v) => {
@@ -148,13 +148,13 @@ impl Interpreter {
                 self.assign_to_variable(id, &assigned);
             }
             Some(LhsBinding::Internal { idx }) => match value_to_scalar(rhs) {
-                Ok(val) => self.internals.set(idx, val),
+                Ok(val) => self.state.internals.set(idx, val),
                 Err(_) => {
                     self.report_error(
                         ErrorKind::TypeError,
                         format!(
                             "Internal quantity `{}` requires numeric, got {}",
-                            self.internals.name(idx),
+                            self.state.internals.name(idx),
                             rhs.ty()
                         ),
                     );
@@ -224,45 +224,46 @@ impl Interpreter {
     pub(super) fn assign_to_variable(&mut self, var_id: crate::equation::VarId, value: &Value) {
         match value {
             Value::Numeric(v) => {
-                self.variables
+                self.state
+                    .variables
                     .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
             }
             Value::Pair(x, y) => {
-                let var_val = self.variables.get(var_id).clone();
+                let var_val = self.state.variables.get(var_id).clone();
                 if let VarValue::Pair { x: xid, y: yid } = var_val {
-                    self.variables
+                    self.state
+                        .variables
                         .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
-                    self.variables
+                    self.state
+                        .variables
                         .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
                 } else {
-                    self.variables.set_known(var_id, value.clone());
+                    self.state.variables.set_known(var_id, value.clone());
                 }
             }
             Value::Color(c) => {
-                let var_val = self.variables.get(var_id).clone();
+                let var_val = self.state.variables.get(var_id).clone();
                 if let VarValue::Color { r, g, b } = var_val {
-                    self.variables
+                    self.state
+                        .variables
                         .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
-                    self.variables
+                    self.state
+                        .variables
                         .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
-                    self.variables
+                    self.state
+                        .variables
                         .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
                 } else {
-                    self.variables.set_known(var_id, value.clone());
+                    self.state.variables.set_known(var_id, value.clone());
                 }
             }
             _ => {
-                self.variables.set_known(var_id, value.clone());
+                self.state.variables.set_known(var_id, value.clone());
             }
         }
 
-        if let Value::Picture(p) = value
-            && self
-                .variables
-                .lookup_existing("currentpicture")
-                .is_some_and(|id| id == var_id)
-        {
-            self.picture_state.current_picture = p.clone();
-        }
+        self.state
+            .picture_manager
+            .sync_runtime_for_picture_assignment(&self.state.variables, var_id, value);
     }
 }

@@ -15,10 +15,11 @@
 
 mod equation;
 mod expand;
-mod expr;
 pub(crate) mod helpers;
 mod operators;
+mod parser;
 mod path_parse;
+mod runtime;
 mod statement;
 
 use std::sync::Arc;
@@ -28,7 +29,7 @@ use postmeta_graphics::path::Path;
 use postmeta_graphics::types::{Color, Pen, Picture, Transform};
 
 use crate::command::Command;
-use crate::equation::{DepList, VarId, const_dep, single_dep};
+use crate::equation::{DepList, VarId, const_dep};
 use crate::error::{ErrorKind, InterpResult, InterpreterError, Severity};
 use crate::filesystem::FileSystem;
 use crate::input::{InputSystem, ResolvedToken, TokenList};
@@ -36,83 +37,19 @@ use crate::internals::Internals;
 use crate::scanner::ScanErrorKind;
 use crate::symbols::{SymbolId, SymbolTable};
 use crate::types::{Type, Value};
-use crate::variables::{NumericState, SaveStack, SuffixSegment, VarTrie, VarValue, Variables};
+use crate::variables::{NumericState, SuffixSegment, VarTrie, VarValue, Variables};
 
-use expand::{ControlFlow, MacroInfo};
+use expand::ControlFlow;
+use runtime::macros::MacroTable;
+use runtime::pictures::PictureManager;
+use runtime::scope::ScopeManager;
 
 // ---------------------------------------------------------------------------
 // Current expression state
 // ---------------------------------------------------------------------------
 
-/// The interpreter's current expression result.
-///
-/// Groups the value, type, and linear dependency state that the expression
-/// parser writes to and consumers read from. These four fields are always
-/// mutated as a unit, so bundling them reduces `Interpreter`'s field count
-/// Expression evaluation result.
-///
-/// Carries a value, its type, and optional dependency information for the
-/// equation solver. This is the canonical result type returned by all
-/// expression-parsing functions.
-#[derive(Clone)]
-pub(super) struct ExprResultValue {
-    pub exp: Value,
-    pub ty: Type,
-    pub dep: Option<DepList>,
-    pub pair_dep: Option<(DepList, DepList)>,
-}
-
-impl ExprResultValue {
-    const fn vacuous() -> Self {
-        Self {
-            exp: Value::Vacuous,
-            ty: Type::Vacuous,
-            dep: None,
-            pair_dep: None,
-        }
-    }
-
-    const fn typed(exp: Value, ty: Type) -> Self {
-        Self {
-            ty,
-            exp,
-            dep: None,
-            pair_dep: None,
-        }
-    }
-
-    const fn plain(exp: Value) -> Self {
-        let ty = exp.ty();
-        Self::typed(exp, ty)
-    }
-
-    fn numeric_known(v: f64) -> Self {
-        Self {
-            exp: Value::Numeric(v),
-            ty: Type::Known,
-            dep: Some(const_dep(v)),
-            pair_dep: None,
-        }
-    }
-
-    fn numeric_independent(id: VarId) -> Self {
-        Self {
-            exp: Value::Numeric(0.0),
-            ty: Type::Independent,
-            dep: Some(single_dep(id)),
-            pair_dep: None,
-        }
-    }
-
-    fn numeric_dependent(dep: DepList) -> Self {
-        Self {
-            exp: Value::Numeric(crate::equation::constant_value(&dep).unwrap_or(0.0)),
-            ty: Type::Dependent,
-            dep: Some(dep),
-            pair_dep: None,
-        }
-    }
-}
+/// Interpreter-facing alias for the shared expression payload.
+pub(super) type ExprResultValue = crate::expr_value::ExprValue;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
@@ -158,33 +95,6 @@ impl LhsTracking {
     }
 }
 
-/// Aggregates interpreter picture output/runtime drawing state.
-pub(super) struct PictureState {
-    /// Output pictures (one per `beginfig`/`endfig`).
-    pub pictures: Vec<Picture>,
-    /// Current picture being built.
-    pub current_picture: Picture,
-    /// Temporary buffer for `addto` targeting a named picture variable.
-    /// Used to avoid borrow conflicts: the picture is extracted from the
-    /// variable, modified here, then flushed back.
-    pub named_pic_buf: Option<Picture>,
-    /// Whether `current_picture` has been modified since the last sync to the
-    /// `currentpicture` variable. Enables lazy sync: the variable is only
-    /// updated when actually read.
-    pub currentpicture_dirty: bool,
-}
-
-impl PictureState {
-    const fn new() -> Self {
-        Self {
-            pictures: Vec::new(),
-            current_picture: Picture::new(),
-            named_pic_buf: None,
-            currentpicture_dirty: false,
-        }
-    }
-}
-
 /// Long-lived interpreter machine state.
 ///
 /// This groups the mutable subsystems that represent the `MetaPost` "world":
@@ -206,19 +116,12 @@ pub struct MachineState {
     pub internals: Internals,
     /// Token input system.
     pub input: InputSystem,
-    /// Save stack for `begingroup`/`endgroup`.
-    pub save_stack: SaveStack,
+    /// Scope transaction manager for `begingroup`/`save`/`endgroup`.
+    scope_manager: ScopeManager,
     /// Picture output/runtime drawing state.
-    picture_state: PictureState,
-    /// Defined macros: `SymbolId` → macro info.
-    macros: std::collections::HashMap<SymbolId, MacroInfo>,
-    /// Macro save stack for `begingroup`/`endgroup` scoping.
-    ///
-    /// `save x` must hide macro definitions (especially vardefs, whose
-    /// presence is checked via the `macros` map rather than the symbol
-    /// entry).  `None` marks a group boundary; `Some((id, info))` is a
-    /// macro entry removed by `save` that must be restored at `endgroup`.
-    macro_save_stack: Vec<Option<(SymbolId, MacroInfo)>>,
+    picture_manager: PictureManager,
+    /// Defined macros and their save/restore runtime stack.
+    macros: MacroTable,
     /// Random seed.
     pub random_seed: u64,
     /// Error list.
@@ -290,10 +193,9 @@ impl Interpreter {
                 var_trie: VarTrie::new(),
                 internals,
                 input: InputSystem::new(),
-                save_stack: SaveStack::new(),
-                picture_state: PictureState::new(),
-                macros: std::collections::HashMap::new(),
-                macro_save_stack: Vec::new(),
+                scope_manager: ScopeManager::new(),
+                picture_manager: PictureManager::new(),
+                macros: MacroTable::new(),
                 random_seed: 0,
                 errors: Vec::new(),
                 job_name: "output".into(),
@@ -417,7 +319,7 @@ impl Interpreter {
     }
 
     fn numeric_dep_for_var(&mut self, id: VarId) -> DepList {
-        match self.variables.get(id).clone() {
+        match self.state.variables.get(id).clone() {
             VarValue::NumericVar(NumericState::Known(v)) => const_dep(v),
             VarValue::NumericVar(NumericState::Independent { .. }) => {
                 crate::equation::single_dep(id)
@@ -425,62 +327,80 @@ impl Interpreter {
             VarValue::NumericVar(NumericState::Dependent(dep)) => dep,
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
-                self.variables.make_independent(id);
+                self.state.variables.make_independent(id);
                 crate::equation::single_dep(id)
             }
-            _ => const_dep(self.variables.known_value(id).unwrap_or(0.0)),
+            _ => const_dep(self.state.variables.known_value(id).unwrap_or(0.0)),
         }
     }
 
     fn cur_symbolic_name(&self) -> Option<&str> {
-        self.cur.sym.map(|id| self.symbols.name(id))
+        self.cur.sym.map(|id| self.state.symbols.name(id))
     }
 
     fn alloc_pair_value(&mut self, name: &str) -> VarValue {
-        let x = self.variables.alloc();
-        let y = self.variables.alloc();
-        self.variables
+        let x = self.state.variables.alloc();
+        let y = self.state.variables.alloc();
+        self.state
+            .variables
             .set(x, VarValue::NumericVar(NumericState::Numeric));
-        self.variables
+        self.state
+            .variables
             .set(y, VarValue::NumericVar(NumericState::Numeric));
-        self.variables.register_name(&format!("{name}.x"), x);
-        self.variables.register_name(&format!("{name}.y"), y);
+        self.state.variables.register_name(&format!("{name}.x"), x);
+        self.state.variables.register_name(&format!("{name}.y"), y);
         VarValue::Pair { x, y }
     }
 
     fn alloc_color_value(&mut self, name: &str) -> VarValue {
-        let r = self.variables.alloc();
-        let g = self.variables.alloc();
-        let b = self.variables.alloc();
-        self.variables
+        let r = self.state.variables.alloc();
+        let g = self.state.variables.alloc();
+        let b = self.state.variables.alloc();
+        self.state
+            .variables
             .set(r, VarValue::NumericVar(NumericState::Numeric));
-        self.variables
+        self.state
+            .variables
             .set(g, VarValue::NumericVar(NumericState::Numeric));
-        self.variables
+        self.state
+            .variables
             .set(b, VarValue::NumericVar(NumericState::Numeric));
-        self.variables.register_name(&format!("{name}.r"), r);
-        self.variables.register_name(&format!("{name}.g"), g);
-        self.variables.register_name(&format!("{name}.b"), b);
+        self.state.variables.register_name(&format!("{name}.r"), r);
+        self.state.variables.register_name(&format!("{name}.g"), g);
+        self.state.variables.register_name(&format!("{name}.b"), b);
         VarValue::Color { r, g, b }
     }
 
     fn alloc_transform_value(&mut self, name: &str) -> VarValue {
-        let tx = self.variables.alloc();
-        let ty = self.variables.alloc();
-        let txx = self.variables.alloc();
-        let txy = self.variables.alloc();
-        let tyx = self.variables.alloc();
-        let tyy = self.variables.alloc();
+        let tx = self.state.variables.alloc();
+        let ty = self.state.variables.alloc();
+        let txx = self.state.variables.alloc();
+        let txy = self.state.variables.alloc();
+        let tyx = self.state.variables.alloc();
+        let tyy = self.state.variables.alloc();
         for id in [tx, ty, txx, txy, tyx, tyy] {
-            self.variables
+            self.state
+                .variables
                 .set(id, VarValue::NumericVar(NumericState::Numeric));
         }
-        self.variables.register_name(&format!("{name}.tx"), tx);
-        self.variables.register_name(&format!("{name}.ty"), ty);
-        self.variables.register_name(&format!("{name}.txx"), txx);
-        self.variables.register_name(&format!("{name}.txy"), txy);
-        self.variables.register_name(&format!("{name}.tyx"), tyx);
-        self.variables.register_name(&format!("{name}.tyy"), tyy);
+        self.state
+            .variables
+            .register_name(&format!("{name}.tx"), tx);
+        self.state
+            .variables
+            .register_name(&format!("{name}.ty"), ty);
+        self.state
+            .variables
+            .register_name(&format!("{name}.txx"), txx);
+        self.state
+            .variables
+            .register_name(&format!("{name}.txy"), txy);
+        self.state
+            .variables
+            .register_name(&format!("{name}.tyx"), tyx);
+        self.state
+            .variables
+            .register_name(&format!("{name}.tyy"), tyy);
         VarValue::Transform {
             tx,
             ty,
@@ -579,7 +499,7 @@ impl Interpreter {
         suffixes: &[SuffixSegment],
     ) {
         let needs_init = matches!(
-            self.variables.get(var_id),
+            self.state.variables.get(var_id),
             VarValue::Undefined
                 | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
         );
@@ -590,24 +510,24 @@ impl Interpreter {
         let Some(root_sym) = root_sym else {
             return;
         };
-        let Some(declared_ty) = self.var_trie.declared_type(root_sym, suffixes) else {
+        let Some(declared_ty) = self.state.var_trie.declared_type(root_sym, suffixes) else {
             return;
         };
 
         let Some(val) = self.default_var_value_for_type(declared_ty, name) else {
             return;
         };
-        self.variables.set(var_id, val);
+        self.state.variables.set(var_id, val);
     }
 
     /// Fast path for root-only variable references. Avoids String allocation
     /// entirely when the sym cache hits.
-    fn resolve_variable_root(&mut self, sym: Option<SymbolId>) -> InterpResult<ExprResultValue> {
+    fn resolve_variable_root(&mut self, sym: Option<SymbolId>) -> ExprResultValue {
         let var_id = if let Some(s) = sym {
             // Try the sym cache first — no string allocation needed on hit.
             let idx = s.raw() as usize;
-            let cached = if idx < self.variables.sym_cache.len() {
-                let c = self.variables.sym_cache[idx];
+            let cached = if idx < self.state.variables.sym_cache.len() {
+                let c = self.state.variables.sym_cache[idx];
                 if c == Variables::SYM_CACHE_EMPTY {
                     None
                 } else {
@@ -620,24 +540,24 @@ impl Interpreter {
                 id
             } else {
                 // Cache miss — need the name string for HashMap lookup.
-                let name = self.symbols.name(s).to_owned();
-                self.variables.lookup_by_sym(s, &name)
+                let name = self.state.symbols.name(s).to_owned();
+                self.state.variables.lookup_by_sym(s, &name)
             }
         } else {
             // No symbol — shouldn't happen for tag tokens, but handle gracefully.
-            self.variables.lookup("")
+            self.state.variables.lookup("")
         };
         // For root-only lookups, initialize_declared_variable needs the name
         // only when creating compound sub-parts (pair.x, pair.y, etc.).
         // Check if initialization is needed before allocating the name.
         let needs_init = matches!(
-            self.variables.get(var_id),
+            self.state.variables.get(var_id),
             VarValue::Undefined
                 | VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
         );
         if needs_init {
             if let Some(s) = sym {
-                let name = self.symbols.name(s).to_owned();
+                let name = self.state.symbols.name(s).to_owned();
                 self.initialize_declared_variable(var_id, &name, sym, &[]);
             }
         }
@@ -654,15 +574,15 @@ impl Interpreter {
         sym: Option<SymbolId>,
         name: &str,
         suffixes: &[SuffixSegment],
-    ) -> InterpResult<ExprResultValue> {
+    ) -> ExprResultValue {
         let var_id = if suffixes.is_empty() {
             if let Some(s) = sym {
-                self.variables.lookup_by_sym(s, name)
+                self.state.variables.lookup_by_sym(s, name)
             } else {
-                self.variables.lookup(name)
+                self.state.variables.lookup(name)
             }
         } else {
-            self.variables.lookup(name)
+            self.state.variables.lookup(name)
         };
         self.initialize_declared_variable(var_id, name, sym, suffixes);
         // Track last scanned variable for assignment LHS
@@ -676,12 +596,14 @@ impl Interpreter {
     /// Turn a `VarId` into an `ExprResultValue` by reading the stored value.
     ///
     /// Borrows the variable storage to avoid cloning until actually needed.
-    fn resolve_var_id(&mut self, var_id: VarId) -> InterpResult<ExprResultValue> {
+    fn resolve_var_id(&mut self, var_id: VarId) -> ExprResultValue {
         // Match on a borrow first to extract Copy data without cloning.
         // Only clone for variants that need owned data (Known with heap values,
         // Dependent with DepList).
-        let result = match self.variables.get(var_id) {
-            VarValue::NumericVar(NumericState::Known(v)) => ExprResultValue::numeric_known(*v),
+        match self.state.variables.get(var_id) {
+            VarValue::NumericVar(NumericState::Known(v)) | VarValue::Known(Value::Numeric(v)) => {
+                ExprResultValue::numeric_known(*v)
+            }
             VarValue::NumericVar(NumericState::Independent { .. }) => {
                 ExprResultValue::numeric_independent(var_id)
             }
@@ -690,10 +612,9 @@ impl Interpreter {
             }
             VarValue::NumericVar(NumericState::Numeric | NumericState::Undefined)
             | VarValue::Undefined => {
-                self.variables.make_independent(var_id);
-                return Ok(ExprResultValue::numeric_independent(var_id));
+                self.state.variables.make_independent(var_id);
+                ExprResultValue::numeric_independent(var_id)
             }
-            VarValue::Known(Value::Numeric(v)) => ExprResultValue::numeric_known(*v),
             VarValue::Known(Value::Pair(x, y)) => {
                 let (x, y) = (*x, *y);
                 ExprResultValue {
@@ -716,8 +637,8 @@ impl Interpreter {
             }
             VarValue::Pair { x, y } => {
                 let (x, y) = (*x, *y);
-                let xv = self.variables.known_value(x).unwrap_or(0.0);
-                let yv = self.variables.known_value(y).unwrap_or(0.0);
+                let xv = self.state.variables.known_value(x).unwrap_or(0.0);
+                let yv = self.state.variables.known_value(y).unwrap_or(0.0);
                 ExprResultValue {
                     exp: Value::Pair(xv, yv),
                     ty: Type::PairType,
@@ -727,9 +648,9 @@ impl Interpreter {
             }
             VarValue::Color { r, g, b } => {
                 let (r, g, b) = (*r, *g, *b);
-                let rv = self.variables.known_value(r).unwrap_or(0.0);
-                let gv = self.variables.known_value(g).unwrap_or(0.0);
-                let bv = self.variables.known_value(b).unwrap_or(0.0);
+                let rv = self.state.variables.known_value(r).unwrap_or(0.0);
+                let gv = self.state.variables.known_value(g).unwrap_or(0.0);
+                let bv = self.state.variables.known_value(b).unwrap_or(0.0);
                 ExprResultValue::plain(Value::Color(Color::new(rv, gv, bv)))
             }
             VarValue::Transform {
@@ -741,7 +662,7 @@ impl Interpreter {
                 tyy,
             } => {
                 let parts = [*tx, *ty, *txx, *txy, *tyx, *tyy]
-                    .map(|id| self.variables.known_value(id).unwrap_or(0.0));
+                    .map(|id| self.state.variables.known_value(id).unwrap_or(0.0));
                 ExprResultValue::plain(Value::Transform(Transform {
                     tx: parts[0],
                     ty: parts[1],
@@ -751,8 +672,7 @@ impl Interpreter {
                     tyy: parts[5],
                 }))
             }
-        };
-        Ok(result)
+        }
     }
 
     // =======================================================================
@@ -762,12 +682,12 @@ impl Interpreter {
     /// Record a non-fatal error.
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
         let msg = message.into();
-        self.errors.push(InterpreterError::new(kind, msg));
+        self.state.errors.push(InterpreterError::new(kind, msg));
     }
 
     /// Record an informational diagnostic.
     fn report_info(&mut self, message: impl Into<String>) {
-        self.errors.push(
+        self.state.errors.push(
             InterpreterError::new(ErrorKind::Internal, message.into())
                 .with_severity(Severity::Info),
         );
@@ -778,6 +698,10 @@ impl Interpreter {
     // =======================================================================
 
     /// Run a `MetaPost` program from source text.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when statement parsing or evaluation fails.
     pub fn run(&mut self, source: &str) -> InterpResult<()> {
         self.state.input.push_source(source);
         self.get_x_next();
@@ -792,27 +716,36 @@ impl Interpreter {
     /// Get the output pictures.
     #[must_use]
     pub fn output(&self) -> &[Picture] {
-        &self.state.picture_state.pictures
+        self.state.picture_manager.output()
+    }
+
+    /// Get interpreter diagnostics collected during execution.
+    #[must_use]
+    pub fn diagnostics(&self) -> &[InterpreterError] {
+        &self.state.errors
+    }
+
+    /// Get the current job name used for output file naming.
+    #[must_use]
+    pub fn job_name(&self) -> &str {
+        &self.state.job_name
+    }
+
+    /// Set the current job name used for output file naming.
+    pub fn set_job_name(&mut self, job_name: impl Into<String>) {
+        self.state.job_name = job_name.into();
+    }
+
+    /// Get internal quantity storage.
+    #[must_use]
+    pub const fn internals(&self) -> &Internals {
+        &self.state.internals
     }
 
     /// Get the current picture being built.
     #[must_use]
     pub const fn current_picture(&self) -> &Picture {
-        &self.state.picture_state.current_picture
-    }
-}
-
-impl std::ops::Deref for Interpreter {
-    type Target = MachineState;
-
-    fn deref(&self) -> &Self::Target {
-        &self.state
-    }
-}
-
-impl std::ops::DerefMut for Interpreter {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.state
+        self.state.picture_manager.current_picture()
     }
 }
 
