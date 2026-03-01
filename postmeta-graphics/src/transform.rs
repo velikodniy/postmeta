@@ -60,6 +60,95 @@ impl Transform {
         tyy: 0.0,
     };
 
+    // -----------------------------------------------------------------------
+    // Constructors
+    // -----------------------------------------------------------------------
+
+    /// Create a translation transform.
+    #[must_use]
+    pub const fn shifted(dx: Scalar, dy: Scalar) -> Self {
+        Self {
+            tx: dx,
+            ty: dy,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Create a rotation transform (angle in degrees).
+    #[must_use]
+    pub fn rotated(degrees: Scalar) -> Self {
+        let rad = degrees.to_radians();
+        let c = rad.cos();
+        let s = rad.sin();
+        Self {
+            tx: 0.0,
+            ty: 0.0,
+            txx: c,
+            txy: -s,
+            tyx: s,
+            tyy: c,
+        }
+    }
+
+    /// Create a uniform scaling transform.
+    #[must_use]
+    pub const fn scaled(factor: Scalar) -> Self {
+        Self {
+            tx: 0.0,
+            ty: 0.0,
+            txx: factor,
+            txy: 0.0,
+            tyx: 0.0,
+            tyy: factor,
+        }
+    }
+
+    /// Create an x-only scaling transform.
+    #[must_use]
+    pub const fn xscaled(factor: Scalar) -> Self {
+        Self {
+            txx: factor,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Create a y-only scaling transform.
+    #[must_use]
+    pub const fn yscaled(factor: Scalar) -> Self {
+        Self {
+            tyy: factor,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Create a horizontal shear (slant) transform.
+    #[must_use]
+    pub const fn slanted(factor: Scalar) -> Self {
+        Self {
+            txy: factor,
+            ..Self::IDENTITY
+        }
+    }
+
+    /// Create a complex-multiplication transform: `zscaled (a, b)`.
+    ///
+    /// This simultaneously rotates and scales: the point (1, 0) maps to (a, b).
+    #[must_use]
+    pub fn zscaled(a: Scalar, b: Scalar) -> Self {
+        Self {
+            tx: 0.0,
+            ty: 0.0,
+            txx: a,
+            txy: -b,
+            tyx: b,
+            tyy: a,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Composition & application
+    // -----------------------------------------------------------------------
+
     /// Compose two transforms: `self` applied first, then `other`.
     ///
     /// Equivalent to matrix multiplication `other * self`.
@@ -86,6 +175,36 @@ impl Transform {
             self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
             self.tyy.mul_add(p.y, self.tyx.mul_add(p.x, self.ty)),
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Utilities
+    // -----------------------------------------------------------------------
+
+    /// Determinant of the linear part of this transform.
+    #[must_use]
+    pub fn determinant(&self) -> Scalar {
+        self.txx.mul_add(self.tyy, -(self.txy * self.tyx))
+    }
+
+    /// Compute the inverse of this transform, if it exists.
+    ///
+    /// Returns `None` if the transform is singular (determinant is zero).
+    #[must_use]
+    pub fn inverse(&self) -> Option<Self> {
+        let det = self.determinant();
+        if det.abs() < NEAR_ZERO {
+            return None;
+        }
+        let inv_det = 1.0 / det;
+        Some(Self {
+            txx: self.tyy * inv_det,
+            txy: -self.txy * inv_det,
+            tyx: -self.tyx * inv_det,
+            tyy: self.txx * inv_det,
+            tx: self.txy.mul_add(self.ty, -(self.tyy * self.tx)) * inv_det,
+            ty: self.tyx.mul_add(self.tx, -(self.txx * self.ty)) * inv_det,
+        })
     }
 }
 
@@ -250,7 +369,7 @@ impl Transformable for GraphicsObject {
                     // scale.  For non-uniform transforms this is an approximation
                     // (the exact scale depends on direction) but it matches
                     // MetaPost's approach and is adequate for dash patterns.
-                    let scale = determinant(t).abs().sqrt();
+                    let scale = t.determinant().abs().sqrt();
                     for v in &mut d.dashes {
                         *v *= scale;
                     }
@@ -283,121 +402,6 @@ impl Transformable for Picture {
             objects: self.objects.iter().map(|obj| obj.transformed(t)).collect(),
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// Standard transform constructors
-// ---------------------------------------------------------------------------
-
-/// Create a translation transform.
-#[must_use]
-pub const fn shifted(dx: Scalar, dy: Scalar) -> Transform {
-    Transform {
-        tx: dx,
-        ty: dy,
-        ..Transform::IDENTITY
-    }
-}
-
-/// Create a rotation transform (angle in degrees).
-#[must_use]
-pub fn rotated(degrees: Scalar) -> Transform {
-    let rad = degrees.to_radians();
-    let c = rad.cos();
-    let s = rad.sin();
-    Transform {
-        tx: 0.0,
-        ty: 0.0,
-        txx: c,
-        txy: -s,
-        tyx: s,
-        tyy: c,
-    }
-}
-
-/// Create a uniform scaling transform.
-#[must_use]
-pub const fn scaled(factor: Scalar) -> Transform {
-    Transform {
-        tx: 0.0,
-        ty: 0.0,
-        txx: factor,
-        txy: 0.0,
-        tyx: 0.0,
-        tyy: factor,
-    }
-}
-
-/// Create an x-only scaling transform.
-#[must_use]
-pub const fn xscaled(factor: Scalar) -> Transform {
-    Transform {
-        txx: factor,
-        ..Transform::IDENTITY
-    }
-}
-
-/// Create a y-only scaling transform.
-#[must_use]
-pub const fn yscaled(factor: Scalar) -> Transform {
-    Transform {
-        tyy: factor,
-        ..Transform::IDENTITY
-    }
-}
-
-/// Create a horizontal shear (slant) transform.
-#[must_use]
-pub const fn slanted(factor: Scalar) -> Transform {
-    Transform {
-        txy: factor,
-        ..Transform::IDENTITY
-    }
-}
-
-/// Create a complex-multiplication transform: `zscaled (a, b)`.
-///
-/// This simultaneously rotates and scales: the point (1, 0) maps to (a, b).
-#[must_use]
-pub fn zscaled(a: Scalar, b: Scalar) -> Transform {
-    Transform {
-        tx: 0.0,
-        ty: 0.0,
-        txx: a,
-        txy: -b,
-        tyx: b,
-        tyy: a,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Transform utilities
-// ---------------------------------------------------------------------------
-
-/// Compute the inverse of a transform, if it exists.
-///
-/// Returns `None` if the transform is singular (determinant is zero).
-#[must_use]
-pub fn inverse(t: &Transform) -> Option<Transform> {
-    let det = determinant(t);
-    if det.abs() < NEAR_ZERO {
-        return None;
-    }
-    let inv_det = 1.0 / det;
-    Some(Transform {
-        txx: t.tyy * inv_det,
-        txy: -t.txy * inv_det,
-        tyx: -t.tyx * inv_det,
-        tyy: t.txx * inv_det,
-        tx: t.txy.mul_add(t.ty, -(t.tyy * t.tx)) * inv_det,
-        ty: t.tyx.mul_add(t.tx, -(t.txx * t.ty)) * inv_det,
-    })
-}
-
-/// Determinant of a transform.
-#[must_use]
-pub fn determinant(t: &Transform) -> Scalar {
-    t.txx.mul_add(t.tyy, -(t.txy * t.tyx))
 }
 
 // ---------------------------------------------------------------------------
@@ -458,8 +462,8 @@ mod tests {
         assert_eq!(a, composed);
 
         // Test non-trivial composition with meaningful transforms
-        let translate = shifted(10.0, 20.0);
-        let scale = scaled(2.0);
+        let translate = Transform::shifted(10.0, 20.0);
+        let scale = Transform::scaled(2.0);
         let composed = translate * scale;
         assert_eq!(composed, translate.then(&scale));
 
@@ -471,18 +475,18 @@ mod tests {
         assert!((result.y - 42.0).abs() < EPSILON);
 
         // Test reference operators work
-        let t1 = shifted(5.0, 5.0);
-        let t2 = scaled(3.0);
+        let t1 = Transform::shifted(5.0, 5.0);
+        let t2 = Transform::scaled(3.0);
         let result1 = &t1 * &t2;
         let result2 = &t1 * t2;
-        let result3 = t1 * &scaled(3.0);
+        let result3 = t1 * &Transform::scaled(3.0);
         assert_eq!(result1, result2);
         assert_eq!(result2, result3);
     }
 
     #[test]
     fn test_shifted() {
-        let t = shifted(3.0, 4.0);
+        let t = Transform::shifted(3.0, 4.0);
         let p = Point::ZERO.transformed(&t);
         assert!((p.x - 3.0).abs() < EPSILON);
         assert!((p.y - 4.0).abs() < EPSILON);
@@ -490,7 +494,7 @@ mod tests {
 
     #[test]
     fn test_rotated_90() {
-        let t = rotated(90.0);
+        let t = Transform::rotated(90.0);
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!(p.x.abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -498,7 +502,7 @@ mod tests {
 
     #[test]
     fn test_rotated_180() {
-        let t = rotated(180.0);
+        let t = Transform::rotated(180.0);
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!((p.x + 1.0).abs() < EPSILON);
         assert!(p.y.abs() < EPSILON);
@@ -506,7 +510,7 @@ mod tests {
 
     #[test]
     fn test_scaled() {
-        let t = scaled(3.0);
+        let t = Transform::scaled(3.0);
         let p = Point::new(2.0, 5.0).transformed(&t);
         assert!((p.x - 6.0).abs() < EPSILON);
         assert!((p.y - 15.0).abs() < EPSILON);
@@ -514,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_xscaled() {
-        let t = xscaled(2.0);
+        let t = Transform::xscaled(2.0);
         let p = Point::new(3.0, 4.0).transformed(&t);
         assert!((p.x - 6.0).abs() < EPSILON);
         assert!((p.y - 4.0).abs() < EPSILON);
@@ -522,7 +526,7 @@ mod tests {
 
     #[test]
     fn test_yscaled() {
-        let t = yscaled(2.0);
+        let t = Transform::yscaled(2.0);
         let p = Point::new(3.0, 4.0).transformed(&t);
         assert!((p.x - 3.0).abs() < EPSILON);
         assert!((p.y - 8.0).abs() < EPSILON);
@@ -530,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_slanted() {
-        let t = slanted(1.0);
+        let t = Transform::slanted(1.0);
         let p = Point::new(0.0, 1.0).transformed(&t);
         // x' = 0 + 1*1 = 1, y' = 1
         assert!((p.x - 1.0).abs() < EPSILON);
@@ -540,7 +544,7 @@ mod tests {
     #[test]
     fn test_zscaled() {
         // zscaled (0, 1) is a 90-degree rotation
-        let t = zscaled(0.0, 1.0);
+        let t = Transform::zscaled(0.0, 1.0);
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!(p.x.abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -549,7 +553,7 @@ mod tests {
     #[test]
     fn test_zscaled_scale_and_rotate() {
         // zscaled (1, 1) = scale by sqrt(2) and rotate 45 degrees
-        let t = zscaled(1.0, 1.0);
+        let t = Transform::zscaled(1.0, 1.0);
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!((p.x - 1.0).abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -557,8 +561,8 @@ mod tests {
 
     #[test]
     fn test_compose_shift_then_rotate() {
-        let s = shifted(1.0, 0.0);
-        let r = rotated(90.0);
+        let s = Transform::shifted(1.0, 0.0);
+        let r = Transform::rotated(90.0);
         let c = s.then(&r);
         // (0,0) → shifted → (1,0) → rotated 90 → (0,1)
         let p = Point::ZERO.transformed(&c);
@@ -568,8 +572,8 @@ mod tests {
 
     #[test]
     fn test_compose_rotate_then_shift() {
-        let r = rotated(90.0);
-        let s = shifted(1.0, 0.0);
+        let r = Transform::rotated(90.0);
+        let s = Transform::shifted(1.0, 0.0);
         let c = r.then(&s);
         // (1,0) → rotated 90 → (0,1) → shifted → (1,1)
         let p = Point::new(1.0, 0.0).transformed(&c);
@@ -579,7 +583,7 @@ mod tests {
 
     #[test]
     fn test_inverse_identity() {
-        let inv = inverse(&Transform::IDENTITY).unwrap();
+        let inv = Transform::IDENTITY.inverse().unwrap();
         let p = Point::new(5.0, 7.0).transformed(&inv);
         assert!((p.x - 5.0).abs() < EPSILON);
         assert!((p.y - 7.0).abs() < EPSILON);
@@ -587,8 +591,8 @@ mod tests {
 
     #[test]
     fn test_inverse_shift() {
-        let t = shifted(3.0, 4.0);
-        let inv = inverse(&t).unwrap();
+        let t = Transform::shifted(3.0, 4.0);
+        let inv = t.inverse().unwrap();
         let p = Point::new(3.0, 4.0).transformed(&inv);
         assert!(p.x.abs() < EPSILON);
         assert!(p.y.abs() < EPSILON);
@@ -596,8 +600,8 @@ mod tests {
 
     #[test]
     fn test_inverse_scale() {
-        let t = scaled(2.0);
-        let inv = inverse(&t).unwrap();
+        let t = Transform::scaled(2.0);
+        let inv = t.inverse().unwrap();
         let p = Point::new(6.0, 8.0).transformed(&inv);
         assert!((p.x - 3.0).abs() < EPSILON);
         assert!((p.y - 4.0).abs() < EPSILON);
@@ -605,8 +609,8 @@ mod tests {
 
     #[test]
     fn test_inverse_roundtrip() {
-        let t = rotated(30.0).then(&shifted(5.0, -3.0));
-        let inv = inverse(&t).unwrap();
+        let t = Transform::rotated(30.0).then(&Transform::shifted(5.0, -3.0));
+        let inv = t.inverse().unwrap();
         let original = Point::new(7.0, 11.0);
         let transformed = original.transformed(&t);
         let back = transformed.transformed(&inv);
@@ -617,15 +621,15 @@ mod tests {
     #[test]
     fn test_inverse_singular() {
         // Zero transform is singular
-        let t = scaled(0.0);
-        assert!(inverse(&t).is_none());
+        let t = Transform::scaled(0.0);
+        assert!(t.inverse().is_none());
     }
 
     #[test]
     fn test_determinant() {
-        assert!((determinant(&Transform::IDENTITY) - 1.0).abs() < EPSILON);
-        assert!((determinant(&scaled(3.0)) - 9.0).abs() < EPSILON);
-        assert!((determinant(&rotated(45.0)) - 1.0).abs() < EPSILON);
+        assert!((Transform::IDENTITY.determinant() - 1.0).abs() < EPSILON);
+        assert!((Transform::scaled(3.0).determinant() - 9.0).abs() < EPSILON);
+        assert!((Transform::rotated(45.0).determinant() - 1.0).abs() < EPSILON);
     }
 
     #[test]
@@ -641,7 +645,7 @@ mod tests {
             ],
             false,
         );
-        let t = shifted(10.0, 20.0);
+        let t = Transform::shifted(10.0, 20.0);
         let tp = path.transformed(&t);
         assert!((tp.knots[0].point.x - 10.0).abs() < EPSILON);
         assert!((tp.knots[0].point.y - 20.0).abs() < EPSILON);
@@ -651,7 +655,7 @@ mod tests {
     #[test]
     fn test_transform_pen_elliptical() {
         let pen = Pen::circle(2.0);
-        let t = scaled(3.0);
+        let t = Transform::scaled(3.0);
         let tp = pen.transformed(&t);
         match tp {
             Pen::Elliptical(t2) => {
@@ -665,7 +669,7 @@ mod tests {
 
     #[test]
     fn test_transform_vec_ignores_translation() {
-        let t = shifted(100.0, 200.0);
+        let t = Transform::shifted(100.0, 200.0);
         let v = Vec2::new(1.0, 0.0).transformed(&t);
         assert!((v.x - 1.0).abs() < EPSILON);
         assert!(v.y.abs() < EPSILON);

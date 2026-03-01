@@ -5,10 +5,10 @@
 //! `newinternal`, `show`, `message`, and `endgroup`.
 
 use postmeta_graphics::picture;
-use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Pen, Picture, StrokeObject,
+    Transform,
 };
 
 use crate::command::{BoundsOp, Command, MessageOp, ThingToAddOp, TypeNameOp, WithOptionOp};
@@ -205,7 +205,7 @@ impl Interpreter {
                             // Emulate this via the pen outline path shifted to the
                             // pair position, then filled.
                             let dot = postmeta_graphics::pen::makepath(&ds.pen);
-                            let shifted = dot.transformed(&transform::shifted(x, y));
+                            let shifted = dot.transformed(&Transform::shifted(x, y));
                             picture::addto_contour(
                                 target,
                                 FillObject {

@@ -1329,35 +1329,27 @@ impl Interpreter {
         op: SecondaryBinaryOp,
         right: &Value,
     ) -> postmeta_graphics::types::Transform {
+        use postmeta_graphics::types::Transform;
+
         match op {
-            SecondaryBinaryOp::Scaled => {
-                postmeta_graphics::transform::scaled(value_to_scalar(right).unwrap_or(1.0))
-            }
+            SecondaryBinaryOp::Scaled => Transform::scaled(value_to_scalar(right).unwrap_or(1.0)),
             SecondaryBinaryOp::Shifted => {
                 let (dx, dy) = value_to_pair(right).unwrap_or((0.0, 0.0));
-                postmeta_graphics::transform::shifted(dx, dy)
+                Transform::shifted(dx, dy)
             }
-            SecondaryBinaryOp::Rotated => {
-                postmeta_graphics::transform::rotated(value_to_scalar(right).unwrap_or(0.0))
-            }
-            SecondaryBinaryOp::XScaled => {
-                postmeta_graphics::transform::xscaled(value_to_scalar(right).unwrap_or(1.0))
-            }
-            SecondaryBinaryOp::YScaled => {
-                postmeta_graphics::transform::yscaled(value_to_scalar(right).unwrap_or(1.0))
-            }
-            SecondaryBinaryOp::Slanted => {
-                postmeta_graphics::transform::slanted(value_to_scalar(right).unwrap_or(0.0))
-            }
+            SecondaryBinaryOp::Rotated => Transform::rotated(value_to_scalar(right).unwrap_or(0.0)),
+            SecondaryBinaryOp::XScaled => Transform::xscaled(value_to_scalar(right).unwrap_or(1.0)),
+            SecondaryBinaryOp::YScaled => Transform::yscaled(value_to_scalar(right).unwrap_or(1.0)),
+            SecondaryBinaryOp::Slanted => Transform::slanted(value_to_scalar(right).unwrap_or(0.0)),
             SecondaryBinaryOp::ZScaled => {
                 let (a, b) = value_to_pair(right).unwrap_or((1.0, 0.0));
-                postmeta_graphics::transform::zscaled(a, b)
+                Transform::zscaled(a, b)
             }
             SecondaryBinaryOp::Transformed => {
-                value_to_transform(right).unwrap_or(postmeta_graphics::types::Transform::IDENTITY)
+                value_to_transform(right).unwrap_or(Transform::IDENTITY)
             }
             SecondaryBinaryOp::Times | SecondaryBinaryOp::Over | SecondaryBinaryOp::Infont => {
-                postmeta_graphics::types::Transform::IDENTITY
+                Transform::IDENTITY
             }
         }
     }

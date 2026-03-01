@@ -11,7 +11,6 @@ use postmeta_graphics::math;
 use postmeta_graphics::path;
 use postmeta_graphics::path::Path;
 use postmeta_graphics::pen;
-use postmeta_graphics::transform;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, GraphicsObject, Knot, Pen, Picture, Point, TextMetrics, TextObject, Transform, Vec2,
@@ -643,31 +642,31 @@ impl Interpreter {
             }
             SecondaryBinaryOp::Scaled => {
                 let factor = value_to_scalar(right)?;
-                Self::apply_transform(left, &transform::scaled(factor))
+                Self::apply_transform(left, &Transform::scaled(factor))
             }
             SecondaryBinaryOp::Shifted => {
                 let (dx, dy) = value_to_pair(right)?;
-                Self::apply_transform(left, &transform::shifted(dx, dy))
+                Self::apply_transform(left, &Transform::shifted(dx, dy))
             }
             SecondaryBinaryOp::Rotated => {
                 let angle = value_to_scalar(right)?;
-                Self::apply_transform(left, &transform::rotated(angle))
+                Self::apply_transform(left, &Transform::rotated(angle))
             }
             SecondaryBinaryOp::XScaled => {
                 let factor = value_to_scalar(right)?;
-                Self::apply_transform(left, &transform::xscaled(factor))
+                Self::apply_transform(left, &Transform::xscaled(factor))
             }
             SecondaryBinaryOp::YScaled => {
                 let factor = value_to_scalar(right)?;
-                Self::apply_transform(left, &transform::yscaled(factor))
+                Self::apply_transform(left, &Transform::yscaled(factor))
             }
             SecondaryBinaryOp::Slanted => {
                 let factor = value_to_scalar(right)?;
-                Self::apply_transform(left, &transform::slanted(factor))
+                Self::apply_transform(left, &Transform::slanted(factor))
             }
             SecondaryBinaryOp::ZScaled => {
                 let (a, b) = value_to_pair(right)?;
-                Self::apply_transform(left, &transform::zscaled(a, b))
+                Self::apply_transform(left, &Transform::zscaled(a, b))
             }
             SecondaryBinaryOp::Transformed => {
                 let t = value_to_transform(right)?;
