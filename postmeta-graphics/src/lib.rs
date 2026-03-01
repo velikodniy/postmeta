@@ -1,3 +1,15 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::expect_used,
+        clippy::unwrap_used,
+        clippy::panic,
+        clippy::op_ref,
+        clippy::float_cmp,
+        clippy::manual_range_contains
+    )
+)]
+
 pub mod types;
 
 pub mod bbox;
