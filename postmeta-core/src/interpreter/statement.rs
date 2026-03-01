@@ -4,7 +4,6 @@
 //! `clip`, `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`,
 //! `newinternal`, `show`, `message`, and `endgroup`.
 
-use postmeta_graphics::picture;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, LineCap, LineJoin, Pen, Picture, StrokeObject,
@@ -174,16 +173,13 @@ impl Interpreter {
                     &mut self.state.variables,
                     &pic_name,
                     |target| {
-                        picture::addto_contour(
-                            target,
-                            FillObject {
-                                path,
-                                color: ds.color,
-                                pen: if pen_specified { Some(ds.pen) } else { None },
-                                line_join: ds.line_join,
-                                miter_limit: ds.miter_limit,
-                            },
-                        );
+                        target.add_fill(FillObject {
+                            path,
+                            color: ds.color,
+                            pen: if pen_specified { Some(ds.pen) } else { None },
+                            line_join: ds.line_join,
+                            miter_limit: ds.miter_limit,
+                        });
                     },
                 );
             }
@@ -206,30 +202,24 @@ impl Interpreter {
                             // pair position, then filled.
                             let dot = postmeta_graphics::pen::makepath(&ds.pen);
                             let shifted = dot.transformed(&Transform::shifted(x, y));
-                            picture::addto_contour(
-                                target,
-                                FillObject {
-                                    path: shifted,
-                                    color: ds.color,
-                                    pen: None,
-                                    line_join: ds.line_join,
-                                    miter_limit: ds.miter_limit,
-                                },
-                            );
+                            target.add_fill(FillObject {
+                                path: shifted,
+                                color: ds.color,
+                                pen: None,
+                                line_join: ds.line_join,
+                                miter_limit: ds.miter_limit,
+                            });
                         }
                         DoublePathTarget::Path(path) => {
-                            picture::addto_doublepath(
-                                target,
-                                StrokeObject {
-                                    path,
-                                    pen: ds.pen,
-                                    color: ds.color,
-                                    dash: ds.dash,
-                                    line_cap: ds.line_cap,
-                                    line_join: ds.line_join,
-                                    miter_limit: ds.miter_limit,
-                                },
-                            );
+                            target.add_stroke(StrokeObject {
+                                path,
+                                pen: ds.pen,
+                                color: ds.color,
+                                dash: ds.dash,
+                                line_cap: ds.line_cap,
+                                line_join: ds.line_join,
+                                miter_limit: ds.miter_limit,
+                            });
                         }
                     },
                 );
@@ -332,9 +322,9 @@ impl Interpreter {
             &pic_name,
             |target| {
                 if is_clip {
-                    picture::clip(target, clip_path);
+                    target.clip(clip_path);
                 } else {
-                    picture::setbounds(target, clip_path);
+                    target.set_bounds(clip_path);
                 }
             },
         );

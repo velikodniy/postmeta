@@ -284,16 +284,13 @@ mod tests {
         use crate::types::{Color, FillObject, LineJoin};
         let mut pic = Picture::new();
         let path = make_unit_square();
-        crate::picture::addto_contour(
-            &mut pic,
-            FillObject {
-                path,
-                color: Color::BLACK,
-                pen: None,
-                line_join: LineJoin::Round,
-                miter_limit: 10.0,
-            },
-        );
+        pic.add_fill(FillObject {
+            path,
+            color: Color::BLACK,
+            pen: None,
+            line_join: LineJoin::Round,
+            miter_limit: 10.0,
+        });
 
         let bb = BoundingBox::of_picture(&pic, true);
         assert!(bb.is_valid());

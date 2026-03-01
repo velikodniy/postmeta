@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use postmeta_graphics::path::Path;
-use postmeta_graphics::picture::{addto_contour, addto_doublepath};
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, Knot, KnotDirection, LineCap, LineJoin, Pen,
     Picture, Point, StrokeObject, TextMetrics, TextObject, Transform,
@@ -204,16 +203,13 @@ fn test_render_empty_picture() {
 #[test]
 fn test_render_filled_square() {
     let mut pic = Picture::new();
-    addto_contour(
-        &mut pic,
-        FillObject {
-            path: make_square(),
-            color: Color::new(0.0, 0.0, 1.0),
-            pen: None,
-            line_join: LineJoin::Round,
-            miter_limit: 10.0,
-        },
-    );
+    pic.add_fill(FillObject {
+        path: make_square(),
+        color: Color::new(0.0, 0.0, 1.0),
+        pen: None,
+        line_join: LineJoin::Round,
+        miter_limit: 10.0,
+    });
     let svg = render_to_string(&pic);
     assert!(svg.contains("fill=\"#0000ff\""), "missing blue fill: {svg}");
     assert!(
@@ -225,18 +221,15 @@ fn test_render_filled_square() {
 #[test]
 fn test_render_stroked_line() {
     let mut pic = Picture::new();
-    addto_doublepath(
-        &mut pic,
-        StrokeObject {
-            path: make_line(),
-            pen: Pen::circle(1.0),
-            color: Color::BLACK,
-            dash: None,
-            line_cap: LineCap::Round,
-            line_join: LineJoin::Round,
-            miter_limit: 10.0,
-        },
-    );
+    pic.add_stroke(StrokeObject {
+        path: make_line(),
+        pen: Pen::circle(1.0),
+        color: Color::BLACK,
+        dash: None,
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        miter_limit: 10.0,
+    });
     let svg = render_to_string(&pic);
     assert!(svg.contains("stroke=\"black\""), "missing stroke: {svg}");
     assert!(svg.contains("stroke-width="), "missing stroke-width: {svg}");
@@ -299,16 +292,13 @@ fn test_find_matching_end_nested() {
 #[test]
 fn test_viewbox_uses_bbox() {
     let mut pic = Picture::new();
-    addto_contour(
-        &mut pic,
-        FillObject {
-            path: make_square(),
-            color: Color::BLACK,
-            pen: None,
-            line_join: LineJoin::Round,
-            miter_limit: 10.0,
-        },
-    );
+    pic.add_fill(FillObject {
+        path: make_square(),
+        color: Color::BLACK,
+        pen: None,
+        line_join: LineJoin::Round,
+        miter_limit: 10.0,
+    });
     let svg = render_to_string(&pic);
     assert!(svg.contains("viewBox="), "missing viewBox: {svg}");
     assert!(svg.contains("pt\""), "missing pt units: {svg}");

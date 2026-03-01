@@ -13,50 +13,48 @@ use crate::path::Path;
 use crate::types::{FillObject, GraphicsObject, Picture, StrokeObject};
 
 // ---------------------------------------------------------------------------
-// addto operations
+// Picture assembly methods
 // ---------------------------------------------------------------------------
 
-/// Add a filled contour to a picture.
-///
-/// The path must be cyclic. Corresponds to `addto <pic> contour <path>`.
-pub fn addto_contour(pic: &mut Picture, fill: FillObject) {
-    debug_assert!(fill.path.is_cyclic, "addto contour requires a cyclic path");
-    pic.push(GraphicsObject::Fill(fill));
-}
+impl Picture {
+    /// Add a filled contour to the picture.
+    ///
+    /// The path must be cyclic. Corresponds to `addto <pic> contour <path>`.
+    pub fn add_fill(&mut self, fill: FillObject) {
+        debug_assert!(fill.path.is_cyclic, "addto contour requires a cyclic path");
+        self.push(GraphicsObject::Fill(fill));
+    }
 
-/// Add a stroked path to a picture.
-///
-/// Corresponds to `addto <pic> doublepath <path>`.
-pub fn addto_doublepath(pic: &mut Picture, stroke: StrokeObject) {
-    pic.push(GraphicsObject::Stroke(stroke));
-}
+    /// Add a stroked path to the picture.
+    ///
+    /// Corresponds to `addto <pic> doublepath <path>`.
+    pub fn add_stroke(&mut self, stroke: StrokeObject) {
+        self.push(GraphicsObject::Stroke(stroke));
+    }
 
-// ---------------------------------------------------------------------------
-// clip and setbounds
-// ---------------------------------------------------------------------------
+    /// Clip the picture to a cyclic path.
+    ///
+    /// Wraps all existing objects in `ClipStart`/`ClipEnd` brackets.
+    pub fn clip(&mut self, clip_path: Path) {
+        debug_assert!(clip_path.is_cyclic, "clip requires a cyclic path");
 
-/// Clip a picture to a cyclic path.
-///
-/// Wraps all existing objects in `ClipStart`/`ClipEnd` brackets.
-pub fn clip(pic: &mut Picture, clip_path: Path) {
-    debug_assert!(clip_path.is_cyclic, "clip requires a cyclic path");
+        let existing = std::mem::take(&mut self.objects);
+        self.push(GraphicsObject::ClipStart(clip_path));
+        self.objects.extend(existing);
+        self.push(GraphicsObject::ClipEnd);
+    }
 
-    let existing = std::mem::take(&mut pic.objects);
-    pic.push(GraphicsObject::ClipStart(clip_path));
-    pic.objects.extend(existing);
-    pic.push(GraphicsObject::ClipEnd);
-}
+    /// Set an artificial bounding box on the picture.
+    ///
+    /// Wraps all existing objects in `SetBoundsStart`/`SetBoundsEnd` brackets.
+    pub fn set_bounds(&mut self, bounds_path: Path) {
+        debug_assert!(bounds_path.is_cyclic, "setbounds requires a cyclic path");
 
-/// Set an artificial bounding box on a picture.
-///
-/// Wraps all existing objects in `SetBoundsStart`/`SetBoundsEnd` brackets.
-pub fn setbounds(pic: &mut Picture, bounds_path: Path) {
-    debug_assert!(bounds_path.is_cyclic, "setbounds requires a cyclic path");
-
-    let existing = std::mem::take(&mut pic.objects);
-    pic.push(GraphicsObject::SetBoundsStart(bounds_path));
-    pic.objects.extend(existing);
-    pic.push(GraphicsObject::SetBoundsEnd);
+        let existing = std::mem::take(&mut self.objects);
+        self.push(GraphicsObject::SetBoundsStart(bounds_path));
+        self.objects.extend(existing);
+        self.push(GraphicsObject::SetBoundsEnd);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -96,25 +94,22 @@ mod tests {
     }
 
     #[test]
-    fn test_addto_contour() {
+    fn test_add_fill() {
         let mut pic = Picture::new();
         let path = make_unit_square();
-        addto_contour(
-            &mut pic,
-            FillObject {
-                path,
-                color: Color::BLACK,
-                pen: None,
-                line_join: LineJoin::Round,
-                miter_limit: 10.0,
-            },
-        );
+        pic.add_fill(FillObject {
+            path,
+            color: Color::BLACK,
+            pen: None,
+            line_join: LineJoin::Round,
+            miter_limit: 10.0,
+        });
         assert_eq!(pic.objects.len(), 1);
         assert!(matches!(pic.objects[0], GraphicsObject::Fill(_)));
     }
 
     #[test]
-    fn test_addto_doublepath() {
+    fn test_add_stroke() {
         let mut pic = Picture::new();
         let mut k0 = Knot::new(Point::ZERO);
         k0.right = KnotDirection::Explicit(Point::new(3.0, 0.0));
@@ -124,18 +119,15 @@ mod tests {
         k1.right = KnotDirection::Explicit(Point::new(10.0, 0.0));
         let path = Path::from_knots(vec![k0, k1], false);
 
-        addto_doublepath(
-            &mut pic,
-            StrokeObject {
-                path,
-                pen: Pen::circle(1.0),
-                color: Color::BLACK,
-                dash: None,
-                line_cap: LineCap::Round,
-                line_join: LineJoin::Round,
-                miter_limit: 10.0,
-            },
-        );
+        pic.add_stroke(StrokeObject {
+            path,
+            pen: Pen::circle(1.0),
+            color: Color::BLACK,
+            dash: None,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            miter_limit: 10.0,
+        });
         assert_eq!(pic.objects.len(), 1);
         assert!(matches!(pic.objects[0], GraphicsObject::Stroke(_)));
     }
@@ -158,7 +150,7 @@ mod tests {
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
         let clip_path = make_unit_square();
-        clip(&mut pic, clip_path);
+        pic.clip(clip_path);
 
         assert_eq!(pic.objects.len(), 3);
         assert!(matches!(pic.objects[0], GraphicsObject::ClipStart(_)));
@@ -167,12 +159,12 @@ mod tests {
     }
 
     #[test]
-    fn test_setbounds() {
+    fn test_set_bounds() {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
         let bounds = make_unit_square();
-        setbounds(&mut pic, bounds);
+        pic.set_bounds(bounds);
 
         assert_eq!(pic.objects.len(), 3);
         assert!(matches!(pic.objects[0], GraphicsObject::SetBoundsStart(_)));
