@@ -4,8 +4,12 @@
 //! - Hobby's algorithm for computing smooth cubic Bezier control points
 //!   through a sequence of knots with direction/tension/curl constraints.
 //! - Path query operations: `point_of`, `direction_of`, `subpath`, `reverse`.
+//! - [`BezierPath`] — a resolved cubic Bezier path with per-segment controls.
 
+pub mod bezier_path;
 pub mod hobby;
+
+pub use bezier_path::{BezierPath, SegmentControls};
 
 use crate::bezier::CubicSegment;
 use crate::types::{
@@ -13,20 +17,26 @@ use crate::types::{
 };
 
 // ---------------------------------------------------------------------------
-// Path
+// KnotPath (formerly Path)
 // ---------------------------------------------------------------------------
 
-/// A path: a sequence of knots, optionally cyclic.
+/// A knot-based path: a sequence of knots with direction/tension constraints,
+/// optionally cyclic.
 ///
-/// After Hobby's algorithm runs, all `KnotDirection` values will be
-/// `Explicit` (computed Bezier control points).
+/// After Hobby's algorithm runs (via [`resolve()`](Self::resolve)), all
+/// `KnotDirection` values will be `Explicit` (computed Bezier control points)
+/// and the result is returned as a [`BezierPath`].
 #[derive(Debug, Clone, PartialEq)]
-pub struct Path {
+pub struct KnotPath {
     pub knots: Vec<Knot>,
     pub is_cyclic: bool,
 }
 
-impl Path {
+/// Migration alias: keeps all existing code compiling during the transition
+/// from `Path` to `KnotPath`.
+pub type Path = KnotPath;
+
+impl KnotPath {
     /// Create an empty open path.
     #[must_use]
     pub const fn new() -> Self {
@@ -150,9 +160,48 @@ impl Path {
 
         None
     }
+
+    /// Resolve direction constraints via Hobby's algorithm and return
+    /// a [`BezierPath`] with explicit cubic control points.
+    #[must_use]
+    pub fn resolve(mut self) -> BezierPath {
+        hobby::make_choices(&mut self);
+        self.into_bezier_path()
+    }
+
+    /// Convert a fully-resolved `KnotPath` (all directions `Explicit`) into
+    /// a [`BezierPath`].  Non-explicit directions fall back to the on-curve
+    /// point.
+    fn into_bezier_path(self) -> BezierPath {
+        if self.knots.is_empty() {
+            return BezierPath::new();
+        }
+
+        let n = self.num_segments();
+        let mut points = Vec::with_capacity(self.knots.len());
+        let mut controls = Vec::with_capacity(n);
+
+        for (i, knot) in self.knots.iter().enumerate() {
+            points.push(knot.point);
+            if i < n {
+                let j = (i + 1) % self.knots.len();
+                let post = match knot.right {
+                    KnotDirection::Explicit(p) => p,
+                    _ => knot.point,
+                };
+                let pre = match self.knots[j].left {
+                    KnotDirection::Explicit(p) => p,
+                    _ => self.knots[j].point,
+                };
+                controls.push(SegmentControls { post, pre });
+            }
+        }
+
+        BezierPath::from_parts(points, controls, self.is_cyclic)
+    }
 }
 
-impl Default for Path {
+impl Default for KnotPath {
     fn default() -> Self {
         Self::new()
     }
