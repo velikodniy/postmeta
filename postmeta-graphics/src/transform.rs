@@ -13,12 +13,119 @@
 //! The [`Transformable`] trait provides a uniform interface for applying
 //! transforms to all graphics types.
 
+use std::ops;
+
 use crate::path::Path;
-use crate::pen::convex_hull;
+use crate::pen::{Pen, convex_hull};
 use crate::types::{
-    FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Pen, Picture, Point, Scalar,
-    StrokeObject, TextObject, Transform, Vec2,
+    FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Picture, Point, Scalar,
+    StrokeObject, TextObject, Vec2,
 };
+
+// ---------------------------------------------------------------------------
+// Transform
+// ---------------------------------------------------------------------------
+
+/// A transform with named components.
+///
+/// Maps point (x, y) to:
+///   (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    pub tx: Scalar,
+    pub ty: Scalar,
+    pub txx: Scalar,
+    pub txy: Scalar,
+    pub tyx: Scalar,
+    pub tyy: Scalar,
+}
+
+impl Transform {
+    pub const IDENTITY: Self = Self {
+        tx: 0.0,
+        ty: 0.0,
+        txx: 1.0,
+        txy: 0.0,
+        tyx: 0.0,
+        tyy: 1.0,
+    };
+
+    /// The zero transform (all components zero). Used for the null pen.
+    pub const ZERO: Self = Self {
+        tx: 0.0,
+        ty: 0.0,
+        txx: 0.0,
+        txy: 0.0,
+        tyx: 0.0,
+        tyy: 0.0,
+    };
+
+    /// Compose two transforms: `self` applied first, then `other`.
+    ///
+    /// Equivalent to matrix multiplication `other * self`.
+    #[must_use]
+    pub fn then(&self, other: &Self) -> Self {
+        Self {
+            txx: other.txx.mul_add(self.txx, other.txy * self.tyx),
+            txy: other.txx.mul_add(self.txy, other.txy * self.tyy),
+            tyx: other.tyx.mul_add(self.txx, other.tyy * self.tyx),
+            tyy: other.tyx.mul_add(self.txy, other.tyy * self.tyy),
+            tx: other
+                .txx
+                .mul_add(self.tx, other.txy.mul_add(self.ty, other.tx)),
+            ty: other
+                .tyx
+                .mul_add(self.tx, other.tyy.mul_add(self.ty, other.ty)),
+        }
+    }
+
+    /// Apply this transform to a point.
+    #[must_use]
+    pub fn apply(&self, p: Point) -> Point {
+        Point::new(
+            self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
+            self.tyy.mul_add(p.y, self.tyx.mul_add(p.x, self.ty)),
+        )
+    }
+}
+
+/// `Transform * Transform` — compose two transforms.
+///
+/// `a * b` applies `a` first, then `b` (equivalent to `a.then(&b)`).
+impl ops::Mul for Transform {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self {
+        self.then(&rhs)
+    }
+}
+
+/// `&Transform * Transform` — compose with borrowed left operand.
+impl ops::Mul<Transform> for &Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: Transform) -> Transform {
+        self.then(&rhs)
+    }
+}
+
+/// `Transform * &Transform` — compose with borrowed right operand.
+impl ops::Mul<&Self> for Transform {
+    type Output = Self;
+
+    fn mul(self, rhs: &Self) -> Self {
+        self.then(rhs)
+    }
+}
+
+/// `&Transform * &Transform` — compose with both operands borrowed.
+impl ops::Mul for &Transform {
+    type Output = Transform;
+
+    fn mul(self, rhs: &Transform) -> Transform {
+        self.then(rhs)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Transformable trait
@@ -301,6 +408,77 @@ pub fn determinant(t: &Transform) -> Scalar {
 mod tests {
     use super::*;
     use crate::types::EPSILON;
+
+    #[test]
+    fn transform_compose_identity() {
+        let t = Transform {
+            tx: 1.0,
+            ty: 2.0,
+            txx: 3.0,
+            txy: 4.0,
+            tyx: 5.0,
+            tyy: 6.0,
+        };
+        // Composing with identity should be a no-op
+        let r = t.then(&Transform::IDENTITY);
+        assert_eq!(t, r);
+        let r = Transform::IDENTITY.then(&t);
+        assert_eq!(t, r);
+    }
+
+    #[test]
+    fn transform_apply() {
+        let t = Transform {
+            tx: 10.0,
+            ty: 20.0,
+            txx: 2.0,
+            txy: 0.0,
+            tyx: 0.0,
+            tyy: 3.0,
+        };
+        let p = t.apply(Point::new(1.0, 1.0));
+        assert!((p.x - 12.0).abs() < EPSILON);
+        assert!((p.y - 23.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn transform_mul_operator() {
+        let a = Transform {
+            tx: 1.0,
+            ty: 2.0,
+            txx: 3.0,
+            txy: 4.0,
+            tyx: 5.0,
+            tyy: 6.0,
+        };
+        // Mul should be equivalent to `then`
+        let composed = a * Transform::IDENTITY;
+        assert_eq!(a, composed);
+        let composed = Transform::IDENTITY * a;
+        assert_eq!(a, composed);
+
+        // Test non-trivial composition with meaningful transforms
+        let translate = shifted(10.0, 20.0);
+        let scale = scaled(2.0);
+        let composed = translate * scale;
+        assert_eq!(composed, translate.then(&scale));
+
+        // Verify the composition actually transforms a point correctly
+        // Order: translate first (1,1) -> (11,21), then scale -> (22,42)
+        let p = Point::new(1.0, 1.0);
+        let result = composed.apply(p);
+        assert!((result.x - 22.0).abs() < EPSILON);
+        assert!((result.y - 42.0).abs() < EPSILON);
+
+        // Test reference operators work
+        let t1 = shifted(5.0, 5.0);
+        let t2 = scaled(3.0);
+        let result1 = &t1 * &t2;
+        let result2 = &t1 * t2;
+        let result3 = t1 * &scaled(3.0);
+        assert_eq!(result1, result2);
+        assert_eq!(result2, result3);
+    }
 
     #[test]
     fn test_shifted() {

@@ -12,7 +12,49 @@
 
 use crate::error::GraphicsError;
 use crate::path::Path;
-use crate::types::{Knot, NEAR_ZERO, Pen, Point, Scalar, Transform, Vec2, index_to_scalar};
+use crate::transform::Transform;
+use crate::types::{Knot, NEAR_ZERO, Point, Scalar, Vec2, index_to_scalar};
+
+// ---------------------------------------------------------------------------
+// Pen
+// ---------------------------------------------------------------------------
+
+/// A pen: either elliptical (common) or polygonal.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Pen {
+    /// An elliptical pen defined by an affine transform of the unit circle.
+    /// The transform maps the unit circle to the pen shape.
+    Elliptical(Transform),
+    /// A convex polygonal pen defined by its vertices in counter-clockwise
+    /// order.
+    Polygonal(Vec<Point>),
+}
+
+impl Pen {
+    /// Create a circular pen with the given diameter centered at origin.
+    #[must_use]
+    pub const fn circle(diameter: Scalar) -> Self {
+        let r = diameter / 2.0;
+        Self::Elliptical(Transform {
+            txx: r,
+            tyy: r,
+            ..Transform::IDENTITY
+        })
+    }
+
+    /// The null pen: a single point at the origin.
+    #[must_use]
+    pub const fn null() -> Self {
+        Self::Elliptical(Transform::ZERO)
+    }
+}
+
+impl Default for Pen {
+    /// The default pen is a circle with diameter 0.5.
+    fn default() -> Self {
+        Self::circle(0.5)
+    }
+}
 
 // ---------------------------------------------------------------------------
 // makepen — path to pen
@@ -234,6 +276,20 @@ mod tests {
             Pen::Elliptical(t) => {
                 assert!(t.txx.abs() < EPSILON);
                 assert!(t.tyy.abs() < EPSILON);
+            }
+            Pen::Polygonal(_) => panic!("expected elliptical"),
+        }
+    }
+
+    #[test]
+    fn pen_circle() {
+        let p = Pen::circle(2.0);
+        match p {
+            Pen::Elliptical(t) => {
+                assert!((t.txx - 1.0).abs() < EPSILON); // scale x
+                assert!((t.tyy - 1.0).abs() < EPSILON); // scale y
+                assert!(t.txy.abs() < EPSILON);
+                assert!(t.tyx.abs() < EPSILON);
             }
             Pen::Polygonal(_) => panic!("expected elliptical"),
         }
