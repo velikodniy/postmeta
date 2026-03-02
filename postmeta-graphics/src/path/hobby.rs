@@ -24,7 +24,7 @@
 
 use crate::{
     math,
-    path::KnotPath,
+    path::{KnotPath, tridiagonal},
     types::{EPSILON, KnotDirection, NEAR_ZERO, Point, Scalar, Vec2},
 };
 
@@ -225,7 +225,7 @@ fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
 /// endpoint knots' `right` (at first index) and `left` (at last index).
 #[expect(
     clippy::too_many_lines,
-    reason = "tridiagonal solver with boundary conditions is a single logical unit"
+    reason = "tridiagonal coefficient computation with boundary conditions is a single logical unit"
 )]
 fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &[Scalar]) {
     let seg_len = indices.len();
@@ -252,9 +252,7 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
         psi[li] = delta[indices[li - 1]].angle_to(delta[indices[li]]);
     }
 
-    let mut theta = vec![0.0; seg_len];
-    let mut uu = vec![0.0; seg_len];
-    let mut vv = vec![0.0; seg_len];
+    let mut solver = tridiagonal::OpenSolver::with_capacity(seg_len);
 
     // Left boundary (first knot)
     let gi = indices[0];
@@ -264,18 +262,14 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
     match path.knots[gi].right {
         KnotDirection::Given(angle) => {
             let th = math::normalize_angle(angle - delta[gi].direction());
-            theta[0] = th;
-            uu[0] = 0.0;
-            vv[0] = th;
+            solver.push_row(0.0, th);
         }
         KnotDirection::Curl(gamma) => {
             let cr = curl_ratio(gamma, rt0, lt1);
-            uu[0] = cr;
-            vv[0] = -cr * psi[1];
+            solver.push_row(cr, -cr * psi[1]);
         }
         _ => {
-            uu[0] = 0.0;
-            vv[0] = 0.0;
+            solver.push_row(0.0, 0.0);
         }
     }
 
@@ -306,7 +300,7 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
         };
         let ee = (3.0 - beta_next) * dist[gk_prev];
 
-        let cc = uu[li - 1].mul_add(-aa, 1.0);
+        let cc = solver.last_uu().mul_add(-aa, 1.0);
 
         let (dd_adj, ee_adj) = if (lt_k - rt_k).abs() < EPSILON {
             (cc * dd, ee)
@@ -320,13 +314,12 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
 
         let denom_ff = ee_adj + dd_adj;
         if denom_ff.abs() < NEAR_ZERO {
-            uu[li] = 0.0;
-            vv[li] = 0.0;
+            solver.push_row(0.0, 0.0);
         } else {
             let ff = ee_adj / denom_ff;
-            uu[li] = ff * bb;
+            let uu_k = ff * bb;
             let acc = if li + 1 < seg_len - 1 {
-                -psi[li + 1] * uu[li]
+                -psi[li + 1] * uu_k
             } else {
                 0.0
             };
@@ -335,7 +328,8 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
             } else {
                 (1.0 - ff) / cc
             };
-            vv[li] = (vv[li - 1] * bk_frac).mul_add(-aa, psi[li].mul_add(-bk_frac, acc));
+            let vv_k = (solver.last_vv() * bk_frac).mul_add(-aa, psi[li].mul_add(-bk_frac, acc));
+            solver.push_row(uu_k, vv_k);
         }
     }
 
@@ -346,31 +340,24 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
     let lt_end = path.knots[ge].left_tension;
     let rt_prev_end = path.knots[ge_prev].right_tension;
 
-    match path.knots[ge].left {
-        KnotDirection::Given(angle) => {
-            theta[last] = math::normalize_angle(
-                angle - delta[ge_prev].direction() - psi.get(last).copied().unwrap_or(0.0),
-            );
-        }
+    let theta_last = match path.knots[ge].left {
+        KnotDirection::Given(angle) => math::normalize_angle(
+            angle - delta[ge_prev].direction() - psi.get(last).copied().unwrap_or(0.0),
+        ),
         KnotDirection::Curl(gamma) => {
             let ff = curl_ratio(gamma, lt_end, rt_prev_end);
-            // Curl right boundary: theta[n] = -(ff * vv[n-1]) / (1 - ff * uu[n-1])
-            let denom = ff.mul_add(-uu[last - 1], 1.0);
+            let denom = ff.mul_add(-solver.last_uu(), 1.0);
             if denom.abs() < NEAR_ZERO {
-                theta[last] = 0.0;
+                0.0
             } else {
-                theta[last] = -(ff * vv[last - 1]) / denom;
+                -(ff * solver.last_vv()) / denom
             }
         }
-        _ => {
-            theta[last] = vv[last - 1];
-        }
-    }
+        _ => solver.last_vv(),
+    };
 
     // Back-substitution
-    for li in (0..last).rev() {
-        theta[li] = uu[li].mul_add(-theta[li + 1], vv[li]);
-    }
+    let theta = solver.back_substitute(theta_last);
 
     // Compute phi values and set control points
     let mut phi = vec![0.0; seg_len];
@@ -550,10 +537,6 @@ fn solve_two_knots_range(
 /// The coefficient computation uses the same ratio-based approach as the
 /// open solver (aa=A/B, bb=D/C, etc.), since the cyclic and open cases
 /// share the same mock-curvature equation structure.
-#[expect(
-    clippy::too_many_lines,
-    reason = "cyclic tridiagonal solver mirrors mp.web structure"
-)]
 fn solve_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
     if n < 2 {
@@ -577,14 +560,7 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
 
     // Forward sweep: compute uu[k], vv[k], ww[k] for k=1..n.
     // Recurrence: theta[k-1] + uu[k-1]*theta[k] = vv[k-1] + ww[k-1]*theta[0]
-    // Arrays have size n+1 (indices 0..n), where index n corresponds to knot 0.
-    let mut uu = vec![0.0_f64; n + 1];
-    let mut vv = vec![0.0_f64; n + 1];
-    let mut ww = vec![0.0_f64; n + 1];
-
-    uu[0] = 0.0;
-    vv[0] = 0.0;
-    ww[0] = 1.0;
+    let mut solver = tridiagonal::CyclicSolver::new(n);
 
     for k in 1..=n {
         let prev = k - 1;
@@ -620,7 +596,7 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
         };
 
         // cc = 1 - uu[k-1]*aa
-        let cc = uu[prev].mul_add(-aa, 1.0);
+        let cc = solver.last_uu().mul_add(-aa, 1.0);
 
         // ff = C_k / (C_k + B_k - u_{k-1}*A_k)
         let dd = dd * cc;
@@ -639,18 +615,16 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
 
         let denom = ee + dd;
         if denom.abs() < NEAR_ZERO {
-            uu[k] = 0.0;
-            vv[k] = 0.0;
-            ww[k] = 0.0;
+            solver.push_row(0.0, 0.0, 0.0);
             continue;
         }
 
         let ff = ee / denom;
-        uu[k] = ff * bb;
+        let uu_k = ff * bb;
 
         // Compute vv[k] and ww[k]
         let psi_next = psi[knot_next];
-        let acc = -psi_next * uu[k];
+        let acc = -psi_next * uu_k;
 
         let bk_ratio = if cc.abs() < NEAR_ZERO {
             0.0
@@ -659,46 +633,18 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
         };
         let acc = psi[knot_k].mul_add(-bk_ratio, acc);
         let ak_ratio = bk_ratio * aa;
-        vv[k] = vv[prev].mul_add(-ak_ratio, acc);
-        if ww[prev] == 0.0 {
-            ww[k] = 0.0;
+        let vv_k = solver.last_vv().mul_add(-ak_ratio, acc);
+        let ww_k = if solver.last_ww() == 0.0 {
+            0.0
         } else {
-            ww[k] = -ww[prev] * ak_ratio;
-        }
+            -solver.last_ww() * ak_ratio
+        };
+        solver.push_row(uu_k, vv_k, ww_k);
     }
 
-    // Cyclic closure: solve for theta[0] = theta[n].
-    // Backward iteration processes indices {n-1, n-2, ..., 1, n} in that order.
-    let mut aa_val = 0.0_f64;
-    let mut bb_val = 1.0_f64;
-    // Process k = n-1, n-2, ..., 1
-    for k in (1..n).rev() {
-        aa_val = aa_val.mul_add(-uu[k], vv[k]);
-        bb_val = bb_val.mul_add(-uu[k], ww[k]);
-    }
-    // Final step: process k = n (wraps to knot 0)
-    aa_val = aa_val.mul_add(-uu[n], vv[n]);
-    bb_val = bb_val.mul_add(-uu[n], ww[n]);
-
-    // theta[0] = aa / (1 - bb)
-    let theta0 = if (1.0 - bb_val).abs() < NEAR_ZERO {
-        0.0
-    } else {
-        aa_val / (1.0 - bb_val)
-    };
-
-    // Adjust vv to eliminate ww dependency: vv[k] += theta0 * ww[k]
-    vv[0] = theta0;
-    for k in 1..n {
-        vv[k] += theta0 * ww[k];
-    }
-
-    // Back-substitution
-    let mut theta = vec![0.0_f64; n + 1];
-    theta[n] = theta0;
-    for k in (0..n).rev() {
-        theta[k] = uu[k].mul_add(-theta[k + 1], vv[k]);
-    }
+    // Cyclic closure, back-substitution, and theta[0] determination
+    // are all handled by the solver.
+    let theta = solver.solve(n);
 
     // Set control points for all segments
     for k in 0..n {

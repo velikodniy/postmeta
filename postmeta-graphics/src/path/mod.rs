@@ -7,6 +7,7 @@
 
 pub mod bezier_path;
 pub mod hobby;
+pub(crate) mod tridiagonal;
 
 pub use bezier_path::{BezierPath, SegmentControls};
 
