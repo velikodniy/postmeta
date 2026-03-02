@@ -337,7 +337,7 @@ impl Transformable for BezierPath {
                 }
             })
             .collect();
-        BezierPath::from_parts(points, controls, self.is_cyclic())
+        Self::from_parts(points, controls, self.is_cyclic())
     }
 }
 
@@ -715,7 +715,7 @@ mod tests {
     // BezierPath transform tests
     // -----------------------------------------------------------------------
 
-    /// Helper: build a simple open BezierPath with two knot points and one segment.
+    /// Helper: build a simple open `BezierPath` with two knot points and one segment.
     fn sample_bezier_path() -> BezierPath {
         let points = vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)];
         let controls = vec![SegmentControls {
@@ -725,7 +725,7 @@ mod tests {
         BezierPath::from_parts(points, controls, false)
     }
 
-    /// Helper: build a cyclic BezierPath (triangle) with three knot points.
+    /// Helper: build a cyclic `BezierPath` (triangle) with three knot points.
     fn sample_cyclic_bezier_path() -> BezierPath {
         let points = vec![
             Point::new(0.0, 0.0),

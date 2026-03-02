@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::geometry::Scalar;
 use super::style::{Color, DashPattern, LineCap, LineJoin};
-use crate::path::Path;
+use crate::path::BezierPath;
 use crate::pen::Pen;
 use crate::transform::Transform;
 
@@ -22,11 +22,11 @@ pub enum GraphicsObject {
     /// A text label.
     Text(TextObject),
     /// Begin a clipping region.
-    ClipStart(Path),
+    ClipStart(BezierPath),
     /// End the most recent clipping region.
     ClipEnd,
     /// Begin a bounding-box override region.
-    SetBoundsStart(Path),
+    SetBoundsStart(BezierPath),
     /// End the most recent bounding-box override.
     SetBoundsEnd,
 }
@@ -34,7 +34,7 @@ pub enum GraphicsObject {
 /// A filled contour.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillObject {
-    pub path: Path,
+    pub path: BezierPath,
     pub color: Color,
     /// Optional pen for "filldraw" (stroke the contour too).
     pub pen: Option<Pen>,
@@ -45,7 +45,7 @@ pub struct FillObject {
 /// A stroked path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrokeObject {
-    pub path: Path,
+    pub path: BezierPath,
     pub pen: Pen,
     pub color: Color,
     pub dash: Option<DashPattern>,
@@ -109,14 +109,11 @@ impl Picture {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    reason = "exact float comparisons are intentional in tests"
-)]
 mod tests {
     use super::super::geometry::Point;
     use super::super::knot::Knot;
     use super::*;
+    use crate::path::Path;
 
     #[test]
     fn path_num_segments() {

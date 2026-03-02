@@ -141,11 +141,11 @@ impl BoundingBox {
         for obj in &pic.objects {
             match obj {
                 GraphicsObject::Fill(fill) => {
-                    let pbb = Self::of_path(&fill.path);
+                    let pbb = Self::of_bezier_path(&fill.path);
                     bb.union(&pbb);
                 }
                 GraphicsObject::Stroke(stroke) => {
-                    let mut pbb = Self::of_path(&stroke.path);
+                    let mut pbb = Self::of_bezier_path(&stroke.path);
                     // Expand by pen extent (rough estimate)
                     let pen_extent = pen_max_extent(&stroke.pen);
                     pbb.min_x -= pen_extent;
@@ -159,7 +159,7 @@ impl BoundingBox {
                 }
                 GraphicsObject::SetBoundsStart(path) if !true_corners => {
                     bounds_stack.push(bb);
-                    bb = Self::of_path(path);
+                    bb = Self::of_bezier_path(path);
                 }
                 GraphicsObject::SetBoundsEnd if !true_corners => {
                     if let Some(prev) = bounds_stack.pop() {
@@ -234,6 +234,7 @@ fn expand_for_text(text: &TextObject, bb: &mut BoundingBox) {
 )]
 mod tests {
     use super::*;
+    use crate::path::SegmentControls;
     use crate::types::{Color, EPSILON, Knot, TextMetrics, Transform};
     use std::sync::Arc;
 
@@ -261,6 +262,26 @@ mod tests {
             })
             .collect();
         Path::from_knots(knots, true)
+    }
+
+    /// Build a 10x10 square as a cyclic `BezierPath` with straight-line controls.
+    fn make_unit_square_bezier() -> BezierPath {
+        let pts = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(10.0, 10.0),
+            Point::new(0.0, 10.0),
+        ];
+        let controls = (0..4)
+            .map(|i| {
+                let j = (i + 1) % 4;
+                SegmentControls {
+                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
+                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
+                }
+            })
+            .collect();
+        BezierPath::from_parts(pts.to_vec(), controls, true)
     }
 
     #[test]
@@ -298,7 +319,7 @@ mod tests {
     fn test_picture_bbox() {
         use crate::types::{Color, FillObject, LineJoin};
         let mut pic = Picture::new();
-        let path = make_unit_square();
+        let path = make_unit_square_bezier();
         pic.add_fill(FillObject {
             path,
             color: Color::BLACK,

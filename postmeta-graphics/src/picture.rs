@@ -9,7 +9,7 @@
 //! - `clip <pic> to <path>` — clip to a region
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
-use crate::path::Path;
+use crate::path::BezierPath;
 use crate::types::{FillObject, GraphicsObject, Picture, StrokeObject};
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,10 @@ impl Picture {
     ///
     /// The path must be cyclic. Corresponds to `addto <pic> contour <path>`.
     pub fn add_fill(&mut self, fill: FillObject) {
-        debug_assert!(fill.path.is_cyclic, "addto contour requires a cyclic path");
+        debug_assert!(
+            fill.path.is_cyclic(),
+            "addto contour requires a cyclic path"
+        );
         self.push(GraphicsObject::Fill(fill));
     }
 
@@ -35,8 +38,8 @@ impl Picture {
     /// Clip the picture to a cyclic path.
     ///
     /// Wraps all existing objects in `ClipStart`/`ClipEnd` brackets.
-    pub fn clip(&mut self, clip_path: Path) {
-        debug_assert!(clip_path.is_cyclic, "clip requires a cyclic path");
+    pub fn clip(&mut self, clip_path: BezierPath) {
+        debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
         self.push(GraphicsObject::ClipStart(clip_path));
@@ -47,8 +50,8 @@ impl Picture {
     /// Set an artificial bounding box on the picture.
     ///
     /// Wraps all existing objects in `SetBoundsStart`/`SetBoundsEnd` brackets.
-    pub fn set_bounds(&mut self, bounds_path: Path) {
-        debug_assert!(bounds_path.is_cyclic, "setbounds requires a cyclic path");
+    pub fn set_bounds(&mut self, bounds_path: BezierPath) {
+        debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
         self.push(GraphicsObject::SetBoundsStart(bounds_path));
@@ -64,39 +67,45 @@ impl Picture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::path::Path;
-    use crate::types::{Color, Knot, KnotDirection, LineCap, LineJoin, Pen, Point};
+    use crate::path::SegmentControls;
+    use crate::types::{Color, LineCap, LineJoin, Pen, Point};
 
-    fn make_unit_square() -> Path {
-        // A cyclic square path with explicit controls (straight lines)
+    /// Build a 10x10 square as a cyclic `BezierPath` with straight-line controls.
+    fn make_unit_square_bezier() -> BezierPath {
         let pts = [
             Point::new(0.0, 0.0),
             Point::new(10.0, 0.0),
             Point::new(10.0, 10.0),
             Point::new(0.0, 10.0),
         ];
-        let knots = (0..4)
+        let controls = (0..4)
             .map(|i| {
                 let j = (i + 1) % 4;
-                let prev = (i + 3) % 4;
-                let right_cp = Point::new(
-                    pts[i].x + (pts[j].x - pts[i].x) / 3.0,
-                    pts[i].y + (pts[j].y - pts[i].y) / 3.0,
-                );
-                let left_cp = Point::new(
-                    pts[prev].x + 2.0 * (pts[i].x - pts[prev].x) / 3.0,
-                    pts[prev].y + 2.0 * (pts[i].y - pts[prev].y) / 3.0,
-                );
-                Knot::with_controls(pts[i], left_cp, right_cp)
+                SegmentControls {
+                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
+                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
+                }
             })
             .collect();
-        Path::from_knots(knots, true)
+        BezierPath::from_parts(pts.to_vec(), controls, true)
+    }
+
+    /// Build a simple open line as a `BezierPath` from (0,0) to (10,0).
+    fn make_line_bezier() -> BezierPath {
+        BezierPath::from_parts(
+            vec![Point::ZERO, Point::new(10.0, 0.0)],
+            vec![SegmentControls {
+                post: Point::new(10.0 / 3.0, 0.0),
+                pre: Point::new(20.0 / 3.0, 0.0),
+            }],
+            false,
+        )
     }
 
     #[test]
     fn test_add_fill() {
         let mut pic = Picture::new();
-        let path = make_unit_square();
+        let path = make_unit_square_bezier();
         pic.add_fill(FillObject {
             path,
             color: Color::BLACK,
@@ -111,13 +120,7 @@ mod tests {
     #[test]
     fn test_add_stroke() {
         let mut pic = Picture::new();
-        let mut k0 = Knot::new(Point::ZERO);
-        k0.right = KnotDirection::Explicit(Point::new(3.0, 0.0));
-        k0.left = KnotDirection::Explicit(Point::ZERO);
-        let mut k1 = Knot::new(Point::new(10.0, 0.0));
-        k1.left = KnotDirection::Explicit(Point::new(7.0, 0.0));
-        k1.right = KnotDirection::Explicit(Point::new(10.0, 0.0));
-        let path = Path::from_knots(vec![k0, k1], false);
+        let path = make_line_bezier();
 
         pic.add_stroke(StrokeObject {
             path,
@@ -149,7 +152,7 @@ mod tests {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
-        let clip_path = make_unit_square();
+        let clip_path = make_unit_square_bezier();
         pic.clip(clip_path);
 
         assert_eq!(pic.objects.len(), 3);
@@ -163,7 +166,7 @@ mod tests {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
-        let bounds = make_unit_square();
+        let bounds = make_unit_square_bezier();
         pic.set_bounds(bounds);
 
         assert_eq!(pic.objects.len(), 3);

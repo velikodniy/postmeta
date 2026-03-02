@@ -428,7 +428,7 @@ mod tests {
 
     use crate::path::bezier_path::SegmentControls;
 
-    /// Make a horizontal line BezierPath from (x0, y) to (x1, y).
+    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y).
     fn hline_bezier(x0: Scalar, x1: Scalar, y: Scalar) -> BezierPath {
         let dx = (x1 - x0) / 3.0;
         BezierPath::from_parts(
@@ -441,7 +441,7 @@ mod tests {
         )
     }
 
-    /// Make a vertical line BezierPath from (x, y0) to (x, y1).
+    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1).
     fn vline_bezier(x: Scalar, y0: Scalar, y1: Scalar) -> BezierPath {
         let dy = (y1 - y0) / 3.0;
         BezierPath::from_parts(

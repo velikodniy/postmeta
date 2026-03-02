@@ -625,19 +625,13 @@ impl BezierPath {
     /// Returns `None` if the paths don't intersect.
     /// The returned times are in the range [0, `num_segments()`].
     #[must_use]
-    pub fn intersection_times(
-        &self,
-        other: &BezierPath,
-    ) -> Option<crate::intersection::Intersection> {
+    pub fn intersection_times(&self, other: &Self) -> Option<crate::intersection::Intersection> {
         crate::intersection::bezier_intersection_times(self, other)
     }
 
     /// Find all intersections between this path and `other`.
     #[must_use]
-    pub fn all_intersection_times(
-        &self,
-        other: &BezierPath,
-    ) -> Vec<crate::intersection::Intersection> {
+    pub fn all_intersection_times(&self, other: &Self) -> Vec<crate::intersection::Intersection> {
         crate::intersection::all_bezier_intersection_times(self, other)
     }
 

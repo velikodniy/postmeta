@@ -101,10 +101,6 @@ pub struct DashPattern {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[expect(
-    clippy::float_cmp,
-    reason = "exact float comparisons are intentional in tests"
-)]
 mod tests {
     use super::*;
 

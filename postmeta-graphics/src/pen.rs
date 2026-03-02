@@ -11,7 +11,7 @@
 //! - `penoffset` — find the pen offset in a given direction
 
 use crate::error::GraphicsError;
-use crate::path::Path;
+use crate::path::{BezierPath, Path, SegmentControls};
 use crate::transform::Transform;
 use crate::types::{Knot, NEAR_ZERO, Point, Scalar, Vec2, index_to_scalar};
 
@@ -46,6 +46,15 @@ impl Pen {
     #[must_use]
     pub const fn null() -> Self {
         Self::Elliptical(Transform::ZERO)
+    }
+
+    /// Find the pen offset (support point) in the given direction.
+    ///
+    /// Returns the point on the pen boundary that is furthest in the
+    /// direction `dir`. This is used for computing stroked path envelopes.
+    #[must_use]
+    pub fn offset(&self, dir: Vec2) -> Point {
+        penoffset(self, dir)
     }
 }
 
@@ -146,6 +155,113 @@ fn make_ellipse_path(t: &Transform) -> Path {
         .collect();
 
     Path::from_knots(knots, true)
+}
+
+// ---------------------------------------------------------------------------
+// BezierPath ↔ Pen conversions
+// ---------------------------------------------------------------------------
+
+/// `makepen` for `BezierPath`: convert a bezier path to a polygonal pen.
+///
+/// Extracts the on-curve knot points and computes their convex hull.
+///
+/// # Errors
+///
+/// Returns [`GraphicsError::InvalidPen`] if the path has no knot points.
+impl TryFrom<&BezierPath> for Pen {
+    type Error = GraphicsError;
+
+    fn try_from(path: &BezierPath) -> Result<Self, Self::Error> {
+        if path.knot_points().is_empty() {
+            return Err(GraphicsError::InvalidPen(
+                "makepen requires a non-empty path",
+            ));
+        }
+        let hull = convex_hull(path.knot_points());
+        Ok(Self::Polygonal(hull))
+    }
+}
+
+/// `makepath` for `BezierPath`: convert a pen to a `BezierPath`.
+///
+/// - **Elliptical** pens produce an 8-knot circular approximation built as
+///   a `BezierPath` with explicit cubic controls.
+/// - **Polygonal** pens produce a cyclic `BezierPath` with straight-line
+///   segments through the vertices.
+impl From<&Pen> for BezierPath {
+    fn from(pen: &Pen) -> Self {
+        match pen {
+            Pen::Elliptical(t) => make_ellipse_bezier_path(t),
+            Pen::Polygonal(vertices) => {
+                if vertices.is_empty() {
+                    return Self::new();
+                }
+                let n = vertices.len();
+                let controls: Vec<SegmentControls> = (0..n)
+                    .map(|i| {
+                        let j = (i + 1) % n;
+                        SegmentControls {
+                            post: vertices[i].lerp(vertices[j], 1.0 / 3.0),
+                            pre: vertices[i].lerp(vertices[j], 2.0 / 3.0),
+                        }
+                    })
+                    .collect();
+                Self::from_parts(vertices.clone(), controls, true)
+            }
+        }
+    }
+}
+
+/// Generate an 8-point approximation of an ellipse as a [`BezierPath`].
+///
+/// Same mathematics as [`make_ellipse_path`], but produces a `BezierPath`
+/// directly (no `Knot`/`KnotDirection` overhead).
+fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
+    const KAPPA: Scalar = 0.265_207_840_674;
+    const N: usize = 8;
+
+    let mut points = Vec::with_capacity(N);
+    let mut controls = Vec::with_capacity(N);
+
+    for i in 0..N {
+        let angle = index_to_scalar(i) * std::f64::consts::FRAC_PI_4;
+        let (sin_a, cos_a) = angle.sin_cos();
+
+        let p = Point::new(cos_a, sin_a);
+        let tangent = Vec2::new(-sin_a, cos_a);
+
+        let on_curve = t.apply(p);
+        let right_cp = t.apply(p + tangent * KAPPA);
+        let left_cp = t.apply(p - tangent * KAPPA);
+
+        points.push(on_curve);
+
+        // Build the segment control from this knot to the next.
+        // The "post" handle of segment i is the right_cp of knot i.
+        // The "pre" handle of segment i is the left_cp of knot (i+1).
+        // We'll set the pre handle in the next iteration; for now, store
+        // the right_cp and fix up later.
+        //
+        // Actually, we have all the data now — compute knot i+1's left_cp.
+        let j = (i + 1) % N;
+        let angle_j = index_to_scalar(j) * std::f64::consts::FRAC_PI_4;
+        let (sin_j, cos_j) = angle_j.sin_cos();
+        let p_j = Point::new(cos_j, sin_j);
+        let tangent_j = Vec2::new(-sin_j, cos_j);
+        let left_cp_j = t.apply(p_j - tangent_j * KAPPA);
+
+        controls.push(SegmentControls {
+            post: right_cp,
+            pre: left_cp_j,
+        });
+
+        // Suppress unused variable warning — left_cp is the pre-handle
+        // for the segment ending at this knot, which was already set in
+        // the previous iteration's controls entry.
+        let _ = left_cp;
+    }
+
+    BezierPath::from_parts(points, controls, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -438,6 +554,198 @@ mod tests {
                 assert!((verts[0].y - 3.0).abs() < EPSILON);
             }
             Pen::Elliptical(_) => panic!("expected polygonal"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // TryFrom<&BezierPath> for Pen
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn try_from_bezier_path_triangle() {
+        // A triangle BezierPath with 3 knot points.
+        let bp = BezierPath::from_parts(
+            vec![
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 0.0),
+                Point::new(0.5, 1.0),
+            ],
+            vec![
+                SegmentControls {
+                    post: Point::new(0.33, 0.0),
+                    pre: Point::new(0.67, 0.0),
+                },
+                SegmentControls {
+                    post: Point::new(1.0, 0.33),
+                    pre: Point::new(0.75, 0.67),
+                },
+                SegmentControls {
+                    post: Point::new(0.25, 0.67),
+                    pre: Point::new(0.0, 0.33),
+                },
+            ],
+            true,
+        );
+        let pen = Pen::try_from(&bp).expect("triangle should produce a pen");
+        match pen {
+            Pen::Polygonal(verts) => {
+                assert_eq!(verts.len(), 3, "triangle hull should have 3 vertices");
+            }
+            Pen::Elliptical(_) => panic!("expected polygonal"),
+        }
+    }
+
+    #[test]
+    fn try_from_bezier_path_empty_fails() {
+        let bp = BezierPath::new();
+        let result = Pen::try_from(&bp);
+        assert!(result.is_err(), "empty BezierPath should fail");
+    }
+
+    #[test]
+    fn try_from_bezier_path_single_point() {
+        let bp = BezierPath::from_parts(vec![Point::new(3.0, 4.0)], vec![], false);
+        let pen = Pen::try_from(&bp).expect("single-point BezierPath should succeed");
+        match pen {
+            Pen::Polygonal(verts) => {
+                assert_eq!(verts.len(), 1);
+                assert!((verts[0].x - 3.0).abs() < EPSILON);
+                assert!((verts[0].y - 4.0).abs() < EPSILON);
+            }
+            Pen::Elliptical(_) => panic!("expected polygonal"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // From<&Pen> for BezierPath
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn from_pen_elliptical_has_8_knots() {
+        let pen = Pen::circle(2.0);
+        let bp = BezierPath::from(&pen);
+        assert!(bp.is_cyclic());
+        assert_eq!(bp.num_knots(), 8);
+        assert_eq!(bp.num_segments(), 8);
+    }
+
+    #[test]
+    fn from_pen_elliptical_points_on_circle() {
+        let pen = Pen::circle(2.0); // radius = 1.0
+        let bp = BezierPath::from(&pen);
+        for i in 0..bp.num_knots() {
+            let p = bp.knot_point(i);
+            let r = Vec2::from(p).length();
+            assert!(
+                (r - 1.0).abs() < 0.01,
+                "knot {i} at {p:?} not on unit circle: r = {r}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_pen_polygonal_triangle() {
+        let pen = Pen::Polygonal(vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.5, 1.0),
+        ]);
+        let bp = BezierPath::from(&pen);
+        assert!(bp.is_cyclic());
+        assert_eq!(bp.num_knots(), 3);
+        assert_eq!(bp.num_segments(), 3);
+
+        // Knot points should match the vertices.
+        assert!((bp.knot_point(0).x).abs() < EPSILON);
+        assert!((bp.knot_point(0).y).abs() < EPSILON);
+        assert!((bp.knot_point(1).x - 1.0).abs() < EPSILON);
+        assert!((bp.knot_point(2).y - 1.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn from_pen_polygonal_empty() {
+        let pen = Pen::Polygonal(vec![]);
+        let bp = BezierPath::from(&pen);
+        assert_eq!(bp.num_knots(), 0);
+        assert_eq!(bp.num_segments(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Pen::offset method
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pen_offset_circle_right() {
+        let pen = Pen::circle(2.0); // radius 1
+        let offset = pen.offset(Vec2::new(1.0, 0.0));
+        assert!((offset.x - 1.0).abs() < 0.01, "offset.x = {}", offset.x);
+        assert!(offset.y.abs() < 0.01, "offset.y = {}", offset.y);
+    }
+
+    #[test]
+    fn pen_offset_circle_up() {
+        let pen = Pen::circle(2.0); // radius 1
+        let offset = pen.offset(Vec2::new(0.0, 1.0));
+        assert!(offset.x.abs() < 0.01, "offset.x = {}", offset.x);
+        assert!((offset.y - 1.0).abs() < 0.01, "offset.y = {}", offset.y);
+    }
+
+    #[test]
+    fn pen_offset_polygonal() {
+        let pen = Pen::Polygonal(vec![
+            Point::new(-1.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(0.0, 1.0),
+        ]);
+        let offset = pen.offset(Vec2::new(1.0, 0.0));
+        assert!((offset.x - 1.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn pen_offset_diagonal() {
+        let pen = Pen::circle(2.0); // radius 1
+        let dir = Vec2::new(1.0, 1.0);
+        let offset = pen.offset(dir);
+        // Should be at ~(1/sqrt(2), 1/sqrt(2)) ≈ (0.707, 0.707)
+        let expected = 1.0 / 2.0_f64.sqrt();
+        assert!(
+            (offset.x - expected).abs() < 0.01,
+            "offset.x = {}, expected {}",
+            offset.x,
+            expected
+        );
+        assert!(
+            (offset.y - expected).abs() < 0.01,
+            "offset.y = {}, expected {}",
+            offset.y,
+            expected
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Roundtrip: BezierPath → Pen → BezierPath
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn roundtrip_bezier_pen_bezier() {
+        // Start with an elliptical pen, convert to BezierPath, then back to Pen.
+        let original = Pen::circle(2.0);
+        let bp = BezierPath::from(&original);
+        let pen = Pen::try_from(&bp).expect("roundtrip should succeed");
+        // The result is a polygonal pen (8 vertices from the circle approximation).
+        match pen {
+            Pen::Polygonal(verts) => {
+                assert_eq!(verts.len(), 8);
+                // All vertices should be approximately on the unit circle.
+                for v in &verts {
+                    let r = Vec2::from(*v).length();
+                    assert!(
+                        (r - 1.0).abs() < 0.01,
+                        "vertex {v:?} not on unit circle: r = {r}"
+                    );
+                }
+            }
+            Pen::Elliptical(_) => panic!("expected polygonal after roundtrip"),
         }
     }
 }
