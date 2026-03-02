@@ -616,6 +616,35 @@ impl BezierPath {
         Self::from_parts(points, controls, false)
     }
 
+    // -----------------------------------------------------------------------
+    // Intersection queries
+    // -----------------------------------------------------------------------
+
+    /// Find the first intersection between this path and `other`.
+    ///
+    /// Returns `None` if the paths don't intersect.
+    /// The returned times are in the range [0, `num_segments()`].
+    #[must_use]
+    pub fn intersection_times(
+        &self,
+        other: &BezierPath,
+    ) -> Option<crate::intersection::Intersection> {
+        crate::intersection::bezier_intersection_times(self, other)
+    }
+
+    /// Find all intersections between this path and `other`.
+    #[must_use]
+    pub fn all_intersection_times(
+        &self,
+        other: &BezierPath,
+    ) -> Vec<crate::intersection::Intersection> {
+        crate::intersection::all_bezier_intersection_times(self, other)
+    }
+
+    // -----------------------------------------------------------------------
+    // Conversion
+    // -----------------------------------------------------------------------
+
     /// Convert this resolved path back to a [`KnotPath`](super::KnotPath)
     /// with explicit control points.
     ///

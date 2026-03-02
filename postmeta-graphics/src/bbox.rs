@@ -3,7 +3,7 @@
 //! Provides [`BoundingBox`] and helpers for computing bounds of paths,
 //! pens, and pictures.
 
-use crate::path::Path;
+use crate::path::{BezierPath, Path};
 use crate::types::{GraphicsObject, KnotDirection, Pen, Picture, Point, Scalar, TextObject, Vec2};
 
 // ---------------------------------------------------------------------------
@@ -112,6 +112,21 @@ impl BoundingBox {
             }
             bb
         })
+    }
+
+    /// Compute the bounding box of a [`BezierPath`] (control-point hull).
+    ///
+    /// This is a conservative estimate using the convex hull of all control
+    /// points, not the tight bound. This matches `MetaPost`'s behavior.
+    #[must_use]
+    pub fn of_bezier_path(path: &BezierPath) -> Self {
+        let mut bb = Self::EMPTY;
+        for seg in path.segments() {
+            let (min, max) = seg.bbox();
+            bb.include_point(min);
+            bb.include_point(max);
+        }
+        bb
     }
 
     /// Compute the bounding box of a picture.
@@ -393,5 +408,69 @@ mod tests {
         ]);
         let extent = pen_max_extent(&pen);
         assert!((extent - 4.0).abs() < EPSILON, "extent: {extent}");
+    }
+
+    // -----------------------------------------------------------------------
+    // BezierPath bounding box
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn bezier_path_bbox() {
+        use crate::path::bezier_path::SegmentControls;
+
+        // Build a 10x10 square as a cyclic BezierPath with straight-line controls.
+        let pts = [
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(10.0, 10.0),
+            Point::new(0.0, 10.0),
+        ];
+        let controls = (0..4)
+            .map(|i| {
+                let j = (i + 1) % 4;
+                SegmentControls {
+                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
+                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
+                }
+            })
+            .collect();
+        let bp = BezierPath::from_parts(pts.to_vec(), controls, true);
+
+        let bb = BoundingBox::of_bezier_path(&bp);
+        assert!(bb.is_valid());
+        assert!(bb.min_x < 0.1, "min_x: {}", bb.min_x);
+        assert!(bb.min_y < 0.1, "min_y: {}", bb.min_y);
+        assert!(bb.max_x > 9.9, "max_x: {}", bb.max_x);
+        assert!(bb.max_y > 9.9, "max_y: {}", bb.max_y);
+    }
+
+    #[test]
+    fn bezier_path_bbox_empty() {
+        let bp = BezierPath::new();
+        let bb = BoundingBox::of_bezier_path(&bp);
+        assert!(!bb.is_valid());
+    }
+
+    #[test]
+    fn bezier_path_bbox_single_segment() {
+        use crate::path::bezier_path::SegmentControls;
+
+        // A line from (2, 3) to (8, 7) with controls that bulge outward.
+        let bp = BezierPath::from_parts(
+            vec![Point::new(2.0, 3.0), Point::new(8.0, 7.0)],
+            vec![SegmentControls {
+                post: Point::new(4.0, 0.0), // below the line
+                pre: Point::new(6.0, 10.0), // above the line
+            }],
+            false,
+        );
+
+        let bb = BoundingBox::of_bezier_path(&bp);
+        assert!(bb.is_valid());
+        // The bbox should encompass all 4 control points.
+        assert!(bb.min_x <= 2.0 + EPSILON, "min_x: {}", bb.min_x);
+        assert!(bb.min_y <= 0.0 + EPSILON, "min_y: {}", bb.min_y);
+        assert!(bb.max_x >= 8.0 - EPSILON, "max_x: {}", bb.max_x);
+        assert!(bb.max_y >= 10.0 - EPSILON, "max_y: {}", bb.max_y);
     }
 }

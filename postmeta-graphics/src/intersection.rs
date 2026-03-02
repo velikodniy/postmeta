@@ -7,7 +7,7 @@
 //! overlap, stopping when the sub-curves are small enough.
 
 use crate::bezier::CubicSegment;
-use crate::path::Path;
+use crate::path::{BezierPath, Path};
 use crate::types::{Point, Scalar, index_to_scalar};
 
 /// Result of an intersection search.
@@ -76,6 +76,73 @@ pub fn all_intersection_times(path1: &Path, path2: &Path) -> Vec<Intersection> {
         for j in 0..n2 {
             let seg1 = CubicSegment::from_path(path1, i);
             let seg2 = CubicSegment::from_path(path2, j);
+            ctx.seg1_offset = index_to_scalar(i);
+            ctx.seg2_offset = index_to_scalar(j);
+            ctx.recurse(&seg1, &seg2, Interval::UNIT, Interval::UNIT, 0);
+        }
+    }
+
+    ctx.results
+}
+
+// ---------------------------------------------------------------------------
+// BezierPath-based overloads
+// ---------------------------------------------------------------------------
+
+/// Find the first intersection between two [`BezierPath`]s.
+///
+/// Returns `None` if the paths don't intersect.
+/// The returned times are in the range [0, `path.num_segments()`].
+#[must_use]
+pub fn bezier_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Option<Intersection> {
+    let n1 = path1.num_segments();
+    let n2 = path2.num_segments();
+
+    if n1 == 0 || n2 == 0 {
+        return None;
+    }
+
+    let mut work = 0_u32;
+    for i in 0..n1 {
+        for j in 0..n2 {
+            let seg1 = path1.segment(i);
+            let seg2 = path2.segment(j);
+
+            if let Some((t1, t2)) =
+                intersect_cubics(&seg1, &seg2, Interval::UNIT, Interval::UNIT, 0, &mut work)
+            {
+                return Some(Intersection {
+                    t1: index_to_scalar(i) + t1,
+                    t2: index_to_scalar(j) + t2,
+                });
+            }
+        }
+    }
+
+    None
+}
+
+/// Find all intersections between two [`BezierPath`]s.
+#[must_use]
+pub fn all_bezier_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Intersection> {
+    let n1 = path1.num_segments();
+    let n2 = path2.num_segments();
+
+    if n1 == 0 || n2 == 0 {
+        return Vec::new();
+    }
+
+    let mut ctx = FindAllContext {
+        seg1_offset: 0.0,
+        seg2_offset: 0.0,
+        results: Vec::new(),
+        work: 0,
+    };
+
+    for i in 0..n1 {
+        for j in 0..n2 {
+            let seg1 = path1.segment(i);
+            let seg2 = path2.segment(j);
             ctx.seg1_offset = index_to_scalar(i);
             ctx.seg2_offset = index_to_scalar(j);
             ctx.recurse(&seg1, &seg2, Interval::UNIT, Interval::UNIT, 0);
@@ -353,5 +420,92 @@ mod tests {
         let a = (Point::new(0.0, 0.0), Point::new(2.0, 2.0));
         let b = (Point::new(3.0, 3.0), Point::new(5.0, 5.0));
         assert!(!bbox_overlap(&a, &b));
+    }
+
+    // -----------------------------------------------------------------------
+    // BezierPath-based intersection tests
+    // -----------------------------------------------------------------------
+
+    use crate::path::bezier_path::SegmentControls;
+
+    /// Make a horizontal line BezierPath from (x0, y) to (x1, y).
+    fn hline_bezier(x0: Scalar, x1: Scalar, y: Scalar) -> BezierPath {
+        let dx = (x1 - x0) / 3.0;
+        BezierPath::from_parts(
+            vec![Point::new(x0, y), Point::new(x1, y)],
+            vec![SegmentControls {
+                post: Point::new(x0 + dx, y),
+                pre: Point::new(x1 - dx, y),
+            }],
+            false,
+        )
+    }
+
+    /// Make a vertical line BezierPath from (x, y0) to (x, y1).
+    fn vline_bezier(x: Scalar, y0: Scalar, y1: Scalar) -> BezierPath {
+        let dy = (y1 - y0) / 3.0;
+        BezierPath::from_parts(
+            vec![Point::new(x, y0), Point::new(x, y1)],
+            vec![SegmentControls {
+                post: Point::new(x, y0 + dy),
+                pre: Point::new(x, y1 - dy),
+            }],
+            false,
+        )
+    }
+
+    #[test]
+    fn bezier_crossing_lines() {
+        let h = hline_bezier(0.0, 10.0, 5.0);
+        let v = vline_bezier(5.0, 0.0, 10.0);
+
+        let result = bezier_intersection_times(&h, &v);
+        assert!(result.is_some(), "expected intersection");
+        let ix = result.unwrap();
+        assert!((ix.t1 - 0.5).abs() < 0.01, "t1 = {}", ix.t1);
+        assert!((ix.t2 - 0.5).abs() < 0.01, "t2 = {}", ix.t2);
+    }
+
+    #[test]
+    fn bezier_method_crossing_lines() {
+        let h = hline_bezier(0.0, 10.0, 5.0);
+        let v = vline_bezier(5.0, 0.0, 10.0);
+
+        let result = h.intersection_times(&v);
+        assert!(result.is_some(), "expected intersection via method");
+        let ix = result.unwrap();
+        assert!((ix.t1 - 0.5).abs() < 0.01, "t1 = {}", ix.t1);
+        assert!((ix.t2 - 0.5).abs() < 0.01, "t2 = {}", ix.t2);
+    }
+
+    #[test]
+    fn bezier_no_intersection() {
+        let h1 = hline_bezier(0.0, 10.0, 0.0);
+        let h2 = hline_bezier(0.0, 10.0, 5.0);
+        assert!(bezier_intersection_times(&h1, &h2).is_none());
+    }
+
+    #[test]
+    fn bezier_empty_path() {
+        let empty = BezierPath::new();
+        let line = hline_bezier(0.0, 10.0, 5.0);
+        assert!(bezier_intersection_times(&empty, &line).is_none());
+        assert!(bezier_intersection_times(&line, &empty).is_none());
+    }
+
+    #[test]
+    fn bezier_all_intersections() {
+        let h = hline_bezier(0.0, 10.0, 5.0);
+        let v = vline_bezier(5.0, 0.0, 10.0);
+        let all = all_bezier_intersection_times(&h, &v);
+        assert_eq!(all.len(), 1);
+    }
+
+    #[test]
+    fn bezier_method_all_intersections() {
+        let h = hline_bezier(0.0, 10.0, 5.0);
+        let v = vline_bezier(5.0, 0.0, 10.0);
+        let all = h.all_intersection_times(&v);
+        assert_eq!(all.len(), 1);
     }
 }
