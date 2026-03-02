@@ -3,8 +3,7 @@
 //! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}`
 //! brace directions, and `cycle`.
 
-use postmeta_graphics::path::Path;
-use postmeta_graphics::path::hobby;
+use postmeta_graphics::path::KnotPath;
 use postmeta_graphics::types::{Knot, KnotDirection, Point, Scalar};
 
 use crate::command::Command;
@@ -39,7 +38,10 @@ impl Interpreter {
         let first_expr = left.exp;
         let (mut knots, mut is_cyclic) = match first_expr {
             Value::Pair(x, y) => (vec![Knot::new(Point::new(x, y))], false),
-            Value::Path(p) => (p.knots, p.is_cyclic),
+            Value::Path(p) => {
+                let kp = p.to_knot_path();
+                (kp.knots, kp.is_cyclic)
+            }
             Value::Numeric(v) if v.abs() <= f64::EPSILON => (Vec::new(), false),
             Value::Numeric(v) => {
                 return Err(InterpreterError::new(
@@ -144,7 +146,7 @@ impl Interpreter {
             // `&` can concatenate paths; a pair is treated as a one-knot path.
             if join_type == u16::MAX {
                 let mut rhs_knots = match point_val {
-                    Value::Path(rhs) => rhs.knots,
+                    Value::Path(rhs) => rhs.to_knot_path().knots,
                     Value::Pair(x, y) => vec![Knot::new(Point::new(x, y))],
                     other => {
                         return Err(InterpreterError::new(
@@ -171,8 +173,9 @@ impl Interpreter {
                 // MetaPost allows `..` with a path operand in macros like
                 // `buildcycle`; treat this as joining to the first knot of the
                 // right path and appending the whole path.
-                Value::Path(mut rhs) => {
-                    if rhs.knots.is_empty() {
+                Value::Path(rhs) => {
+                    let mut rhs_knots = rhs.to_knot_path().knots;
+                    if rhs_knots.is_empty() {
                         return Err(InterpreterError::new(
                             ErrorKind::TypeError,
                             "Expected non-empty path in path construction",
@@ -180,12 +183,12 @@ impl Interpreter {
                     }
 
                     if let Some(dir) = post_dir
-                        && let Some(first) = rhs.knots.first_mut()
+                        && let Some(first) = rhs_knots.first_mut()
                     {
                         first.left = dir;
                     }
 
-                    if let Some(first) = rhs.knots.first_mut() {
+                    if let Some(first) = rhs_knots.first_mut() {
                         match pending {
                             Some(PendingJoin::Tension(t)) => first.left_tension = t,
                             Some(PendingJoin::Control(pt)) => {
@@ -195,7 +198,7 @@ impl Interpreter {
                         }
                     }
 
-                    knots.append(&mut rhs.knots);
+                    knots.append(&mut rhs_knots);
                 }
                 other => {
                     let mut knot = Self::value_to_knot(&other)?;
@@ -214,10 +217,10 @@ impl Interpreter {
         }
 
         // Build the path
-        let mut path_obj = Path::from_knots(knots, is_cyclic);
-        hobby::make_choices(&mut path_obj);
+        let knot_path = KnotPath::from_knots(knots, is_cyclic);
+        let bezier_path = knot_path.resolve();
 
-        Ok(super::ExprResultValue::plain(Value::Path(path_obj)))
+        Ok(super::ExprResultValue::plain(Value::Path(bezier_path)))
     }
 
     /// Concatenate path knots for `&`.
@@ -443,16 +446,11 @@ mod tests {
             other => panic!("expected path variable, got {other:?}"),
         };
 
-        let p0 = path.knots[0].point;
-        let p1 = path.knots[1].point;
-        let r0 = match path.knots[0].right {
-            KnotDirection::Explicit(cp) => cp,
-            ref other => panic!("knot 0 right is not explicit: {other:?}"),
-        };
-        let l1 = match path.knots[1].left {
-            KnotDirection::Explicit(cp) => cp,
-            ref other => panic!("knot 1 left is not explicit: {other:?}"),
-        };
+        let p0 = path.knot_point(0);
+        let p1 = path.knot_point(1);
+        let ctrl = path.segment_controls(0);
+        let r0 = ctrl.post; // postcontrol leaving knot 0
+        let l1 = ctrl.pre; // precontrol arriving at knot 1
 
         // Start direction is up: outgoing tangent at p0 should be vertical.
         let t0 = r0 - p0;
@@ -487,13 +485,10 @@ mod tests {
             VarValue::Known(Value::Path(p)) => p,
             other => panic!("expected path variable, got {other:?}"),
         };
-        assert_eq!(path.knots.len(), 3, "expected three knots");
+        assert_eq!(path.num_knots(), 3, "expected three knots");
 
-        // Path choices should have been resolved to explicit controls.
-        assert!(matches!(path.knots[0].right, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[2].left, KnotDirection::Explicit(_)));
+        // Path should have been resolved with explicit segment controls.
+        assert_eq!(path.num_segments(), 2, "expected two segments");
     }
 
     #[test]
@@ -517,23 +512,17 @@ mod tests {
             other => panic!("expected path variable, got {other:?}"),
         };
 
-        assert_eq!(path.knots.len(), 2, "expected two knots");
+        assert_eq!(path.num_knots(), 2, "expected two knots");
+        assert_eq!(path.num_segments(), 1, "expected one segment");
 
-        match path.knots[0].right {
-            KnotDirection::Explicit(cp) => {
-                assert!((cp.x + 1.0).abs() < 1e-9, "cp.x={}", cp.x);
-                assert!((cp.y - 2.0).abs() < 1e-9, "cp.y={}", cp.y);
-            }
-            ref other => panic!("knot 0 right is not explicit: {other:?}"),
-        }
+        let ctrl = path.segment_controls(0);
+        // postcontrol (B = (-1, 2))
+        assert!((ctrl.post.x + 1.0).abs() < 1e-9, "cp.x={}", ctrl.post.x);
+        assert!((ctrl.post.y - 2.0).abs() < 1e-9, "cp.y={}", ctrl.post.y);
 
-        match path.knots[1].left {
-            KnotDirection::Explicit(cp) => {
-                assert!((cp.x - 3.0).abs() < 1e-9, "cp.x={}", cp.x);
-                assert!((cp.y - 3.0).abs() < 1e-9, "cp.y={}", cp.y);
-            }
-            ref other => panic!("knot 1 left is not explicit: {other:?}"),
-        }
+        // precontrol (C = (3, 3))
+        assert!((ctrl.pre.x - 3.0).abs() < 1e-9, "cp.x={}", ctrl.pre.x);
+        assert!((ctrl.pre.y - 3.0).abs() < 1e-9, "cp.y={}", ctrl.pre.y);
     }
 
     #[test]
@@ -558,12 +547,9 @@ mod tests {
             other => panic!("expected path variable, got {other:?}"),
         };
 
-        assert_eq!(path.knots.len(), 3, "expected merged shared knot");
-        assert!(!path.is_cyclic);
-        assert!(matches!(path.knots[0].right, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[1].left, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[1].right, KnotDirection::Explicit(_)));
-        assert!(matches!(path.knots[2].left, KnotDirection::Explicit(_)));
+        assert_eq!(path.num_knots(), 3, "expected merged shared knot");
+        assert!(!path.is_cyclic());
+        assert_eq!(path.num_segments(), 2, "expected two segments");
     }
 
     #[test]
@@ -587,9 +573,10 @@ mod tests {
             other => panic!("expected path variable, got {other:?}"),
         };
 
-        assert_eq!(path.knots.len(), 3, "expected appended pair knot");
-        assert!((path.knots[2].point.x - 2.0).abs() < 1e-9);
-        assert!((path.knots[2].point.y - 0.0).abs() < 1e-9);
+        assert_eq!(path.num_knots(), 3, "expected appended pair knot");
+        let pt2 = path.knot_point(2);
+        assert!((pt2.x - 2.0).abs() < 1e-9);
+        assert!((pt2.y - 0.0).abs() < 1e-9);
     }
 
     #[test]
@@ -614,6 +601,6 @@ mod tests {
             other => panic!("expected path variable, got {other:?}"),
         };
 
-        assert_eq!(path.knots.len(), 4, "expected all rhs knots appended");
+        assert_eq!(path.num_knots(), 4, "expected all rhs knots appended");
     }
 }

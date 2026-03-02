@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use postmeta_graphics::path::Path;
+use postmeta_graphics::path::BezierPath;
 use postmeta_graphics::types::{Pen, Picture, Scalar, Transform};
 
 use crate::equation::const_dep;
@@ -36,9 +36,9 @@ impl_value_extractor!(
     Value::Pair(x, y) => (*x, *y)
 );
 impl_value_extractor!(value_to_bool, bool, "boolean", Value::Boolean(b) => *b);
-impl_value_extractor!(value_to_path, &Path, "path", Value::Path(p) => p);
+impl_value_extractor!(value_to_path, &BezierPath, "path", Value::Path(p) => p);
 
-pub(super) fn value_to_path_owned(val: Value) -> InterpResult<Path> {
+pub(super) fn value_to_path_owned(val: Value) -> InterpResult<BezierPath> {
     match val {
         Value::Path(p) => Ok(p),
         _ => Err(InterpreterError::new(

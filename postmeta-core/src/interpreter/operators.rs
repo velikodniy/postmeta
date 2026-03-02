@@ -8,12 +8,10 @@ use std::sync::Arc;
 use postmeta_fonts::FontProvider;
 use postmeta_graphics::bbox::BoundingBox;
 use postmeta_graphics::math;
-use postmeta_graphics::path;
-use postmeta_graphics::path::Path;
-use postmeta_graphics::pen;
+use postmeta_graphics::path::BezierPath;
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
-    Color, GraphicsObject, Knot, Pen, Picture, Point, TextMetrics, TextObject, Transform, Vec2,
+    Color, GraphicsObject, Pen, Picture, Point, TextMetrics, TextObject, Transform, Vec2,
 };
 
 use crate::command::{
@@ -286,7 +284,7 @@ impl Interpreter {
             }
             UnaryOp::Reverse => {
                 if let Value::Path(p) = input {
-                    Ok((Value::Path(path::reverse(p)), Type::Path))
+                    Ok((Value::Path(p.reverse()), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -306,7 +304,7 @@ impl Interpreter {
             }
             UnaryOp::MakePath => {
                 if let Value::Pen(p) = input {
-                    Ok((Value::Path(pen::makepath(p)), Type::Path))
+                    Ok((Value::Path(BezierPath::from(p)), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -320,11 +318,8 @@ impl Interpreter {
                 let path_ref = match input {
                     Value::Path(p) => p,
                     Value::Pair(x, y) => {
-                        use postmeta_graphics::types::Knot;
-                        owned_path = postmeta_graphics::path::Path {
-                            knots: vec![Knot::new(Point::new(*x, *y))],
-                            is_cyclic: true,
-                        };
+                        owned_path =
+                            BezierPath::from_parts(vec![Point::new(*x, *y)], vec![], false);
                         &owned_path
                     }
                     _ => {
@@ -334,19 +329,19 @@ impl Interpreter {
                         ));
                     }
                 };
-                let result = pen::makepen(path_ref).map_err(|e| {
+                let result = Pen::try_from(path_ref).map_err(|e| {
                     InterpreterError::new(ErrorKind::TypeError, format!("makepen: {e}"))
                 })?;
                 Ok((Value::Pen(result), Type::Pen))
             }
             UnaryOp::CycleOp => {
-                let is_cyclic = matches!(input, Value::Path(p) if p.is_cyclic);
+                let is_cyclic = matches!(input, Value::Path(p) if p.is_cyclic());
                 Ok((Value::Boolean(is_cyclic), Type::Boolean))
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 let bb = match input {
                     Value::Picture(pic) => BoundingBox::of_picture(pic, false),
-                    Value::Path(p) => BoundingBox::of_path(p),
+                    Value::Path(p) => BoundingBox::of_bezier_path(p),
                     Value::Pen(p) => {
                         let mut bb = BoundingBox::EMPTY;
                         match p {
@@ -388,7 +383,7 @@ impl Interpreter {
             }
             UnaryOp::ArcLength => {
                 let p = value_to_path(input)?;
-                let len = path::arc_length(p);
+                let len = p.arc_length();
                 Ok((Value::Numeric(len), Type::Known))
             }
             UnaryOp::TurningNumber => {
@@ -396,7 +391,7 @@ impl Interpreter {
                     Ok((Value::Numeric(0.0), Type::Known))
                 } else {
                     let p = value_to_path(input)?;
-                    Ok((Value::Numeric(path::turning_number(p)), Type::Known))
+                    Ok((Value::Numeric(p.turning_number()), Type::Known))
                 }
             }
             // readfrom: stub — no filesystem access (WASM compatibility).
@@ -449,7 +444,7 @@ impl Interpreter {
                     }
                     _ => {
                         // Default: single-knot path at origin
-                        Path::from_knots(vec![Knot::new(Point::ZERO)], false)
+                        BezierPath::from_parts(vec![Point::ZERO], vec![], false)
                     }
                 };
                 Ok((Value::Path(path), Type::Path))
@@ -526,24 +521,24 @@ impl Interpreter {
             PrimaryBinaryOp::PrecontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
-                let pt = path::precontrol_of(p, t);
+                let pt = p.precontrol_at(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::PostcontrolOf => {
                 let t = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
-                let pt = path::postcontrol_of(p, t);
+                let pt = p.postcontrol_at(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::SubpathOf => {
                 let (t1, t2) = value_to_pair(first)?;
                 let p = value_to_path(second)?;
-                Ok((Value::Path(path::subpath(p, t1, t2)), Type::Path))
+                Ok((Value::Path(p.subpath(t1, t2)), Type::Path))
             }
             PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
                 let p = value_to_pen(second)?;
-                let pt = pen::penoffset(p, Vec2::new(dx, dy));
+                let pt = p.offset(Vec2::new(dx, dy));
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::SubstringOf => {
@@ -588,7 +583,7 @@ impl Interpreter {
             PrimaryBinaryOp::ArcTimeOf => {
                 let target_len = value_to_scalar(first)?;
                 let p = value_to_path(second)?;
-                let t = path::arc_time(p, target_len);
+                let t = p.arc_time(target_len);
                 Ok((Value::Numeric(t), Type::Known))
             }
             PrimaryBinaryOp::DirectionTimeOf => {
@@ -1057,7 +1052,7 @@ fn tertiary_binary_value(
         TertiaryBinaryOp::IntersectionTimes => {
             let p1 = value_to_path(left)?;
             let p2 = value_to_path(right)?;
-            let value = postmeta_graphics::intersection::intersection_times(p1, p2).map_or_else(
+            let value = p1.intersection_times(p2).map_or_else(
                 || Value::Pair(-1.0, -1.0),
                 |isect| Value::Pair(isect.t1, isect.t2),
             );

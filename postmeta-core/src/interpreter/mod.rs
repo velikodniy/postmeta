@@ -25,7 +25,7 @@ mod statement;
 use std::sync::Arc;
 
 use postmeta_fonts::FontProvider;
-use postmeta_graphics::path::Path;
+use postmeta_graphics::path::BezierPath;
 use postmeta_graphics::types::{Color, Pen, Picture, Transform};
 
 use crate::command::Command;
@@ -416,7 +416,7 @@ impl Interpreter {
             Type::Numeric => Some(VarValue::NumericVar(NumericState::Numeric)),
             Type::Boolean => Some(VarValue::Known(Value::Boolean(false))),
             Type::String => Some(VarValue::Known(Value::String(Arc::from("")))),
-            Type::Path => Some(VarValue::Known(Value::Path(Path::default()))),
+            Type::Path => Some(VarValue::Known(Value::Path(BezierPath::default()))),
             Type::Pen => Some(VarValue::Known(Value::Pen(Pen::circle(0.0)))),
             Type::Picture => Some(VarValue::Known(Value::Picture(Picture::default()))),
             Type::PairType => Some(self.alloc_pair_value(name)),

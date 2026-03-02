@@ -21,7 +21,7 @@ use super::helpers::{value_to_path_owned, value_to_scalar};
 
 enum DoublePathTarget {
     Dot { x: f64, y: f64 },
-    Path(postmeta_graphics::path::Path),
+    Path(postmeta_graphics::path::BezierPath),
 }
 
 impl Interpreter {
@@ -200,7 +200,7 @@ impl Interpreter {
                             // `draw <pair> withpen <pen>` draws a dot-like mark.
                             // Emulate this via the pen outline path shifted to the
                             // pair position, then filled.
-                            let dot = postmeta_graphics::pen::makepath(&ds.pen);
+                            let dot = postmeta_graphics::path::BezierPath::from(&ds.pen);
                             let shifted = dot.transformed(&Transform::shifted(x, y));
                             target.add_fill(FillObject {
                                 path: shifted,
@@ -763,19 +763,19 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
 
     for obj in &pic.objects {
         if let GraphicsObject::Stroke(stroke) = obj {
-            let knots = &stroke.path.knots;
-            if knots.is_empty() {
+            let points = stroke.path.knot_points();
+            if points.is_empty() {
                 continue;
             }
             // The x-range of this stroke path gives the on-segment.
             let mut xmin = f64::INFINITY;
             let mut xmax = f64::NEG_INFINITY;
-            for k in knots {
-                xmin = xmin.min(k.point.x);
-                xmax = xmax.max(k.point.x);
+            for p in points {
+                xmin = xmin.min(p.x);
+                xmax = xmax.max(p.x);
             }
             // The y-coordinate is the total pattern length.
-            total_length = total_length.max(knots[0].point.y);
+            total_length = total_length.max(points[0].y);
 
             on_segments.push((xmin, xmax));
         }
