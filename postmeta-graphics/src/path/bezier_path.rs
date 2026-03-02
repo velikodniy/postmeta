@@ -542,7 +542,7 @@ impl BezierPath {
     /// Reverse the traversal direction of the path.
     ///
     /// Each segment's post/pre control handles are swapped. For cyclic
-    /// paths, MetaPost convention keeps knot 0 as the start: the order
+    /// paths, `MetaPost` convention keeps knot 0 as the start: the order
     /// `0,1,...,n-1` becomes `0,n-1,...,1`, preserving the cyclic start
     /// knot identity.
     #[must_use]

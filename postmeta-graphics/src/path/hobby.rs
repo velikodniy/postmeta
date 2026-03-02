@@ -732,7 +732,7 @@ fn set_controls_for_segment(
 /// Enforce the "at least" tension constraint (bounding triangle).
 ///
 /// When both turning angles bend the same way, the tangent lines at
-/// the two knots form a triangle. MetaPost's "at least" tension
+/// the two knots form a triangle. `MetaPost`'s "at least" tension
 /// (signaled by a negative tension value) limits the control-point
 /// distances so the curve stays inside that triangle.
 #[expect(
