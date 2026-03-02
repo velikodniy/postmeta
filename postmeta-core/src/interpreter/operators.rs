@@ -341,7 +341,7 @@ impl Interpreter {
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 let bb = match input {
                     Value::Picture(pic) => BoundingBox::of_picture(pic, false),
-                    Value::Path(p) => BoundingBox::of_bezier_path(p),
+                    Value::Path(p) => BoundingBox::of_path(p),
                     Value::Pen(p) => {
                         let mut bb = BoundingBox::EMPTY;
                         match p {

@@ -15,7 +15,7 @@
 
 use std::ops;
 
-use crate::path::{BezierPath, Path, SegmentControls};
+use crate::path::{BezierPath, SegmentControls};
 use crate::pen::{Pen, convex_hull};
 use crate::types::{
     FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Picture, Point, Scalar,
@@ -311,13 +311,6 @@ impl Transformable for Knot {
             left_tension: self.left_tension,
             right_tension: self.right_tension,
         }
-    }
-}
-
-impl Transformable for Path {
-    fn transformed(&self, t: &Transform) -> Self {
-        let knots = self.knots.iter().map(|k| k.transformed(t)).collect();
-        Self::from_knots(knots, self.is_cyclic)
     }
 }
 
@@ -653,23 +646,20 @@ mod tests {
     }
 
     #[test]
-    fn test_transform_path() {
-        let path = Path::from_knots(
-            vec![
-                Knot::with_controls(Point::ZERO, Point::ZERO, Point::new(1.0, 0.0)),
-                Knot::with_controls(
-                    Point::new(3.0, 0.0),
-                    Point::new(2.0, 0.0),
-                    Point::new(3.0, 0.0),
-                ),
-            ],
+    fn test_transform_bezier_path() {
+        let path = BezierPath::from_parts(
+            vec![Point::ZERO, Point::new(3.0, 0.0)],
+            vec![SegmentControls {
+                post: Point::new(1.0, 0.0),
+                pre: Point::new(2.0, 0.0),
+            }],
             false,
         );
         let t = Transform::shifted(10.0, 20.0);
         let tp = path.transformed(&t);
-        assert!((tp.knots[0].point.x - 10.0).abs() < EPSILON);
-        assert!((tp.knots[0].point.y - 20.0).abs() < EPSILON);
-        assert!((tp.knots[1].point.x - 13.0).abs() < EPSILON);
+        assert!((tp.knot_point(0).x - 10.0).abs() < EPSILON);
+        assert!((tp.knot_point(0).y - 20.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).x - 13.0).abs() < EPSILON);
     }
 
     #[test]

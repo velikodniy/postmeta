@@ -24,18 +24,18 @@
 
 use crate::{
     math,
-    path::Path,
+    path::KnotPath,
     types::{EPSILON, KnotDirection, NEAR_ZERO, Point, Scalar, Vec2},
 };
 
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
 
-/// Solve for control points on a `Path`, modifying knots in place.
+/// Solve for control points on a `KnotPath`, modifying knots in place.
 ///
 /// After this call, all `KnotDirection` values in the path will be
 /// `Explicit` (computed Bezier control points).
-pub fn make_choices(path: &mut Path) {
+pub fn make_choices(path: &mut KnotPath) {
     // Follow mp.web: when consecutive knots are coincident, force that
     // segment to be explicit with control points equal to the knot.
     // This prevents zero-length chords from entering turning-angle math.
@@ -63,7 +63,7 @@ pub fn make_choices(path: &mut Path) {
 /// This mirrors mp.web's `make_choices` pre-pass:
 /// - set `right(p)` and `left(q)` to explicit controls at the knot point;
 /// - if the opposite side is still open, set it to `curl 1`.
-fn join_consecutive_equal_knots(path: &mut Path) {
+fn join_consecutive_equal_knots(path: &mut KnotPath) {
     let knot_count = path.knots.len();
     if knot_count < 2 {
         return;
@@ -101,7 +101,7 @@ fn join_consecutive_equal_knots(path: &mut Path) {
     }
 }
 
-fn make_choices_cyclic(path: &mut Path) {
+fn make_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
 
     // Find the first breakpoint on the cycle: a knot where either
@@ -121,7 +121,7 @@ fn make_choices_cyclic(path: &mut Path) {
     }
 }
 
-fn make_choices_open(path: &mut Path) {
+fn make_choices_open(path: &mut KnotPath) {
     // Ensure default curl of 1.0 at open-path endpoints
     if let Some(knot) = path.knots.first_mut() {
         if knot.right == KnotDirection::Open {
@@ -162,7 +162,7 @@ const fn is_breakpoint_dir(dir: &KnotDirection) -> bool {
 /// Following `mp.web`'s `make_choices`, this walks around the cycle starting
 /// from the first breakpoint, collects all breakpoints, and calls
 /// `solve_open_segment` for each pair of consecutive breakpoints.
-fn solve_cyclic_with_breakpoints(path: &mut Path, first_bp: usize) {
+fn solve_cyclic_with_breakpoints(path: &mut KnotPath, first_bp: usize) {
     let n = path.knots.len();
 
     // Mirror one-sided direction constraints at breakpoints so segment
@@ -227,7 +227,7 @@ fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
     clippy::too_many_lines,
     reason = "tridiagonal solver with boundary conditions is a single logical unit"
 )]
-fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Scalar]) {
+fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &[Scalar]) {
     let seg_len = indices.len();
     if seg_len < 2 {
         return;
@@ -390,7 +390,7 @@ fn solve_segment(path: &mut Path, indices: &[usize], delta: &[Vec2], dist: &[Sca
 // Open path solver
 // ---------------------------------------------------------------------------
 
-fn solve_choices_open(path: &mut Path) {
+fn solve_choices_open(path: &mut KnotPath) {
     let n = path.knots.len();
     if n < 2 {
         return;
@@ -427,7 +427,7 @@ fn solve_choices_open(path: &mut Path) {
     }
 }
 
-fn mirror_one_sided_direction_constraints(path: &mut Path) {
+fn mirror_one_sided_direction_constraints(path: &mut KnotPath) {
     for knot in &mut path.knots {
         if matches!(knot.left, KnotDirection::Open) {
             match knot.right {
@@ -447,7 +447,7 @@ fn mirror_one_sided_direction_constraints(path: &mut Path) {
     }
 }
 
-fn infer_right_from_left(path: &mut Path, idx: usize) {
+fn infer_right_from_left(path: &mut KnotPath, idx: usize) {
     if !matches!(path.knots[idx].right, KnotDirection::Open) {
         return;
     }
@@ -462,7 +462,7 @@ fn infer_right_from_left(path: &mut Path, idx: usize) {
     }
 }
 
-fn infer_left_from_right(path: &mut Path, idx: usize) {
+fn infer_left_from_right(path: &mut KnotPath, idx: usize) {
     if !matches!(path.knots[idx].left, KnotDirection::Open) {
         return;
     }
@@ -482,7 +482,7 @@ fn infer_left_from_right(path: &mut Path, idx: usize) {
 /// Handles the four combinations of boundary conditions at a two-knot segment.
 /// Follows mp.web's "Reduce to simple case" sections.
 fn solve_two_knots_range(
-    path: &mut Path,
+    path: &mut KnotPath,
     i: usize,
     j: usize,
     full_delta: &[Vec2],
@@ -554,7 +554,7 @@ fn solve_two_knots_range(
     clippy::too_many_lines,
     reason = "cyclic tridiagonal solver mirrors mp.web structure"
 )]
-fn solve_choices_cyclic(path: &mut Path) {
+fn solve_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
     if n < 2 {
         return;
@@ -716,7 +716,7 @@ fn solve_choices_cyclic(path: &mut Path) {
 /// given the solved angles theta/phi in radians
 /// (theta outgoing at i, phi incoming at j).
 fn set_controls_for_segment(
-    path: &mut Path,
+    path: &mut KnotPath,
     i: usize,
     j: usize,
     delta: &[Vec2],
@@ -923,18 +923,18 @@ mod tests {
     use crate::types::{EPSILON, Knot};
 
     /// Helper: create a simple path through given points with Open constraints.
-    fn make_open_path(points: &[Point]) -> Path {
+    fn make_open_path(points: &[Point]) -> KnotPath {
         let knots = points.iter().map(|&p| Knot::new(p)).collect();
-        Path::from_knots(knots, false)
+        KnotPath::from_knots(knots, false)
     }
 
-    fn make_cyclic_path(points: &[Point]) -> Path {
+    fn make_cyclic_path(points: &[Point]) -> KnotPath {
         let knots = points.iter().map(|&p| Knot::new(p)).collect();
-        Path::from_knots(knots, true)
+        KnotPath::from_knots(knots, true)
     }
 
     /// After `make_choices`, all directions should be Explicit.
-    fn assert_all_explicit(path: &Path) {
+    fn assert_all_explicit(path: &KnotPath) {
         for (i, k) in path.knots.iter().enumerate() {
             assert!(
                 matches!(k.left, KnotDirection::Explicit(_)),
@@ -951,7 +951,7 @@ mod tests {
 
     #[test]
     fn test_single_knot() {
-        let mut path = Path::from_knots(vec![Knot::new(Point::new(5.0, 5.0))], false);
+        let mut path = KnotPath::from_knots(vec![Knot::new(Point::new(5.0, 5.0))], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
         match (path.knots[0].left, path.knots[0].right) {
@@ -990,7 +990,7 @@ mod tests {
         k0.right = KnotDirection::Explicit(cp1);
         k1.left = KnotDirection::Explicit(cp2);
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
 
         match path.knots[0].right {
@@ -1019,7 +1019,8 @@ mod tests {
         assert_all_explicit(&path);
 
         // The curve should pass through the middle knot
-        let mid = path.point_at(1.0);
+        let bp = path.clone().into_bezier_path();
+        let mid = bp.point_at(1.0);
         assert!((mid.x - 5.0).abs() < EPSILON);
         assert!((mid.y - 5.0).abs() < EPSILON);
     }
@@ -1036,9 +1037,10 @@ mod tests {
         assert_all_explicit(&path);
 
         // The curve should pass through all knots
+        let bp = path.clone().into_bezier_path();
         for i in 0..4 {
             #[expect(clippy::cast_precision_loss, reason = "test index fits in f64")]
-            let p = path.point_at(i as Scalar);
+            let p = bp.point_at(i as Scalar);
             assert!(
                 (p.x - path.knots[i].point.x).abs() < EPSILON
                     && (p.y - path.knots[i].point.y).abs() < EPSILON,
@@ -1089,7 +1091,7 @@ mod tests {
             left_tension: 0.0,
             right_tension: 0.0,
         };
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1119,7 +1121,7 @@ mod tests {
             left_tension: 4.0,
             right_tension: 0.0,
         };
-        let mut path2 = Path::from_knots(vec![k0, k1], false);
+        let mut path2 = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path2);
 
         // Higher tension: control points closer to the on-curve points
@@ -1170,7 +1172,7 @@ mod tests {
         let mut k2 = Knot::new(c);
         k2.left = KnotDirection::Curl(1.0);
 
-        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1215,7 +1217,7 @@ mod tests {
         k2.left = KnotDirection::Curl(1.0);
         k2.right = KnotDirection::Curl(1.0);
 
-        let mut path = Path::from_knots(vec![k0, k1, k2], true);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], true);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1257,14 +1259,14 @@ mod tests {
     // -----------------------------------------------------------------------
 
     /// Helper: extract explicit control point.
-    fn right_cp(path: &Path, k: usize) -> Point {
+    fn right_cp(path: &KnotPath, k: usize) -> Point {
         match path.knots[k].right {
             KnotDirection::Explicit(p) => p,
             ref other => panic!("knot {k} right is not Explicit: {other:?}"),
         }
     }
 
-    fn left_cp(path: &Path, k: usize) -> Point {
+    fn left_cp(path: &KnotPath, k: usize) -> Point {
         match path.knots[k].left {
             KnotDirection::Explicit(p) => p,
             ref other => panic!("knot {k} left is not Explicit: {other:?}"),
@@ -1279,7 +1281,7 @@ mod tests {
         k0.right_tension = 2.0;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
         k1.left_tension = 2.0;
-        let mut t2 = Path::from_knots(vec![k0, k1], false);
+        let mut t2 = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut t2);
 
         let mut t1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
@@ -1300,7 +1302,7 @@ mod tests {
         k0.right_tension = 0.75;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
         k1.left_tension = 0.75;
-        let mut t075 = Path::from_knots(vec![k0, k1], false);
+        let mut t075 = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut t075);
 
         let mut t1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
@@ -1321,7 +1323,7 @@ mod tests {
         k0.right_tension = 1.0;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
         k1.left_tension = 3.0;
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1344,12 +1346,13 @@ mod tests {
         k1.right_tension = 2.0;
         let mut k2 = Knot::new(Point::new(10.0, 0.0));
         k2.left_tension = 2.0;
-        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
         // The curve should still pass through the middle knot exactly.
-        let mid = path.point_at(1.0);
+        let bp = path.clone().into_bezier_path();
+        let mid = bp.point_at(1.0);
         assert!(
             (mid.x - 5.0).abs() < EPSILON && (mid.y - 5.0).abs() < EPSILON,
             "middle knot not hit: {mid:?}"
@@ -1358,7 +1361,7 @@ mod tests {
         // With higher tension, the curve should be tighter (closer to straight lines
         // between knots). Check that the midpoint of segment 0 is closer to the
         // chord midpoint than with default tension.
-        let seg0_mid = path.point_at(0.5);
+        let seg0_mid = bp.point_at(0.5);
         let chord_mid = Point::new(2.5, 2.5);
         let dev = (seg0_mid - chord_mid).length();
         assert!(
@@ -1379,7 +1382,7 @@ mod tests {
         let mut k2 = Knot::new(Point::new(5.0, 8.66));
         k2.left_tension = 2.0;
         k2.right_tension = 2.0;
-        let mut path = Path::from_knots(vec![k0, k1, k2], true);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], true);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1437,7 +1440,7 @@ mod tests {
         k1_c2.right = KnotDirection::Curl(1.0);
         let mut k2_c2 = Knot::new(Point::new(10.0, 0.0));
         k2_c2.left = KnotDirection::Curl(1.0);
-        let mut path_c2 = Path::from_knots(vec![k0_c2, k1_c2, k2_c2], false);
+        let mut path_c2 = KnotPath::from_knots(vec![k0_c2, k1_c2, k2_c2], false);
         make_choices(&mut path_c2);
         assert_all_explicit(&path_c2);
 
@@ -1467,7 +1470,7 @@ mod tests {
         k0.right_tension = -1.0; // atleast 1
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
         k1.left_tension = -1.0; // atleast 1
-        let mut path_al = Path::from_knots(vec![k0, k1], false);
+        let mut path_al = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path_al);
         assert_all_explicit(&path_al);
 
@@ -1560,7 +1563,7 @@ mod tests {
         k1.right_tension = 3.0;
         let mut k2 = Knot::new(Point::new(10.0, 0.0));
         k2.left_tension = 3.0;
-        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1620,7 +1623,7 @@ mod tests {
         let k2 = Knot::new(Point::new(cm, 0.0));
         let k3 = Knot::new(Point::new(cm, cm));
 
-        let mut path = Path::from_knots(vec![k0, k1, k2, k3], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2, k3], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1671,7 +1674,7 @@ mod tests {
     /// Verified against: (0,0)..(100,0)..(100,100)..(0,100)..cycle
     #[test]
     fn test_mpost_cyclic_square() {
-        let mut path = Path::from_knots(
+        let mut path = KnotPath::from_knots(
             vec![
                 Knot::new(Point::new(0.0, 0.0)),
                 Knot::new(Point::new(100.0, 0.0)),
@@ -1701,7 +1704,7 @@ mod tests {
     /// Verified against: (0,0)..(50,30)..(100,0)..(80,70)..(20,80)..cycle
     #[test]
     fn test_mpost_cyclic_asymmetric() {
-        let mut path = Path::from_knots(
+        let mut path = KnotPath::from_knots(
             vec![
                 Knot::new(Point::new(0.0, 0.0)),
                 Knot::new(Point::new(50.0, 30.0)),
@@ -1740,7 +1743,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(100.0, 0.0));
         k1.left = KnotDirection::Curl(1.0);
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1758,7 +1761,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(100.0, 0.0));
         k1.left = KnotDirection::Given(135.0_f64.to_radians());
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1776,7 +1779,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(100.0, 50.0));
         k1.left = KnotDirection::Curl(2.0);
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1794,7 +1797,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(100.0, 0.0));
         k1.left = KnotDirection::Given(150.0_f64.to_radians());
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1812,7 +1815,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(100.0, 0.0));
         k1.left_tension = 0.75;
 
-        let mut path = Path::from_knots(vec![k0, k1], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1831,7 +1834,7 @@ mod tests {
         let mut k2 = Knot::new(Point::new(200.0, 0.0));
         k2.left = KnotDirection::Given((-30.0_f64).to_radians());
 
-        let mut path = Path::from_knots(vec![k0, k1, k2], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1862,7 +1865,7 @@ mod tests {
         let k2 = Knot::new(Point::new(cm, 0.0));
         let k3 = Knot::new(Point::new(cm, cm));
 
-        let mut path = Path::from_knots(vec![k0, k1, k2, k3], false);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2, k3], false);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1883,7 +1886,7 @@ mod tests {
     #[test]
     fn test_mpost_example_42_two_knot_cycle() {
         let cm = 28.34645;
-        let mut path = Path::from_knots(
+        let mut path = KnotPath::from_knots(
             vec![
                 Knot::new(Point::new(0.0, 0.0)),
                 Knot::new(Point::new(cm, cm)),
@@ -1914,7 +1917,7 @@ mod tests {
         let mut k1 = Knot::new(Point::new(2.0 * cm, 0.0));
         k1.right = KnotDirection::Given(90.0_f64.to_radians());
 
-        let mut path = Path::from_knots(vec![k0, k1], true);
+        let mut path = KnotPath::from_knots(vec![k0, k1], true);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1945,7 +1948,7 @@ mod tests {
         k2.left = KnotDirection::Explicit(Point::new(2.46371, -1.02052));
         k2.right = KnotDirection::Curl(1.0);
 
-        let mut path = Path::from_knots(vec![k0, k1, k2], true);
+        let mut path = KnotPath::from_knots(vec![k0, k1, k2], true);
         make_choices(&mut path);
         assert_all_explicit(&path);
 
@@ -1964,7 +1967,7 @@ mod tests {
         let c = Point::new(0.5, 1.0);
 
         // Last knot repeats the first knot geometrically.
-        let mut path = Path::from_knots(
+        let mut path = KnotPath::from_knots(
             vec![Knot::new(a), Knot::new(b), Knot::new(c), Knot::new(a)],
             true,
         );
@@ -1986,7 +1989,7 @@ mod tests {
         let a = Point::new(0.0, 0.0);
         let b = Point::new(1.0, 0.0);
 
-        let mut path = Path::from_knots(vec![Knot::new(a), Knot::new(a), Knot::new(b)], false);
+        let mut path = KnotPath::from_knots(vec![Knot::new(a), Knot::new(a), Knot::new(b)], false);
         make_choices(&mut path);
 
         assert_eq!(path.knots[0].right, KnotDirection::Explicit(a));

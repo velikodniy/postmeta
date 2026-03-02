@@ -113,16 +113,16 @@ mod tests {
     use super::super::geometry::Point;
     use super::super::knot::Knot;
     use super::*;
-    use crate::path::Path;
+    use crate::path::KnotPath;
 
     #[test]
-    fn path_num_segments() {
+    fn knot_path_num_segments() {
         // Empty path
-        let p = Path::new();
+        let p = KnotPath::new();
         assert_eq!(p.num_segments(), 0);
 
         // Open path with 3 knots = 2 segments
-        let p = Path::from_knots(
+        let p = KnotPath::from_knots(
             vec![
                 Knot::new(Point::ZERO),
                 Knot::new(Point::new(1.0, 0.0)),
@@ -133,7 +133,7 @@ mod tests {
         assert_eq!(p.num_segments(), 2);
 
         // Cyclic path with 3 knots = 3 segments
-        let p = Path::from_knots(
+        let p = KnotPath::from_knots(
             vec![
                 Knot::new(Point::ZERO),
                 Knot::new(Point::new(1.0, 0.0)),

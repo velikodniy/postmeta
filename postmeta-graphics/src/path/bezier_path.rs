@@ -626,13 +626,13 @@ impl BezierPath {
     /// The returned times are in the range [0, `num_segments()`].
     #[must_use]
     pub fn intersection_times(&self, other: &Self) -> Option<crate::intersection::Intersection> {
-        crate::intersection::bezier_intersection_times(self, other)
+        crate::intersection::intersection_times(self, other)
     }
 
     /// Find all intersections between this path and `other`.
     #[must_use]
     pub fn all_intersection_times(&self, other: &Self) -> Vec<crate::intersection::Intersection> {
-        crate::intersection::all_bezier_intersection_times(self, other)
+        crate::intersection::all_intersection_times(self, other)
     }
 
     // -----------------------------------------------------------------------
@@ -1056,21 +1056,6 @@ mod tests {
         assert_eq!(bp.point_at(0.0), Point::ZERO);
     }
 
-    #[test]
-    fn point_at_matches_knot_path() {
-        // Verify BezierPath.point_at matches the KnotPath free function
-        let bp = make_line_bezier();
-        let kp = bp.to_knot_path();
-        for &t in &[0.0, 0.25, 0.5, 0.75, 1.0] {
-            let bp_pt = bp.point_at(t);
-            let kp_pt = kp.point_at(t);
-            assert!(
-                (bp_pt.x - kp_pt.x).abs() < EPSILON && (bp_pt.y - kp_pt.y).abs() < EPSILON,
-                "t={t}: bezier={bp_pt:?}, knot={kp_pt:?}"
-            );
-        }
-    }
-
     // -- direction_at -------------------------------------------------------
 
     #[test]
@@ -1139,18 +1124,6 @@ mod tests {
         assert_eq!(bp.arc_length(), 0.0);
     }
 
-    #[test]
-    fn arc_length_matches_knot_path() {
-        let bp = make_triangle_bezier();
-        let kp = bp.to_knot_path();
-        let bp_len = bp.arc_length();
-        let kp_len = super::super::arc_length(&kp);
-        assert!(
-            (bp_len - kp_len).abs() < 0.01,
-            "bezier={bp_len}, knot={kp_len}"
-        );
-    }
-
     // -- arc_time -----------------------------------------------------------
 
     #[test]
@@ -1176,16 +1149,6 @@ mod tests {
         let t = bp.arc_time(5.0);
         // For a straight line of length 10, arc_time(5) should be ~0.5
         assert!((t - 0.5).abs() < 0.01, "expected ~0.5, got {t}");
-    }
-
-    #[test]
-    fn arc_time_matches_knot_path() {
-        let bp = make_triangle_bezier();
-        let kp = bp.to_knot_path();
-        let half_len = bp.arc_length() / 2.0;
-        let bp_t = bp.arc_time(half_len);
-        let kp_t = super::super::arc_time(&kp, half_len);
-        assert!((bp_t - kp_t).abs() < 0.01, "bezier={bp_t}, knot={kp_t}");
     }
 
     // -- turning_number -----------------------------------------------------
@@ -1476,33 +1439,5 @@ mod tests {
                 "segment {i}: rev2={rev2c:?}, orig={orig:?}"
             );
         }
-    }
-
-    // -- Cross-validation with KnotPath -------------------------------------
-
-    #[test]
-    fn direction_time_matches_knot_path() {
-        let bp = make_triangle_bezier();
-        let kp = bp.to_knot_path();
-
-        let dir = Vec2::new(1.0, 0.0);
-        let bp_t = bp.direction_time(dir);
-        let kp_t = kp.direction_time(dir);
-        assert_eq!(bp_t.is_some(), kp_t.is_some());
-        if let (Some(bt), Some(kt)) = (bp_t, kp_t) {
-            assert!((bt - kt).abs() < 0.01, "bezier={bt}, knot={kt}");
-        }
-    }
-
-    #[test]
-    fn turning_number_matches_knot_path() {
-        let bp = make_triangle_bezier();
-        let kp = bp.to_knot_path();
-        let bp_tn = bp.turning_number();
-        let kp_tn = super::super::turning_number(&kp);
-        assert!(
-            (bp_tn - kp_tn).abs() < EPSILON,
-            "bezier={bp_tn}, knot={kp_tn}"
-        );
     }
 }

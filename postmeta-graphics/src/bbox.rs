@@ -3,8 +3,8 @@
 //! Provides [`BoundingBox`] and helpers for computing bounds of paths,
 //! pens, and pictures.
 
-use crate::path::{BezierPath, Path};
-use crate::types::{GraphicsObject, KnotDirection, Pen, Picture, Point, Scalar, TextObject, Vec2};
+use crate::path::BezierPath;
+use crate::types::{GraphicsObject, Pen, Picture, Point, Scalar, TextObject, Vec2};
 
 // ---------------------------------------------------------------------------
 // BoundingBox type
@@ -96,30 +96,12 @@ impl BoundingBox {
         }
     }
 
-    /// Compute the bounding box of a path (control-point hull).
-    ///
-    /// This is a conservative estimate using the convex hull of all control
-    /// points, not the tight bound. This matches `MetaPost`'s behavior.
-    #[must_use]
-    pub fn of_path(path: &Path) -> Self {
-        path.knots.iter().fold(Self::EMPTY, |mut bb, knot| {
-            bb.include_point(knot.point);
-            if let KnotDirection::Explicit(cp) = knot.left {
-                bb.include_point(cp);
-            }
-            if let KnotDirection::Explicit(cp) = knot.right {
-                bb.include_point(cp);
-            }
-            bb
-        })
-    }
-
     /// Compute the bounding box of a [`BezierPath`] (control-point hull).
     ///
     /// This is a conservative estimate using the convex hull of all control
     /// points, not the tight bound. This matches `MetaPost`'s behavior.
     #[must_use]
-    pub fn of_bezier_path(path: &BezierPath) -> Self {
+    pub fn of_path(path: &BezierPath) -> Self {
         let mut bb = Self::EMPTY;
         for seg in path.segments() {
             let (min, max) = seg.bbox();
@@ -141,11 +123,11 @@ impl BoundingBox {
         for obj in &pic.objects {
             match obj {
                 GraphicsObject::Fill(fill) => {
-                    let pbb = Self::of_bezier_path(&fill.path);
+                    let pbb = Self::of_path(&fill.path);
                     bb.union(&pbb);
                 }
                 GraphicsObject::Stroke(stroke) => {
-                    let mut pbb = Self::of_bezier_path(&stroke.path);
+                    let mut pbb = Self::of_path(&stroke.path);
                     // Expand by pen extent (rough estimate)
                     let pen_extent = pen_max_extent(&stroke.pen);
                     pbb.min_x -= pen_extent;
@@ -159,7 +141,7 @@ impl BoundingBox {
                 }
                 GraphicsObject::SetBoundsStart(path) if !true_corners => {
                     bounds_stack.push(bb);
-                    bb = Self::of_bezier_path(path);
+                    bb = Self::of_path(path);
                 }
                 GraphicsObject::SetBoundsEnd if !true_corners => {
                     if let Some(prev) = bounds_stack.pop() {
@@ -235,37 +217,11 @@ fn expand_for_text(text: &TextObject, bb: &mut BoundingBox) {
 mod tests {
     use super::*;
     use crate::path::SegmentControls;
-    use crate::types::{Color, EPSILON, Knot, TextMetrics, Transform};
+    use crate::types::{Color, EPSILON, TextMetrics, Transform};
     use std::sync::Arc;
 
-    fn make_unit_square() -> Path {
-        // A cyclic square path with explicit controls (straight lines)
-        let pts = [
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 0.0),
-            Point::new(10.0, 10.0),
-            Point::new(0.0, 10.0),
-        ];
-        let knots = (0..4)
-            .map(|i| {
-                let j = (i + 1) % 4;
-                let prev = (i + 3) % 4;
-                let right_cp = Point::new(
-                    pts[i].x + (pts[j].x - pts[i].x) / 3.0,
-                    pts[i].y + (pts[j].y - pts[i].y) / 3.0,
-                );
-                let left_cp = Point::new(
-                    pts[prev].x + 2.0 * (pts[i].x - pts[prev].x) / 3.0,
-                    pts[prev].y + 2.0 * (pts[i].y - pts[prev].y) / 3.0,
-                );
-                Knot::with_controls(pts[i], left_cp, right_cp)
-            })
-            .collect();
-        Path::from_knots(knots, true)
-    }
-
     /// Build a 10x10 square as a cyclic `BezierPath` with straight-line controls.
-    fn make_unit_square_bezier() -> BezierPath {
+    fn make_unit_square() -> BezierPath {
         let pts = [
             Point::new(0.0, 0.0),
             Point::new(10.0, 0.0),
@@ -319,7 +275,7 @@ mod tests {
     fn test_picture_bbox() {
         use crate::types::{Color, FillObject, LineJoin};
         let mut pic = Picture::new();
-        let path = make_unit_square_bezier();
+        let path = make_unit_square();
         pic.add_fill(FillObject {
             path,
             color: Color::BLACK,
@@ -431,15 +387,10 @@ mod tests {
         assert!((extent - 4.0).abs() < EPSILON, "extent: {extent}");
     }
 
-    // -----------------------------------------------------------------------
-    // BezierPath bounding box
-    // -----------------------------------------------------------------------
-
     #[test]
     fn bezier_path_bbox() {
         use crate::path::bezier_path::SegmentControls;
 
-        // Build a 10x10 square as a cyclic BezierPath with straight-line controls.
         let pts = [
             Point::new(0.0, 0.0),
             Point::new(10.0, 0.0),
@@ -457,7 +408,7 @@ mod tests {
             .collect();
         let bp = BezierPath::from_parts(pts.to_vec(), controls, true);
 
-        let bb = BoundingBox::of_bezier_path(&bp);
+        let bb = BoundingBox::of_path(&bp);
         assert!(bb.is_valid());
         assert!(bb.min_x < 0.1, "min_x: {}", bb.min_x);
         assert!(bb.min_y < 0.1, "min_y: {}", bb.min_y);
@@ -468,7 +419,7 @@ mod tests {
     #[test]
     fn bezier_path_bbox_empty() {
         let bp = BezierPath::new();
-        let bb = BoundingBox::of_bezier_path(&bp);
+        let bb = BoundingBox::of_path(&bp);
         assert!(!bb.is_valid());
     }
 
@@ -486,7 +437,7 @@ mod tests {
             false,
         );
 
-        let bb = BoundingBox::of_bezier_path(&bp);
+        let bb = BoundingBox::of_path(&bp);
         assert!(bb.is_valid());
         // The bbox should encompass all 4 control points.
         assert!(bb.min_x <= 2.0 + EPSILON, "min_x: {}", bb.min_x);

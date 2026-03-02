@@ -4,8 +4,7 @@
 //! across the crate: de Casteljau evaluation, splitting, derivative
 //! computation, and bounding boxes.
 
-use crate::path::Path;
-use crate::types::{KnotDirection, Point, Scalar, Vec2};
+use crate::types::{Point, Scalar, Vec2};
 
 /// Four control points of a cubic Bezier segment.
 #[derive(Debug, Clone, Copy)]
@@ -21,44 +20,6 @@ impl CubicSegment {
     #[must_use]
     pub const fn new(p0: Point, p1: Point, p2: Point, p3: Point) -> Self {
         Self { p0, p1, p2, p3 }
-    }
-
-    /// Extract segment `i` from a resolved path.
-    ///
-    /// For a cyclic path with N knots, valid segment indices are `0..N`.
-    /// For an open path with N knots, valid segment indices are `0..N-1`.
-    ///
-    /// Non-explicit knot directions fall back to the on-curve point.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `i >= path.num_segments()` or the path is empty.
-    #[must_use]
-    pub fn from_path(path: &Path, i: usize) -> Self {
-        debug_assert!(
-            !path.knots.is_empty() && i < path.num_segments(),
-            "segment index {i} out of range for path with {} segments",
-            path.num_segments()
-        );
-        let j = (i + 1) % path.knots.len();
-        let k0 = &path.knots[i];
-        let k1 = &path.knots[j];
-
-        let p1 = match k0.right {
-            KnotDirection::Explicit(p) => p,
-            _ => k0.point,
-        };
-        let p2 = match k1.left {
-            KnotDirection::Explicit(p) => p,
-            _ => k1.point,
-        };
-
-        Self {
-            p0: k0.point,
-            p1,
-            p2,
-            p3: k1.point,
-        }
     }
 
     /// Evaluate the point at parameter `t` in [0, 1].
