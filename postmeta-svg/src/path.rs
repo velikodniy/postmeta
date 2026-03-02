@@ -1,45 +1,31 @@
-use postmeta_graphics::path::Path;
-use postmeta_graphics::types::{KnotDirection, Scalar};
+use postmeta_graphics::path::BezierPath;
+use postmeta_graphics::types::Scalar;
 
-/// Convert a resolved [`Path`] to an SVG path data string.
+/// Convert a resolved [`BezierPath`] to an SVG path data string.
 ///
 /// Uses cubic Bezier commands (M, C, Z). All coordinates are f64 with
 /// the specified precision. Y coordinates are negated to convert from
 /// `MetaPost` (Y-up) to SVG (Y-down).
-pub fn path_to_d(path: &Path, precision: usize) -> String {
-    if path.knots.is_empty() {
+pub fn path_to_d(path: &BezierPath, precision: usize) -> String {
+    if path.num_knots() == 0 {
         return String::new();
     }
 
-    let mut d = String::with_capacity(path.knots.len() * 40);
-    let p0 = path.knots[0].point;
+    let mut d = String::with_capacity(path.num_knots() * 40);
+    let p0 = path.knot_point(0);
     d.push('M');
     write_point(&mut d, p0.x, -p0.y, precision);
 
-    let n = path.num_segments();
-    for i in 0..n {
-        let j = (i + 1) % path.knots.len();
-        let k0 = &path.knots[i];
-        let k1 = &path.knots[j];
-
-        let cp1 = match k0.right {
-            KnotDirection::Explicit(p) => p,
-            _ => k0.point,
-        };
-        let cp2 = match k1.left {
-            KnotDirection::Explicit(p) => p,
-            _ => k1.point,
-        };
-
+    for seg in path.segments() {
         d.push('C');
-        write_point(&mut d, cp1.x, -cp1.y, precision);
+        write_point(&mut d, seg.p1.x, -seg.p1.y, precision);
         d.push(' ');
-        write_point(&mut d, cp2.x, -cp2.y, precision);
+        write_point(&mut d, seg.p2.x, -seg.p2.y, precision);
         d.push(' ');
-        write_point(&mut d, k1.point.x, -k1.point.y, precision);
+        write_point(&mut d, seg.p3.x, -seg.p3.y, precision);
     }
 
-    if path.is_cyclic {
+    if path.is_cyclic() {
         d.push('Z');
     }
 

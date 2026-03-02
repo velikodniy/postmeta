@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use postmeta_graphics::path::Path;
+use postmeta_graphics::path::{BezierPath, KnotPath};
 use postmeta_graphics::types::{
     Color, DashPattern, FillObject, GraphicsObject, Knot, KnotDirection, LineCap, LineJoin, Pen,
     Picture, Point, StrokeObject, TextMetrics, TextObject, Transform,
@@ -13,18 +13,18 @@ use crate::util::{color_to_svg, dash_to_svg, fmt_scalar, pen_stroke_width};
 use crate::{RenderOptions, render_to_string};
 
 /// Make a resolved line from (0,0) to (10,0).
-fn make_line() -> Path {
+fn make_line() -> BezierPath {
     let mut k0 = Knot::new(Point::ZERO);
     k0.right = KnotDirection::Explicit(Point::new(10.0 / 3.0, 0.0));
     k0.left = KnotDirection::Explicit(Point::ZERO);
     let mut k1 = Knot::new(Point::new(10.0, 0.0));
     k1.left = KnotDirection::Explicit(Point::new(20.0 / 3.0, 0.0));
     k1.right = KnotDirection::Explicit(Point::new(10.0, 0.0));
-    Path::from_knots(vec![k0, k1], false)
+    KnotPath::from_knots(vec![k0, k1], false).resolve()
 }
 
 /// Make a resolved square 0,0 -> 10,0 -> 10,10 -> 0,10 -> cycle.
-fn make_square() -> Path {
+fn make_square() -> BezierPath {
     let pts = [
         Point::new(0.0, 0.0),
         Point::new(10.0, 0.0),
@@ -46,12 +46,12 @@ fn make_square() -> Path {
             Knot::with_controls(pts[i], left_cp, right_cp)
         })
         .collect();
-    Path::from_knots(knots, true)
+    KnotPath::from_knots(knots, true).resolve()
 }
 
 #[test]
 fn test_path_to_d_empty() {
-    let path = Path::new();
+    let path = BezierPath::new();
     assert_eq!(path_to_d(&path, 4), "");
 }
 
@@ -70,7 +70,7 @@ fn test_path_to_d_y_negation() {
     let mut k0 = Knot::new(Point::new(5.0, 10.0));
     k0.right = KnotDirection::Explicit(Point::new(5.0, 10.0));
     k0.left = KnotDirection::Explicit(Point::new(5.0, 10.0));
-    let path = Path::from_knots(vec![k0], false);
+    let path = KnotPath::from_knots(vec![k0], false).resolve();
     let d = path_to_d(&path, 1);
     assert!(d.contains("5.0,-10.0"), "Y should be negated: {d}");
 }
@@ -280,8 +280,8 @@ fn test_render_text() {
 #[test]
 fn test_find_matching_end_nested() {
     let objects = vec![
-        GraphicsObject::ClipStart(Path::new()),
-        GraphicsObject::ClipStart(Path::new()),
+        GraphicsObject::ClipStart(BezierPath::new()),
+        GraphicsObject::ClipStart(BezierPath::new()),
         GraphicsObject::ClipEnd,
         GraphicsObject::ClipEnd,
     ];
