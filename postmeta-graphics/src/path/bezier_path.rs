@@ -202,10 +202,12 @@ impl BezierPath {
         self.segment(seg).direction_at(frac)
     }
 
-    /// Find the first time at which the path travels in the given direction.
+    /// Find the first time at which the tangent matches a given direction.
     ///
-    /// Returns `None` if the direction is never matched. If `dir` is `(0,0)`,
-    /// returns `Some(0.0)` (undefined direction matches immediately).
+    /// The tangent derivative of each cubic segment is a degree-2 Bernstein
+    /// polynomial. Rotating so that `dir` maps to the positive x-axis
+    /// reduces the problem to finding roots of the y-component, which is
+    /// solved via the quadratic formula. Returns `None` if no match exists.
     #[must_use]
     pub fn direction_time(&self, dir: Vec2) -> Option<Scalar> {
         // Zero direction matches immediately.
@@ -295,10 +297,12 @@ impl BezierPath {
         index_to_scalar(n)
     }
 
-    /// Compute the turning number of a cyclic path.
+    /// Compute the turning number (winding count) of a cyclic path.
     ///
-    /// Returns +1 for counterclockwise simple closed curves, -1 for clockwise,
-    /// and 0 for non-cyclic paths or degenerate cases.
+    /// Accumulates the total signed angular change of the tangent vector
+    /// around the curve and divides by 2*pi. Returns +1 for
+    /// counterclockwise simple closed curves, -1 for clockwise, and 0
+    /// for non-cyclic or degenerate paths.
     #[must_use]
     pub fn turning_number(&self) -> Scalar {
         if !self.is_cyclic || self.points.len() < 2 {
@@ -405,11 +409,12 @@ impl BezierPath {
 
     /// Extract a subpath from time `t1` to time `t2`.
     ///
-    /// For cyclic paths, the subpath wraps around naturally: `subpath(3.5, 1.5)`
-    /// on a 4-segment cycle yields the path going 3.5 -> 0/4 -> 1.5 (the long
-    /// way around). This matches `MetaPost`'s `chop_path` semantics.
-    ///
-    /// Returns a new (always open) `BezierPath`.
+    /// The first and last segments are split at their fractional times
+    /// using de Casteljau subdivision; intermediate segments are copied
+    /// wholesale. For cyclic paths, times may wrap around (e.g.,
+    /// `subpath(3.5, 1.5)` on a 4-segment cycle follows the long way
+    /// around). If `t1 > t2`, the result is computed forward and then
+    /// reversed.
     #[must_use]
     pub fn subpath(&self, t1: Scalar, t2: Scalar) -> Self {
         if self.points.is_empty() {
@@ -534,10 +539,12 @@ impl BezierPath {
         )
     }
 
-    /// Reverse the path.
+    /// Reverse the traversal direction of the path.
     ///
-    /// For cyclic paths, MetaPost-style reversal keeps the same start knot:
-    /// Original order `0,1,2,...,n-1` becomes `0,n-1,n-2,...,1`.
+    /// Each segment's post/pre control handles are swapped. For cyclic
+    /// paths, MetaPost convention keeps knot 0 as the start: the order
+    /// `0,1,...,n-1` becomes `0,n-1,...,1`, preserving the cyclic start
+    /// knot identity.
     #[must_use]
     pub fn reverse(&self) -> Self {
         if self.points.is_empty() {

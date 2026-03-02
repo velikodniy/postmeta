@@ -86,7 +86,9 @@ pub fn all_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Int
 // Bounding box overlap
 // ---------------------------------------------------------------------------
 
-/// Check if two bounding boxes overlap.
+/// Axis-aligned bounding box overlap test.
+///
+/// Returns `true` when the two AABBs share any area (inclusive of edges).
 fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
     a.0.x <= b.1.x && a.1.x >= b.0.x && a.0.y <= b.1.y && a.1.y >= b.0.y
 }
@@ -138,7 +140,12 @@ impl Interval {
     }
 }
 
-/// Find one intersection between two cubic segments via bisection.
+/// Find one intersection between two cubic segments by recursive bisection.
+///
+/// Both curves are split at their midpoints and the four sub-pairs are
+/// tested. Sub-pairs whose bounding boxes don't overlap are pruned.
+/// When a sub-curve's extent falls below the tolerance, the midpoint
+/// of the parameter interval is reported as the intersection.
 fn intersect_cubics(
     seg1: &CubicSegment,
     seg2: &CubicSegment,

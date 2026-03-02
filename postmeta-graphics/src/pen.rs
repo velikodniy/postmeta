@@ -47,10 +47,13 @@ impl Pen {
         Self::Elliptical(Transform::ZERO)
     }
 
-    /// Find the pen offset (support point) in the given direction.
+    /// Find the support point of the pen in a given direction.
     ///
-    /// Returns the point on the pen boundary that is furthest in the
-    /// direction `dir`. This is used for computing stroked path envelopes.
+    /// For an elliptical pen defined by transform T, the support point is
+    /// `T * normalize(T^{-T} * dir)` -- the point on the ellipse whose
+    /// outward normal aligns with `dir`. For a polygonal pen, it is the
+    /// vertex with the maximum dot product. Used for computing stroked
+    /// path envelopes.
     #[must_use]
     pub fn offset(&self, dir: Vec2) -> Point {
         match self {
@@ -209,8 +212,11 @@ fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
 // Convex hull
 // ---------------------------------------------------------------------------
 
-/// Compute the convex hull of a set of points.
-/// Returns vertices in counter-clockwise order.
+/// Compute the convex hull of a set of points using Andrew's monotone chain.
+///
+/// Points are sorted by x (then y), and the lower and upper hulls are
+/// built in a single left-to-right / right-to-left sweep, yielding the
+/// vertices in counter-clockwise order in O(n log n) time.
 #[must_use]
 pub fn convex_hull(points: &[Point]) -> Vec<Point> {
     if points.len() < 3 {

@@ -31,10 +31,13 @@ use crate::{
 /// Minimum tension value (`MetaPost` uses 3/4).
 const MIN_TENSION: Scalar = 0.75;
 
-/// Solve for control points on a `KnotPath`, modifying knots in place.
+/// Resolve all knot constraints to explicit Bezier control points.
 ///
-/// After this call, all `KnotDirection` values in the path will be
-/// `Explicit` (computed Bezier control points).
+/// Decomposes the path at breakpoints (knots with given directions or
+/// curls), solves a tridiagonal system for the turning angles in each
+/// sub-segment, and converts the solved angles to control-point
+/// positions via the velocity function. After this call, every
+/// `KnotDirection` in the path will be `Explicit`.
 pub fn make_choices(path: &mut KnotPath) {
     // Follow mp.web: when consecutive knots are coincident, force that
     // segment to be explicit with control points equal to the knot.
@@ -215,14 +218,13 @@ fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
     indices
 }
 
-/// Solve one segment of a path given an explicit list of knot indices.
+/// Solve for turning angles along one sub-segment of the path.
 ///
-/// The `indices` slice maps local positions (0..`seg_len`) to global knot
-/// indices in the path. This handles both contiguous ranges (open paths)
-/// and wrap-around ranges (cyclic path segments).
-///
-/// Applies Hobby's tridiagonal solver with boundary conditions from the
-/// endpoint knots' `right` (at first index) and `left` (at last index).
+/// Sets up and forward-eliminates a tridiagonal system whose unknowns
+/// are the turning angles theta at each interior knot. Boundary
+/// conditions (given direction, curl, or open) determine the first and
+/// last rows. After back-substitution, `set_controls_for_segment` is
+/// called to convert angles to Bezier control points.
 #[expect(
     clippy::too_many_lines,
     reason = "tridiagonal coefficient computation with boundary conditions is a single logical unit"
@@ -527,16 +529,13 @@ fn solve_two_knots_range(
 // Cyclic path solver
 // ---------------------------------------------------------------------------
 
-/// Solve a purely cyclic path (all Open directions, no breakpoints).
+/// Solve a purely cyclic path where every direction is Open.
 ///
-/// Uses the cyclic tridiagonal solver from mp.web:
-/// - Forward sweep with uu[k], vv[k], ww[k] (ww tracks theta[0] coefficient)
-/// - Backward iteration closure to solve for theta[0] = theta[n]
-/// - Standard back-substitution
-///
-/// The coefficient computation uses the same ratio-based approach as the
-/// open solver (aa=A/B, bb=D/C, etc.), since the cyclic and open cases
-/// share the same mock-curvature equation structure.
+/// Uses the same mock-curvature equations as the open case, but the
+/// tridiagonal system wraps around: theta[0] = theta[n]. An extra
+/// coefficient `ww[k]` tracks the dependency on theta[0] through the
+/// forward sweep; the cyclic closure condition then determines theta[0]
+/// and standard back-substitution recovers the remaining angles.
 fn solve_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
     if n < 2 {
@@ -658,9 +657,12 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
 // Control point computation
 // ---------------------------------------------------------------------------
 
-/// Set cubic Bezier control points for the segment from knot `i` to knot `j`,
-/// given the solved angles theta/phi in radians
-/// (theta outgoing at i, phi incoming at j).
+/// Convert solved turning angles to Bezier control points for one segment.
+///
+/// Given the departure angle theta at knot `i` and arrival angle phi at
+/// knot `j`, the chord vector is rotated by theta (resp. -phi) and
+/// scaled by the velocity function to obtain the outgoing (resp.
+/// incoming) control point positions.
 fn set_controls_for_segment(
     path: &mut KnotPath,
     i: usize,
@@ -727,17 +729,12 @@ fn set_controls_for_segment(
     path.knots[j].left = KnotDirection::Explicit(left_cp);
 }
 
-/// Clamp velocities for "at least" tension (bounding triangle constraint).
+/// Enforce the "at least" tension constraint (bounding triangle).
 ///
-/// When `sin(theta)` and `sin(phi)` have the same sign, the bounding
-/// triangle condition limits velocities so that the curve stays inside the
-/// triangle formed by the tangent lines.
-///
-/// Arguments:
-/// - `rr`, `ss`: computed velocities
-/// - `st`, `ct`, `sf`, `cf`: sin/cos of theta and phi
-/// - `right_t`: raw right tension (negative means "at least")
-/// - `left_t`: raw left tension (negative means "at least")
+/// When both turning angles bend the same way, the tangent lines at
+/// the two knots form a triangle. MetaPost's "at least" tension
+/// (signaled by a negative tension value) limits the control-point
+/// distances so the curve stays inside that triangle.
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors mp.web set_controls which requires all sin/cos and tension values"
@@ -789,18 +786,13 @@ fn clamp_at_least(
     (rr, ss)
 }
 
-/// Hobby's velocity function.
+/// Compute control-point distance as a fraction of the chord length.
 ///
-/// Given sin/cos of theta and phi, and the tension alpha, computes the
-/// fraction of the chord length to use for the control point distance.
-///
-/// From mp.web: `velocity(st, ct, sf, cf, t)`.
-///
-/// The formula is:
-///   f(θ, φ) = (2 + √2·(sin θ − sin φ / 16)·(sin φ − sin θ / 16)·(cos θ − cos φ))
-///             / (3·(1 + 0.5·(√5 − 1)·cos θ + 0.5·(3 − √5)·cos φ))
-///
-/// The result is divided by the tension value.
+/// Implements Hobby's velocity function (Hobby 1986, section 3).
+/// Given the departure angle theta and arrival angle phi of a spline
+/// segment, this determines how far the control point sits from its
+/// knot relative to the chord. The result is inversely proportional
+/// to tension.
 fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> Scalar {
     let sqrt2 = std::f64::consts::SQRT_2;
     let sqrt5 = 5.0_f64.sqrt();
@@ -817,15 +809,12 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
     result.min(4.0)
 }
 
-/// Compute the curl ratio for endpoint curl handling.
+/// Convert an endpoint curl value to an angle ratio.
 ///
-/// From mp.web's `curl_ratio(gamma, a_tension, b_tension)`.
-/// Arguments are the raw tension values (not reciprocals).
-///
-/// With `alpha = 1/a_tension` and `beta = 1/b_tension`, the formula is:
-///   ((3 - alpha) * alpha^2 * gamma + beta^3) / (alpha^3 * gamma + (3 - beta) * beta^2)
-///
-/// Result is capped at 4.0.
+/// At an open-path endpoint, the curl parameter gamma controls how
+/// much the curve bends. This function computes the ratio
+/// theta/phi (or phi/theta) that satisfies the curl boundary
+/// condition for the given pair of tensions (Hobby 1986, section 4).
 fn curl_ratio(gamma: Scalar, a_tension: Scalar, b_tension: Scalar) -> Scalar {
     let at = tension_val(a_tension);
     let bt = tension_val(b_tension);

@@ -144,7 +144,12 @@ const ARC_TOL: Scalar = 0.001;
 /// Maximum recursion depth for arc-length subdivision.
 const ARC_MAX_DEPTH: u32 = 20;
 
-/// Recursive arc-length computation via subdivision.
+/// Estimate arc length by comparing chord and control-polygon lengths.
+///
+/// If the straight-line distance (chord) and the sum of control-leg
+/// distances (polygon) agree within tolerance, their average is a good
+/// approximation. Otherwise the curve is split at t=0.5 and each half
+/// is measured recursively.
 fn arc_length_recursive(seg: &CubicSegment, depth: u32) -> Scalar {
     let chord = (seg.p3 - seg.p0).length();
     let poly = (seg.p1 - seg.p0).length() + (seg.p2 - seg.p1).length() + (seg.p3 - seg.p2).length();

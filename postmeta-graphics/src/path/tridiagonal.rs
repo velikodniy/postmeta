@@ -20,13 +20,12 @@ use crate::types::{NEAR_ZERO, Scalar};
 // Open (non-cyclic) solver
 // ---------------------------------------------------------------------------
 
-/// Reduced tridiagonal solver for open path segments.
+/// Reduced tridiagonal solver for open (non-cyclic) path segments.
 ///
-/// After Hobby's forward elimination, each row is in the form:
-///   `theta[k] + uu[k] * theta[k+1] = vv[k]`
-///
-/// This struct accumulates the reduced rows and performs back-substitution
-/// once the right boundary value `theta[last]` is known.
+/// Hobby's mock-curvature equations form a tridiagonal system. Forward
+/// elimination reduces each row to `theta[k] + uu[k] * theta[k+1] = vv[k]`.
+/// Once the boundary condition determines `theta[last]`, back-substitution
+/// recovers all unknowns in O(n) time.
 pub struct OpenSolver {
     /// Upper-diagonal ratios after forward elimination.
     uu: Vec<Scalar>,
@@ -83,15 +82,12 @@ impl OpenSolver {
 // Cyclic solver
 // ---------------------------------------------------------------------------
 
-/// Reduced tridiagonal solver for purely cyclic paths.
+/// Reduced tridiagonal solver for purely cyclic (all-Open) paths.
 ///
-/// Like [`OpenSolver`], but each row carries an additional coefficient
-/// `ww[k]` tracking the dependency on `theta[0]`:
-///
-///   `theta[k] + uu[k] * theta[k+1] = vv[k] + ww[k] * theta[0]`
-///
-/// After the forward sweep, a backward iteration solves for `theta[0]`
-/// using the cyclic closure condition `theta[0] = theta[n]`.
+/// Extends [`OpenSolver`] with an extra coefficient `ww[k]` that tracks
+/// each row's dependency on `theta[0]`. The cyclic closure condition
+/// `theta[0] = theta[n]` provides the additional equation needed to
+/// determine `theta[0]`, after which standard back-substitution applies.
 pub struct CyclicSolver {
     /// Upper-diagonal ratios after forward elimination.
     uu: Vec<Scalar>,
