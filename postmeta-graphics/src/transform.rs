@@ -15,7 +15,7 @@
 
 use std::ops;
 
-use crate::path::Path;
+use crate::path::{BezierPath, Path, SegmentControls};
 use crate::pen::{Pen, convex_hull};
 use crate::types::{
     FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Picture, Point, Scalar,
@@ -318,6 +318,26 @@ impl Transformable for Path {
     fn transformed(&self, t: &Transform) -> Self {
         let knots = self.knots.iter().map(|k| k.transformed(t)).collect();
         Self::from_knots(knots, self.is_cyclic)
+    }
+}
+
+impl Transformable for BezierPath {
+    fn transformed(&self, t: &Transform) -> Self {
+        let points = self
+            .knot_points()
+            .iter()
+            .map(|p| p.transformed(t))
+            .collect();
+        let controls = (0..self.num_segments())
+            .map(|i| {
+                let c = self.segment_controls(i);
+                SegmentControls {
+                    post: c.post.transformed(t),
+                    pre: c.pre.transformed(t),
+                }
+            })
+            .collect();
+        BezierPath::from_parts(points, controls, self.is_cyclic())
     }
 }
 
@@ -689,5 +709,145 @@ mod tests {
         let dir = KnotDirection::Given(1.0);
         let result = dir.transformed(&t);
         assert!(matches!(result, KnotDirection::Curl(c) if (c - 1.0).abs() < EPSILON));
+    }
+
+    // -----------------------------------------------------------------------
+    // BezierPath transform tests
+    // -----------------------------------------------------------------------
+
+    /// Helper: build a simple open BezierPath with two knot points and one segment.
+    fn sample_bezier_path() -> BezierPath {
+        let points = vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)];
+        let controls = vec![SegmentControls {
+            post: Point::new(3.0, 4.0),
+            pre: Point::new(7.0, 4.0),
+        }];
+        BezierPath::from_parts(points, controls, false)
+    }
+
+    /// Helper: build a cyclic BezierPath (triangle) with three knot points.
+    fn sample_cyclic_bezier_path() -> BezierPath {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(5.0, 10.0),
+        ];
+        let controls = vec![
+            SegmentControls {
+                post: Point::new(3.0, 0.0),
+                pre: Point::new(7.0, 0.0),
+            },
+            SegmentControls {
+                post: Point::new(10.0, 3.0),
+                pre: Point::new(8.0, 7.0),
+            },
+            SegmentControls {
+                post: Point::new(3.0, 8.0),
+                pre: Point::new(0.0, 3.0),
+            },
+        ];
+        BezierPath::from_parts(points, controls, true)
+    }
+
+    #[test]
+    fn test_bezier_path_shift() {
+        let path = sample_bezier_path();
+        let t = Transform::shifted(5.0, 10.0);
+        let tp = path.transformed(&t);
+
+        // Knot points shifted
+        assert!((tp.knot_point(0).x - 5.0).abs() < EPSILON);
+        assert!((tp.knot_point(0).y - 10.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).x - 15.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).y - 10.0).abs() < EPSILON);
+
+        // Control points shifted
+        let c = tp.segment_controls(0);
+        assert!((c.post.x - 8.0).abs() < EPSILON);
+        assert!((c.post.y - 14.0).abs() < EPSILON);
+        assert!((c.pre.x - 12.0).abs() < EPSILON);
+        assert!((c.pre.y - 14.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_bezier_path_rotation() {
+        let path = sample_bezier_path();
+        let t = Transform::rotated(90.0);
+        let tp = path.transformed(&t);
+
+        // (0,0) rotated 90 -> (0,0)
+        assert!(tp.knot_point(0).x.abs() < EPSILON);
+        assert!(tp.knot_point(0).y.abs() < EPSILON);
+        // (10,0) rotated 90 -> (0,10)
+        assert!(tp.knot_point(1).x.abs() < EPSILON);
+        assert!((tp.knot_point(1).y - 10.0).abs() < EPSILON);
+
+        // (3,4) rotated 90 -> (-4,3)
+        let c = tp.segment_controls(0);
+        assert!((c.post.x + 4.0).abs() < EPSILON);
+        assert!((c.post.y - 3.0).abs() < EPSILON);
+        // (7,4) rotated 90 -> (-4,7)
+        assert!((c.pre.x + 4.0).abs() < EPSILON);
+        assert!((c.pre.y - 7.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn test_bezier_path_preserves_segment_count_and_cyclic() {
+        let open_path = sample_bezier_path();
+        let cyclic_path = sample_cyclic_bezier_path();
+        let t = Transform::scaled(2.0);
+
+        let tp_open = open_path.transformed(&t);
+        assert_eq!(tp_open.num_segments(), open_path.num_segments());
+        assert_eq!(tp_open.num_knots(), open_path.num_knots());
+        assert!(!tp_open.is_cyclic());
+
+        let tp_cyclic = cyclic_path.transformed(&t);
+        assert_eq!(tp_cyclic.num_segments(), cyclic_path.num_segments());
+        assert_eq!(tp_cyclic.num_knots(), cyclic_path.num_knots());
+        assert!(tp_cyclic.is_cyclic());
+    }
+
+    #[test]
+    fn test_bezier_path_cyclic_shift() {
+        let path = sample_cyclic_bezier_path();
+        let t = Transform::shifted(1.0, 2.0);
+        let tp = path.transformed(&t);
+
+        // All three knot points shifted
+        assert!((tp.knot_point(0).x - 1.0).abs() < EPSILON);
+        assert!((tp.knot_point(0).y - 2.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).x - 11.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).y - 2.0).abs() < EPSILON);
+        assert!((tp.knot_point(2).x - 6.0).abs() < EPSILON);
+        assert!((tp.knot_point(2).y - 12.0).abs() < EPSILON);
+
+        // All three segments' controls shifted
+        for i in 0..3 {
+            let orig = path.segment_controls(i);
+            let transformed = tp.segment_controls(i);
+            assert!((transformed.post.x - orig.post.x - 1.0).abs() < EPSILON);
+            assert!((transformed.post.y - orig.post.y - 2.0).abs() < EPSILON);
+            assert!((transformed.pre.x - orig.pre.x - 1.0).abs() < EPSILON);
+            assert!((transformed.pre.y - orig.pre.y - 2.0).abs() < EPSILON);
+        }
+    }
+
+    #[test]
+    fn test_bezier_path_scale() {
+        let path = sample_bezier_path();
+        let t = Transform::scaled(3.0);
+        let tp = path.transformed(&t);
+
+        assert!((tp.knot_point(0).x - 0.0).abs() < EPSILON);
+        assert!((tp.knot_point(0).y - 0.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).x - 30.0).abs() < EPSILON);
+        assert!((tp.knot_point(1).y - 0.0).abs() < EPSILON);
+
+        let c = tp.segment_controls(0);
+        assert!((c.post.x - 9.0).abs() < EPSILON);
+        assert!((c.post.y - 12.0).abs() < EPSILON);
+        assert!((c.pre.x - 21.0).abs() < EPSILON);
+        assert!((c.pre.y - 12.0).abs() < EPSILON);
     }
 }
