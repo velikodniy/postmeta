@@ -13,8 +13,6 @@
 //! The [`Transformable`] trait provides a uniform interface for applying
 //! transforms to all graphics types.
 
-use std::ops;
-
 use crate::path::{BezierPath, SegmentControls};
 use crate::pen::{Pen, convex_hull};
 use crate::types::{
@@ -28,8 +26,7 @@ use crate::types::{
 
 /// A transform with named components.
 ///
-/// Maps point (x, y) to:
-///   (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
+/// Maps point (x, y) to (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
     pub tx: Scalar,
@@ -60,10 +57,6 @@ impl Transform {
         tyy: 0.0,
     };
 
-    // -----------------------------------------------------------------------
-    // Constructors
-    // -----------------------------------------------------------------------
-
     /// Create a translation transform.
     #[must_use]
     pub const fn shifted(dx: Scalar, dy: Scalar) -> Self {
@@ -77,9 +70,7 @@ impl Transform {
     /// Create a rotation transform (angle in degrees).
     #[must_use]
     pub fn rotated(degrees: Scalar) -> Self {
-        let rad = degrees.to_radians();
-        let c = rad.cos();
-        let s = rad.sin();
+        let (s, c) = degrees.to_radians().sin_cos();
         Self {
             tx: 0.0,
             ty: 0.0,
@@ -145,10 +136,6 @@ impl Transform {
         }
     }
 
-    // -----------------------------------------------------------------------
-    // Composition & application
-    // -----------------------------------------------------------------------
-
     /// Compose two transforms: `self` applied first, then `other`.
     ///
     /// Equivalent to matrix multiplication `other * self`.
@@ -168,87 +155,12 @@ impl Transform {
         }
     }
 
-    /// Apply this transform to a point.
-    #[must_use]
-    pub fn apply(&self, p: Point) -> Point {
-        Point::new(
-            self.txy.mul_add(p.y, self.txx.mul_add(p.x, self.tx)),
-            self.tyy.mul_add(p.y, self.tyx.mul_add(p.x, self.ty)),
-        )
-    }
-
-    // -----------------------------------------------------------------------
-    // Utilities
-    // -----------------------------------------------------------------------
-
     /// Determinant of the linear part of this transform.
     #[must_use]
-    pub fn determinant(&self) -> Scalar {
+    pub fn det(&self) -> Scalar {
         self.txx.mul_add(self.tyy, -(self.txy * self.tyx))
     }
-
-    /// Compute the inverse of this transform, if it exists.
-    ///
-    /// Returns `None` if the transform is singular (determinant is zero).
-    #[must_use]
-    pub fn inverse(&self) -> Option<Self> {
-        let det = self.determinant();
-        if det.abs() < NEAR_ZERO {
-            return None;
-        }
-        let inv_det = 1.0 / det;
-        Some(Self {
-            txx: self.tyy * inv_det,
-            txy: -self.txy * inv_det,
-            tyx: -self.tyx * inv_det,
-            tyy: self.txx * inv_det,
-            tx: self.txy.mul_add(self.ty, -(self.tyy * self.tx)) * inv_det,
-            ty: self.tyx.mul_add(self.tx, -(self.txx * self.ty)) * inv_det,
-        })
-    }
 }
-
-/// `Transform * Transform` — compose two transforms.
-///
-/// `a * b` applies `a` first, then `b` (equivalent to `a.then(&b)`).
-impl ops::Mul for Transform {
-    type Output = Self;
-
-    fn mul(self, rhs: Self) -> Self {
-        self.then(&rhs)
-    }
-}
-
-/// `&Transform * Transform` — compose with borrowed left operand.
-impl ops::Mul<Transform> for &Transform {
-    type Output = Transform;
-
-    fn mul(self, rhs: Transform) -> Transform {
-        self.then(&rhs)
-    }
-}
-
-/// `Transform * &Transform` — compose with borrowed right operand.
-impl ops::Mul<&Self> for Transform {
-    type Output = Self;
-
-    fn mul(self, rhs: &Self) -> Self {
-        self.then(rhs)
-    }
-}
-
-/// `&Transform * &Transform` — compose with both operands borrowed.
-impl ops::Mul for &Transform {
-    type Output = Transform;
-
-    fn mul(self, rhs: &Transform) -> Transform {
-        self.then(rhs)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Transformable trait
-// ---------------------------------------------------------------------------
 
 /// A type that can be transformed by an affine [`Transform`].
 pub trait Transformable {
@@ -262,16 +174,17 @@ pub trait Transformable {
 // ---------------------------------------------------------------------------
 
 impl Transformable for Point {
-    #[inline]
     fn transformed(&self, t: &Transform) -> Self {
-        t.apply(*self)
+        Point::new(
+            t.txy.mul_add(self.y, t.txx.mul_add(self.x, t.tx)),
+            t.tyy.mul_add(self.y, t.tyx.mul_add(self.x, t.ty)),
+        )
     }
 }
 
 impl Transformable for Vec2 {
     /// Transform a vector (direction). Translation is ignored — only the
     /// linear part of the affine is applied.
-    #[inline]
     fn transformed(&self, t: &Transform) -> Self {
         Self::new(
             t.txx.mul_add(self.x, t.txy * self.y),
@@ -351,16 +264,6 @@ impl Transformable for Pen {
     }
 }
 
-impl Transformable for Transform {
-    /// Compose: `self` applied first, then `t`.
-    ///
-    /// Equivalent to `self.then(t)`.
-    #[inline]
-    fn transformed(&self, t: &Transform) -> Self {
-        self.then(t)
-    }
-}
-
 impl Transformable for GraphicsObject {
     fn transformed(&self, t: &Transform) -> Self {
         match self {
@@ -377,12 +280,13 @@ impl Transformable for GraphicsObject {
                 color: stroke.color,
                 dash: stroke.dash.clone().map(|mut d| {
                     // Scale dash lengths by the "average linear scale factor" of
-                    // the transform.  For a uniform scale s the determinant is
-                    // s², so sqrt(|det|) = |s|, which is the correct 1-D length
-                    // scale.  For non-uniform transforms this is an approximation
+                    // the transform. For a uniform scale s the determinant is s²,
+                    // so sqrt(|det|) = |s|, which is the correct 1-D length
+                    // scale.
+                    // For non-uniform transforms this is an approximation
                     // (the exact scale depends on direction) but it matches
                     // MetaPost's approach and is adequate for dash patterns.
-                    let scale = t.determinant().abs().sqrt();
+                    let scale = t.det().abs().sqrt();
                     for v in &mut d.dashes {
                         *v *= scale;
                     }
@@ -399,7 +303,7 @@ impl Transformable for GraphicsObject {
                 font_size: text.font_size,
                 metrics: text.metrics,
                 color: text.color,
-                transform: text.transform.transformed(t),
+                transform: text.transform.then(t),
             }),
             Self::ClipStart(path) => Self::ClipStart(path.transformed(t)),
             Self::ClipEnd => Self::ClipEnd,
@@ -453,48 +357,9 @@ mod tests {
             tyx: 0.0,
             tyy: 3.0,
         };
-        let p = t.apply(Point::new(1.0, 1.0));
+        let p = Point::new(1.0, 1.0).transformed(&t);
         assert!((p.x - 12.0).abs() < EPSILON);
         assert!((p.y - 23.0).abs() < EPSILON);
-    }
-
-    #[test]
-    fn transform_mul_operator() {
-        let a = Transform {
-            tx: 1.0,
-            ty: 2.0,
-            txx: 3.0,
-            txy: 4.0,
-            tyx: 5.0,
-            tyy: 6.0,
-        };
-        // Mul should be equivalent to `then`
-        let composed = a * Transform::IDENTITY;
-        assert_eq!(a, composed);
-        let composed = Transform::IDENTITY * a;
-        assert_eq!(a, composed);
-
-        // Test non-trivial composition with meaningful transforms
-        let translate = Transform::shifted(10.0, 20.0);
-        let scale = Transform::scaled(2.0);
-        let composed = translate * scale;
-        assert_eq!(composed, translate.then(&scale));
-
-        // Verify the composition actually transforms a point correctly
-        // Order: translate first (1,1) -> (11,21), then scale -> (22,42)
-        let p = Point::new(1.0, 1.0);
-        let result = composed.apply(p);
-        assert!((result.x - 22.0).abs() < EPSILON);
-        assert!((result.y - 42.0).abs() < EPSILON);
-
-        // Test reference operators work
-        let t1 = Transform::shifted(5.0, 5.0);
-        let t2 = Transform::scaled(3.0);
-        let result1 = &t1 * &t2;
-        let result2 = &t1 * t2;
-        let result3 = t1 * &Transform::scaled(3.0);
-        assert_eq!(result1, result2);
-        assert_eq!(result2, result3);
     }
 
     #[test]
@@ -595,54 +460,10 @@ mod tests {
     }
 
     #[test]
-    fn test_inverse_identity() {
-        let inv = Transform::IDENTITY.inverse().unwrap();
-        let p = Point::new(5.0, 7.0).transformed(&inv);
-        assert!((p.x - 5.0).abs() < EPSILON);
-        assert!((p.y - 7.0).abs() < EPSILON);
-    }
-
-    #[test]
-    fn test_inverse_shift() {
-        let t = Transform::shifted(3.0, 4.0);
-        let inv = t.inverse().unwrap();
-        let p = Point::new(3.0, 4.0).transformed(&inv);
-        assert!(p.x.abs() < EPSILON);
-        assert!(p.y.abs() < EPSILON);
-    }
-
-    #[test]
-    fn test_inverse_scale() {
-        let t = Transform::scaled(2.0);
-        let inv = t.inverse().unwrap();
-        let p = Point::new(6.0, 8.0).transformed(&inv);
-        assert!((p.x - 3.0).abs() < EPSILON);
-        assert!((p.y - 4.0).abs() < EPSILON);
-    }
-
-    #[test]
-    fn test_inverse_roundtrip() {
-        let t = Transform::rotated(30.0).then(&Transform::shifted(5.0, -3.0));
-        let inv = t.inverse().unwrap();
-        let original = Point::new(7.0, 11.0);
-        let transformed = original.transformed(&t);
-        let back = transformed.transformed(&inv);
-        assert!((back.x - original.x).abs() < 1e-10);
-        assert!((back.y - original.y).abs() < 1e-10);
-    }
-
-    #[test]
-    fn test_inverse_singular() {
-        // Zero transform is singular
-        let t = Transform::scaled(0.0);
-        assert!(t.inverse().is_none());
-    }
-
-    #[test]
-    fn test_determinant() {
-        assert!((Transform::IDENTITY.determinant() - 1.0).abs() < EPSILON);
-        assert!((Transform::scaled(3.0).determinant() - 9.0).abs() < EPSILON);
-        assert!((Transform::rotated(45.0).determinant() - 1.0).abs() < EPSILON);
+    fn test_det() {
+        assert!((Transform::IDENTITY.det() - 1.0).abs() < EPSILON);
+        assert!((Transform::scaled(3.0).det() - 9.0).abs() < EPSILON);
+        assert!((Transform::rotated(45.0).det() - 1.0).abs() < EPSILON);
     }
 
     #[test]

@@ -347,10 +347,10 @@ impl Interpreter {
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
                                 for pt in [
-                                    t.apply(Point::new(1.0, 0.0)),
-                                    t.apply(Point::new(-1.0, 0.0)),
-                                    t.apply(Point::new(0.0, 1.0)),
-                                    t.apply(Point::new(0.0, -1.0)),
+                                    (Point::new(1.0, 0.0)).transformed(&t),
+                                    (Point::new(-1.0, 0.0)).transformed(&t),
+                                    (Point::new(0.0, 1.0)).transformed(&t),
+                                    (Point::new(0.0, -1.0)).transformed(&t),
                                 ] {
                                     bb.include_point(pt);
                                 }
@@ -704,10 +704,9 @@ impl Interpreter {
             Value::Path(p) => Ok((Value::Path(p.transformed(t)), Type::Path)),
             Value::Pen(p) => Ok((Value::Pen(p.transformed(t)), Type::Pen)),
             Value::Picture(p) => Ok((Value::Picture(p.transformed(t)), Type::Picture)),
-            Value::Transform(existing) => Ok((
-                Value::Transform(existing.transformed(t)),
-                Type::TransformType,
-            )),
+            Value::Transform(existing) => {
+                Ok((Value::Transform(existing.then(t)), Type::TransformType))
+            }
             _ => Err(InterpreterError::new(
                 ErrorKind::TypeError,
                 format!("Cannot transform {}", val.ty()),

@@ -4,6 +4,7 @@
 //! pens, and pictures.
 
 use crate::path::BezierPath;
+use crate::transform::Transformable;
 use crate::types::{GraphicsObject, Pen, Picture, Point, Scalar, TextObject, Vec2};
 
 // ---------------------------------------------------------------------------
@@ -201,7 +202,7 @@ fn expand_for_text(text: &TextObject, bb: &mut BoundingBox) {
         Point::new(0.0, m.height),
     ];
     for corner in &corners {
-        bb.include_point(text.transform.apply(*corner));
+        bb.include_point(corner.transformed(&text.transform));
     }
 }
 

@@ -11,7 +11,7 @@
 //! - [`Pen::offset()`] — find the pen offset in a given direction
 
 use crate::path::{BezierPath, SegmentControls};
-use crate::transform::Transform;
+use crate::transform::{Transform, Transformable};
 use crate::types::{NEAR_ZERO, Point, Scalar, Vec2, index_to_scalar};
 
 // ---------------------------------------------------------------------------
@@ -182,9 +182,9 @@ fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
         let p = Point::new(cos_a, sin_a);
         let tangent = Vec2::new(-sin_a, cos_a);
 
-        let on_curve = t.apply(p);
-        let right_cp = t.apply(p + tangent * KAPPA);
-        let left_cp = t.apply(p - tangent * KAPPA);
+        let on_curve = p.transformed(&t);
+        let right_cp = (p + tangent * KAPPA).transformed(&t);
+        let left_cp = (p - tangent * KAPPA).transformed(&t);
 
         points.push(on_curve);
 
@@ -193,7 +193,7 @@ fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
         let (sin_j, cos_j) = angle_j.sin_cos();
         let p_j = Point::new(cos_j, sin_j);
         let tangent_j = Vec2::new(-sin_j, cos_j);
-        let left_cp_j = t.apply(p_j - tangent_j * KAPPA);
+        let left_cp_j = (p_j - tangent_j * KAPPA).transformed(&t);
 
         controls.push(SegmentControls {
             post: right_cp,
