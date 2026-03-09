@@ -217,29 +217,9 @@ fn expand_for_text(text: &TextObject, bb: &mut BoundingBox) {
 )]
 mod tests {
     use super::*;
-    use crate::path::SegmentControls;
+    use crate::test_helpers;
     use crate::types::{Color, EPSILON, TextMetrics, Transform};
     use std::sync::Arc;
-
-    /// Build a 10x10 square as a cyclic `BezierPath` with straight-line controls.
-    fn make_unit_square() -> BezierPath {
-        let pts = [
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 0.0),
-            Point::new(10.0, 10.0),
-            Point::new(0.0, 10.0),
-        ];
-        let controls = (0..4)
-            .map(|i| {
-                let j = (i + 1) % 4;
-                SegmentControls {
-                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
-                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
-                }
-            })
-            .collect();
-        BezierPath::from_parts(pts.to_vec(), controls, true)
-    }
 
     #[test]
     fn test_bounding_box_empty() {
@@ -263,7 +243,7 @@ mod tests {
 
     #[test]
     fn test_path_bbox() {
-        let path = make_unit_square();
+        let path = test_helpers::square();
         let bb = BoundingBox::of_path(&path);
         assert!(bb.is_valid());
         assert!(bb.min_x < 0.1);
@@ -276,7 +256,7 @@ mod tests {
     fn test_picture_bbox() {
         use crate::types::{Color, FillObject, LineJoin};
         let mut pic = Picture::new();
-        let path = make_unit_square();
+        let path = test_helpers::square();
         pic.add_fill(FillObject {
             path,
             color: Color::BLACK,

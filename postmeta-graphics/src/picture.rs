@@ -89,45 +89,13 @@ impl Picture {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::path::SegmentControls;
-    use crate::types::{Color, LineCap, LineJoin, Pen, Point};
-
-    /// Build a 10x10 square as a cyclic `BezierPath` with straight-line controls.
-    fn make_unit_square_bezier() -> BezierPath {
-        let pts = [
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 0.0),
-            Point::new(10.0, 10.0),
-            Point::new(0.0, 10.0),
-        ];
-        let controls = (0..4)
-            .map(|i| {
-                let j = (i + 1) % 4;
-                SegmentControls {
-                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
-                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
-                }
-            })
-            .collect();
-        BezierPath::from_parts(pts.to_vec(), controls, true)
-    }
-
-    /// Build a simple open line as a `BezierPath` from (0,0) to (10,0).
-    fn make_line_bezier() -> BezierPath {
-        BezierPath::from_parts(
-            vec![Point::ZERO, Point::new(10.0, 0.0)],
-            vec![SegmentControls {
-                post: Point::new(10.0 / 3.0, 0.0),
-                pre: Point::new(20.0 / 3.0, 0.0),
-            }],
-            false,
-        )
-    }
+    use crate::test_helpers;
+    use crate::types::{Color, LineCap, LineJoin, Pen};
 
     #[test]
     fn test_add_fill() {
         let mut pic = Picture::new();
-        let path = make_unit_square_bezier();
+        let path = test_helpers::square();
         pic.add_fill(FillObject {
             path,
             color: Color::BLACK,
@@ -142,7 +110,7 @@ mod tests {
     #[test]
     fn test_add_stroke() {
         let mut pic = Picture::new();
-        let path = make_line_bezier();
+        let path = test_helpers::line();
 
         pic.add_stroke(StrokeObject {
             path,
@@ -174,7 +142,7 @@ mod tests {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
-        let clip_path = make_unit_square_bezier();
+        let clip_path = test_helpers::square();
         pic.clip(clip_path);
 
         assert_eq!(pic.objects.len(), 3);
@@ -188,7 +156,7 @@ mod tests {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::ClipEnd); // dummy content
 
-        let bounds = make_unit_square_bezier();
+        let bounds = test_helpers::square();
         pic.set_bounds(bounds);
 
         assert_eq!(pic.objects.len(), 3);

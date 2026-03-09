@@ -766,36 +766,8 @@ fn bisect_arc_length(seg: &CubicSegment, target: Scalar) -> Scalar {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_helpers;
     use crate::types::{EPSILON, Knot, KnotDirection, Point};
-
-    /// Helper: build a `BezierPath` for a straight line from (0,0) to (10,0).
-    fn make_line_bezier() -> BezierPath {
-        let points = vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)];
-        let controls = vec![SegmentControls {
-            post: Point::new(10.0 / 3.0, 0.0),
-            pre: Point::new(20.0 / 3.0, 0.0),
-        }];
-        BezierPath::from_parts(points, controls, false)
-    }
-
-    /// Helper: build a cyclic triangle `BezierPath` with straight-line controls.
-    fn make_triangle_bezier() -> BezierPath {
-        let pts = [
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 0.0),
-            Point::new(5.0, 10.0),
-        ];
-        let controls = (0..3)
-            .map(|i| {
-                let j = (i + 1) % 3;
-                SegmentControls {
-                    post: pts[i].lerp(pts[j], 1.0 / 3.0),
-                    pre: pts[i].lerp(pts[j], 2.0 / 3.0),
-                }
-            })
-            .collect();
-        BezierPath::from_parts(pts.to_vec(), controls, true)
-    }
 
     // -- Test 1: BezierPath::new() is empty ----------------------------------
 
@@ -812,7 +784,7 @@ mod tests {
 
     #[test]
     fn from_parts_line_segment() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         assert_eq!(bp.num_knots(), 2);
         assert_eq!(bp.num_segments(), 1);
         assert!(!bp.is_cyclic());
@@ -824,7 +796,7 @@ mod tests {
 
     #[test]
     fn segment_returns_correct_cubic() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let seg = bp.segment(0);
         assert!((seg.p0.x - 0.0).abs() < EPSILON);
         assert!((seg.p1.x - 10.0 / 3.0).abs() < EPSILON);
@@ -841,7 +813,7 @@ mod tests {
 
     #[test]
     fn segments_iterator() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let segs: Vec<_> = bp.segments().collect();
         assert_eq!(segs.len(), 3);
 
@@ -983,7 +955,7 @@ mod tests {
 
     #[test]
     fn cyclic_last_segment_wraps() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         // Segment 2 should connect knot 2 back to knot 0
         let seg = bp.segment(2);
         assert!((seg.p0.x - 5.0).abs() < EPSILON);
@@ -1020,7 +992,7 @@ mod tests {
 
     #[test]
     fn point_at_line_endpoints() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let p0 = bp.point_at(0.0);
         assert!(p0.x.abs() < EPSILON);
         assert!(p0.y.abs() < EPSILON);
@@ -1031,14 +1003,14 @@ mod tests {
 
     #[test]
     fn point_at_line_midpoint() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let pmid = bp.point_at(0.5);
         assert!((pmid.x - 5.0).abs() < EPSILON);
     }
 
     #[test]
     fn point_at_clamps_open() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let p_neg = bp.point_at(-1.0);
         assert!(p_neg.x.abs() < EPSILON);
 
@@ -1056,7 +1028,7 @@ mod tests {
 
     #[test]
     fn direction_at_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let d = bp.direction_at(0.5);
         assert!(d.x > 0.0);
         assert!(d.y.abs() < EPSILON);
@@ -1072,7 +1044,7 @@ mod tests {
 
     #[test]
     fn direction_time_east_on_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let t = bp.direction_time(Vec2::new(1.0, 0.0));
         let t = t.expect("east direction should be found");
         assert!((t - 0.0).abs() < 0.01, "expected ~0, got {t}");
@@ -1080,7 +1052,7 @@ mod tests {
 
     #[test]
     fn direction_time_west_not_found() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         assert!(
             bp.direction_time(Vec2::new(-1.0, 0.0)).is_none(),
             "west should not be found on an eastward line"
@@ -1089,7 +1061,7 @@ mod tests {
 
     #[test]
     fn direction_time_zero_dir() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let t = bp
             .direction_time(Vec2::new(0.0, 0.0))
             .expect("zero direction always matches");
@@ -1098,7 +1070,7 @@ mod tests {
 
     #[test]
     fn direction_time_on_triangle() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let t = bp
             .direction_time(Vec2::new(1.0, 0.0))
             .expect("east direction should be found");
@@ -1109,7 +1081,7 @@ mod tests {
 
     #[test]
     fn arc_length_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let len = bp.arc_length();
         assert!((len - 10.0).abs() < 0.01, "expected ~10, got {len}");
     }
@@ -1124,13 +1096,13 @@ mod tests {
 
     #[test]
     fn arc_time_zero() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         assert!((bp.arc_time(0.0)).abs() < EPSILON);
     }
 
     #[test]
     fn arc_time_full() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let total = bp.arc_length();
         let t = bp.arc_time(total + 1.0);
         assert!(
@@ -1141,7 +1113,7 @@ mod tests {
 
     #[test]
     fn arc_time_half_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let t = bp.arc_time(5.0);
         // For a straight line of length 10, arc_time(5) should be ~0.5
         assert!((t - 0.5).abs() < 0.01, "expected ~0.5, got {t}");
@@ -1151,20 +1123,20 @@ mod tests {
 
     #[test]
     fn turning_number_ccw_triangle() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         assert_eq!(bp.turning_number(), 1.0);
     }
 
     #[test]
     fn turning_number_cw_triangle() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let rev = bp.reverse();
         assert_eq!(rev.turning_number(), -1.0);
     }
 
     #[test]
     fn turning_number_open_path() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         assert_eq!(bp.turning_number(), 0.0);
     }
 
@@ -1184,7 +1156,7 @@ mod tests {
 
     #[test]
     fn precontrol_at_open_endpoints() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
 
         // Precontrol at t=0 on open path should be the point itself
         let pre0 = bp.precontrol_at(0.0);
@@ -1201,7 +1173,7 @@ mod tests {
 
     #[test]
     fn postcontrol_at_open_endpoints() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
 
         // Postcontrol at t=0 should be the post control of segment 0
         let post0 = bp.postcontrol_at(0.0);
@@ -1222,7 +1194,7 @@ mod tests {
 
     #[test]
     fn precontrol_at_fractional_time() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         // At fractional time, precontrol is from splitting the segment
         let pre_half = bp.precontrol_at(0.5);
         // For a straight line, the split at 0.5 should give a precontrol
@@ -1232,14 +1204,14 @@ mod tests {
 
     #[test]
     fn postcontrol_at_fractional_time() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let post_half = bp.postcontrol_at(0.5);
         assert!(post_half.x > 0.0 && post_half.x < 10.0);
     }
 
     #[test]
     fn precontrol_at_cyclic_knot() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         // Precontrol at t=0 on cyclic path uses the pre of segment n-1
         let pre0 = bp.precontrol_at(0.0);
         let expected = bp.segment_controls(2).pre;
@@ -1265,7 +1237,7 @@ mod tests {
 
     #[test]
     fn subpath_full_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let sub = bp.subpath(0.0, 1.0);
         assert_eq!(sub.num_knots(), 2);
         assert_eq!(sub.num_segments(), 1);
@@ -1277,7 +1249,7 @@ mod tests {
 
     #[test]
     fn subpath_half_line() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let sub = bp.subpath(0.0, 0.5);
         let end = sub.point_at(index_to_scalar(sub.num_segments()));
         assert!((end.x - 5.0).abs() < 0.1);
@@ -1292,7 +1264,7 @@ mod tests {
 
     #[test]
     fn subpath_cyclic_wrap() {
-        let tri = make_triangle_bezier();
+        let tri = test_helpers::triangle();
         let sub = tri.subpath(2.5, 0.5);
         assert!(!sub.knot_points().is_empty());
 
@@ -1315,7 +1287,7 @@ mod tests {
 
     #[test]
     fn subpath_cyclic_forward_wrap() {
-        let tri = make_triangle_bezier();
+        let tri = test_helpers::triangle();
         let sub = tri.subpath(2.5, 4.5);
         assert!(sub.num_knots() >= 3, "should span multiple segments");
 
@@ -1340,7 +1312,7 @@ mod tests {
 
     #[test]
     fn reverse_open_preserves_points() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let rev = bp.reverse();
         assert_eq!(rev.num_knots(), 2);
         assert!((rev.knot_point(0).x - 10.0).abs() < EPSILON);
@@ -1349,7 +1321,7 @@ mod tests {
 
     #[test]
     fn reverse_open_swaps_controls() {
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let rev = bp.reverse();
         // The original controls were post=10/3, pre=20/3
         // After reverse, the single segment goes 10 -> 0
@@ -1361,7 +1333,7 @@ mod tests {
 
     #[test]
     fn reverse_cyclic_keeps_start() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let rev = bp.reverse();
         assert!(rev.is_cyclic());
         assert_eq!(rev.num_knots(), 3);
@@ -1370,7 +1342,7 @@ mod tests {
 
     #[test]
     fn reverse_cyclic_time_mapping() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let rev = bp.reverse();
         let n = index_to_scalar(bp.num_segments());
 
@@ -1396,7 +1368,7 @@ mod tests {
     #[test]
     fn reverse_involution() {
         // Reversing twice should give back the original
-        let bp = make_line_bezier();
+        let bp = test_helpers::line();
         let rev2 = bp.reverse().reverse();
         assert_eq!(rev2.num_knots(), bp.num_knots());
         for i in 0..bp.num_knots() {
@@ -1412,7 +1384,7 @@ mod tests {
 
     #[test]
     fn reverse_cyclic_involution() {
-        let bp = make_triangle_bezier();
+        let bp = test_helpers::triangle();
         let rev2 = bp.reverse().reverse();
         for i in 0..bp.num_knots() {
             assert!(

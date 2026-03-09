@@ -10,6 +10,9 @@
     )
 )]
 
+#[cfg(test)]
+mod test_helpers;
+
 pub mod bbox;
 pub mod bezier;
 pub mod error;
