@@ -337,9 +337,7 @@ impl BezierPath {
                     continue;
                 }
 
-                let cross = prev_dir.x.mul_add(cur_dir.y, -prev_dir.y * cur_dir.x);
-                let dot = prev_dir.x.mul_add(cur_dir.x, prev_dir.y * cur_dir.y);
-                total_angle += cross.atan2(dot);
+                total_angle += prev_dir.cross(cur_dir).atan2(prev_dir.dot(cur_dir));
 
                 prev_dir = cur_dir;
             }

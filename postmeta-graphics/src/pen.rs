@@ -90,8 +90,8 @@ impl Pen {
                     .iter()
                     .copied()
                     .max_by(|a, b| {
-                        let da = dir.x.mul_add(a.x, dir.y * a.y);
-                        let db = dir.x.mul_add(b.x, dir.y * b.y);
+                        let da = dir.dot(Vec2::from(*a));
+                        let db = dir.dot(Vec2::from(*b));
                         da.total_cmp(&db)
                     })
                     .unwrap_or(Point::ZERO)
@@ -248,9 +248,7 @@ pub fn convex_hull(points: &[Point]) -> Vec<Point> {
 
 /// 2D cross product of vectors OA and OB.
 fn cross(o: Point, a: Point, b: Point) -> Scalar {
-    let oa = a - o;
-    let ob = b - o;
-    oa.x.mul_add(ob.y, -(oa.y * ob.x))
+    (a - o).cross(b - o)
 }
 
 // ---------------------------------------------------------------------------

@@ -163,6 +163,20 @@ impl Vec2 {
         math::normalize_angle(angle)
     }
 
+    /// Dot product: `self.x * other.x + self.y * other.y`.
+    #[must_use]
+    pub fn dot(self, other: Self) -> f64 {
+        self.x.mul_add(other.x, self.y * other.y)
+    }
+
+    /// 2D cross product (z-component): `self.x * other.y - self.y * other.x`.
+    ///
+    /// Positive when `other` is counter-clockwise from `self`.
+    #[must_use]
+    pub fn cross(self, other: Self) -> f64 {
+        self.x.mul_add(other.y, -(self.y * other.x))
+    }
+
     // Angle from `self` to `other`, in the range (-pi, pi].
     #[must_use]
     pub fn angle_to(self, other: Self) -> Scalar {
@@ -273,6 +287,33 @@ mod tests {
         let a = Vec2::new(1.0, 0.0);
         let ta = a.angle_to(a);
         assert!(ta.abs() < EPSILON);
+    }
+
+    #[test]
+    fn dot_perpendicular() {
+        let a = Vec2::new(1.0, 0.0);
+        let b = Vec2::new(0.0, 1.0);
+        assert!(a.dot(b).abs() < EPSILON);
+    }
+
+    #[test]
+    fn dot_parallel() {
+        let a = Vec2::new(3.0, 4.0);
+        assert!((a.dot(a) - 25.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cross_perpendicular() {
+        let a = Vec2::new(1.0, 0.0);
+        let b = Vec2::new(0.0, 1.0);
+        assert!((a.cross(b) - 1.0).abs() < EPSILON);
+    }
+
+    #[test]
+    fn cross_parallel() {
+        let a = Vec2::new(2.0, 3.0);
+        let b = Vec2::new(4.0, 6.0);
+        assert!(a.cross(b).abs() < EPSILON);
     }
 
     #[test]
