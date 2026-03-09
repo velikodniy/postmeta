@@ -184,7 +184,6 @@ fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
 
         let on_curve = p.transformed(&t);
         let right_cp = (p + tangent * KAPPA).transformed(&t);
-        let left_cp = (p - tangent * KAPPA).transformed(&t);
 
         points.push(on_curve);
 
@@ -199,10 +198,6 @@ fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
             post: right_cp,
             pre: left_cp_j,
         });
-
-        // left_cp is the pre-handle for the segment ending at this knot,
-        // which was already set in the previous iteration's controls entry.
-        let _ = left_cp;
     }
 
     BezierPath::from_parts(points, controls, true)

@@ -498,15 +498,6 @@ impl BezierPath {
             let (left_part, _) = cubic_last.split(frac2);
             let end_pt = cubic_last.point_at(frac2);
 
-            // Update the last control's `post` for the outgoing handle of the
-            // last full knot, and add the final partial segment's controls.
-            if let Some(last_ctrl) = controls.last_mut() {
-                // The preceding segment's `pre` is already correct — it was
-                // either from the first split or copied wholesale. Now set
-                // up the new segment from the last full knot to the split point.
-                let _ = last_ctrl; // just to silence unused warning if needed
-            }
-
             controls.push(SegmentControls {
                 post: left_part.p1,
                 pre: left_part.p2,
