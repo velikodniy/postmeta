@@ -5,7 +5,7 @@
 //! `uniformdeviate`, `normaldeviate`, Pythagorean addition (`++`)
 //! and subtraction (`+-+`).
 
-use crate::types::Scalar;
+use crate::types::{Point, Scalar};
 
 /// `MetaPost`'s `mexp`: `mexp(x) = 2^(x/256)`.
 ///
@@ -78,6 +78,54 @@ pub fn normalize_angle(a: Scalar) -> Scalar {
 }
 
 // ---------------------------------------------------------------------------
+// Convex hull
+// ---------------------------------------------------------------------------
+
+/// Compute the convex hull of a set of points using Andrew's monotone chain.
+///
+/// Points are sorted by x (then y), and the lower and upper hulls are
+/// built in a single left-to-right / right-to-left sweep, yielding the
+/// vertices in counter-clockwise order in O(n log n) time.
+#[must_use]
+pub fn convex_hull(points: &[Point]) -> Vec<Point> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    // Andrew's monotone chain algorithm
+    let mut sorted: Vec<Point> = points.to_vec();
+    sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
+
+    let mut hull: Vec<Point> = Vec::with_capacity(2 * sorted.len());
+
+    // Build lower hull
+    for &p in &sorted {
+        while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0 {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+
+    // Build upper hull
+    let lower_len = hull.len() + 1;
+    for &p in sorted.iter().rev() {
+        while hull.len() >= lower_len && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
+        {
+            hull.pop();
+        }
+        hull.push(p);
+    }
+
+    hull.pop(); // Remove the last point (duplicate of first)
+    hull
+}
+
+/// 2D cross product of vectors OA and OB.
+fn cross(o: Point, a: Point, b: Point) -> Scalar {
+    (a - o).cross(b - o)
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -139,5 +187,41 @@ mod tests {
         let mean = sum / Scalar::from(n);
         // Mean should be close to 0
         assert!(mean.abs() < 0.1, "mean too far from 0: {mean}");
+    }
+
+    #[test]
+    fn convex_hull_square() {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(1.0, 1.0),
+            Point::new(0.0, 1.0),
+            Point::new(0.5, 0.5), // interior point
+        ];
+        let hull = convex_hull(&points);
+        assert_eq!(hull.len(), 4);
+    }
+
+    #[test]
+    fn convex_hull_triangle() {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(2.0, 0.0),
+            Point::new(1.0, 2.0),
+        ];
+        let hull = convex_hull(&points);
+        assert_eq!(hull.len(), 3);
+    }
+
+    #[test]
+    fn convex_hull_collinear() {
+        let points = vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.0, 0.0),
+            Point::new(2.0, 0.0),
+        ];
+        let hull = convex_hull(&points);
+        // Collinear points: hull is degenerate (2 points)
+        assert!(hull.len() <= 3);
     }
 }

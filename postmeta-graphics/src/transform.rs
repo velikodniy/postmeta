@@ -13,8 +13,9 @@
 //! The [`Transformable`] trait provides a uniform interface for applying
 //! transforms to all graphics types.
 
+use crate::math::convex_hull;
 use crate::path::{BezierPath, SegmentControls};
-use crate::pen::{Pen, convex_hull};
+use crate::pen::Pen;
 use crate::types::{
     FillObject, GraphicsObject, Knot, KnotDirection, NEAR_ZERO, Picture, Point, Scalar,
     StrokeObject, TextObject, Vec2,
