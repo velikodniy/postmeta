@@ -314,26 +314,6 @@ mod tests {
     }
 
     #[test]
-    fn test_method_crossing_lines() {
-        let h = hline(0.0, 10.0, 5.0);
-        let v = vline(5.0, 0.0, 10.0);
-
-        let result = h.intersection_times(&v);
-        assert!(result.is_some(), "expected intersection via method");
-        let ix = result.unwrap();
-        assert!((ix.t1 - 0.5).abs() < 0.01, "t1 = {}", ix.t1);
-        assert!((ix.t2 - 0.5).abs() < 0.01, "t2 = {}", ix.t2);
-    }
-
-    #[test]
-    fn test_method_all_intersections() {
-        let h = hline(0.0, 10.0, 5.0);
-        let v = vline(5.0, 0.0, 10.0);
-        let all = h.all_intersection_times(&v);
-        assert_eq!(all.len(), 1);
-    }
-
-    #[test]
     fn test_bbox_overlap_yes() {
         let a = (Point::new(0.0, 0.0), Point::new(5.0, 5.0));
         let b = (Point::new(3.0, 3.0), Point::new(8.0, 8.0));

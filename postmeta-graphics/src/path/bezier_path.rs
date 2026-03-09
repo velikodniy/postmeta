@@ -1436,4 +1436,54 @@ mod tests {
             );
         }
     }
+
+    // -------------------------------------------------------------------
+    // Intersection method wrappers
+    // -------------------------------------------------------------------
+
+    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y).
+    fn hline(x0: Scalar, x1: Scalar, y: Scalar) -> BezierPath {
+        let dx = (x1 - x0) / 3.0;
+        BezierPath::from_parts(
+            vec![Point::new(x0, y), Point::new(x1, y)],
+            vec![SegmentControls {
+                post: Point::new(x0 + dx, y),
+                pre: Point::new(x1 - dx, y),
+            }],
+            false,
+        )
+    }
+
+    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1).
+    fn vline(x: Scalar, y0: Scalar, y1: Scalar) -> BezierPath {
+        let dy = (y1 - y0) / 3.0;
+        BezierPath::from_parts(
+            vec![Point::new(x, y0), Point::new(x, y1)],
+            vec![SegmentControls {
+                post: Point::new(x, y0 + dy),
+                pre: Point::new(x, y1 - dy),
+            }],
+            false,
+        )
+    }
+
+    #[test]
+    fn intersection_method_crossing_lines() {
+        let h = hline(0.0, 10.0, 5.0);
+        let v = vline(5.0, 0.0, 10.0);
+
+        let result = h.intersection_times(&v);
+        assert!(result.is_some(), "expected intersection via method");
+        let ix = result.unwrap();
+        assert!((ix.t1 - 0.5).abs() < 0.01, "t1 = {}", ix.t1);
+        assert!((ix.t2 - 0.5).abs() < 0.01, "t2 = {}", ix.t2);
+    }
+
+    #[test]
+    fn intersection_method_all() {
+        let h = hline(0.0, 10.0, 5.0);
+        let v = vline(5.0, 0.0, 10.0);
+        let all = h.all_intersection_times(&v);
+        assert_eq!(all.len(), 1);
+    }
 }
