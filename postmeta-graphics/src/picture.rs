@@ -10,13 +10,35 @@
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
 use crate::path::BezierPath;
-use crate::types::{FillObject, GraphicsObject, Picture, StrokeObject};
+use crate::types::{FillObject, GraphicsObject, StrokeObject};
 
 // ---------------------------------------------------------------------------
-// Picture assembly methods
+// Picture
 // ---------------------------------------------------------------------------
+
+/// An ordered collection of graphical objects.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Picture {
+    pub objects: Vec<GraphicsObject>,
+}
 
 impl Picture {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            objects: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, obj: GraphicsObject) {
+        self.objects.push(obj);
+    }
+
+    /// Append all objects from another picture.
+    pub fn merge(&mut self, other: Self) {
+        self.objects.extend(other.objects);
+    }
+
     /// Add a filled contour to the picture.
     ///
     /// The path must be cyclic. Corresponds to `addto <pic> contour <path>`.

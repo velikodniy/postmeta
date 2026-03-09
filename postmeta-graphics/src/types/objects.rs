@@ -9,7 +9,7 @@ use crate::pen::Pen;
 use crate::transform::Transform;
 
 // ---------------------------------------------------------------------------
-// Picture and GraphicsObject
+// GraphicsObject
 // ---------------------------------------------------------------------------
 
 /// A single graphical object in a picture.
@@ -78,79 +78,4 @@ pub struct TextObject {
     pub metrics: TextMetrics,
     pub color: Color,
     pub transform: Transform,
-}
-
-/// An ordered collection of graphical objects.
-#[derive(Debug, Clone, PartialEq, Default)]
-pub struct Picture {
-    pub objects: Vec<GraphicsObject>,
-}
-
-impl Picture {
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            objects: Vec::new(),
-        }
-    }
-
-    pub fn push(&mut self, obj: GraphicsObject) {
-        self.objects.push(obj);
-    }
-
-    /// Append all objects from another picture.
-    pub fn merge(&mut self, other: Self) {
-        self.objects.extend(other.objects);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::super::geometry::Point;
-    use super::super::knot::Knot;
-    use super::*;
-    use crate::path::KnotPath;
-
-    #[test]
-    fn knot_path_num_segments() {
-        // Empty path
-        let p = KnotPath::new();
-        assert_eq!(p.num_segments(), 0);
-
-        // Open path with 3 knots = 2 segments
-        let p = KnotPath::from_knots(
-            vec![
-                Knot::new(Point::ZERO),
-                Knot::new(Point::new(1.0, 0.0)),
-                Knot::new(Point::new(1.0, 1.0)),
-            ],
-            false,
-        );
-        assert_eq!(p.num_segments(), 2);
-
-        // Cyclic path with 3 knots = 3 segments
-        let p = KnotPath::from_knots(
-            vec![
-                Knot::new(Point::ZERO),
-                Knot::new(Point::new(1.0, 0.0)),
-                Knot::new(Point::new(1.0, 1.0)),
-            ],
-            true,
-        );
-        assert_eq!(p.num_segments(), 3);
-    }
-
-    #[test]
-    fn picture_merge() {
-        let mut p1 = Picture::new();
-        p1.push(GraphicsObject::ClipEnd);
-        let mut p2 = Picture::new();
-        p2.push(GraphicsObject::SetBoundsEnd);
-        p1.merge(p2);
-        assert_eq!(p1.objects.len(), 2);
-    }
 }

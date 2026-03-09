@@ -146,4 +146,29 @@ mod tests {
         assert!(p.knots.is_empty());
         assert!(!p.is_cyclic);
     }
+
+    #[test]
+    fn knot_path_num_segments_3_knots() {
+        // Open path with 3 knots = 2 segments
+        let p = KnotPath::from_knots(
+            vec![
+                Knot::new(Point::ZERO),
+                Knot::new(Point::new(1.0, 0.0)),
+                Knot::new(Point::new(1.0, 1.0)),
+            ],
+            false,
+        );
+        assert_eq!(p.num_segments(), 2);
+
+        // Cyclic path with 3 knots = 3 segments
+        let p = KnotPath::from_knots(
+            vec![
+                Knot::new(Point::ZERO),
+                Knot::new(Point::new(1.0, 0.0)),
+                Knot::new(Point::new(1.0, 1.0)),
+            ],
+            true,
+        );
+        assert_eq!(p.num_segments(), 3);
+    }
 }
