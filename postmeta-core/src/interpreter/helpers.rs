@@ -38,9 +38,9 @@ impl_value_extractor!(
 impl_value_extractor!(value_to_bool, bool, "boolean", Value::Boolean(b) => *b);
 impl_value_extractor!(value_to_path, &BezierPath, "path", Value::Path(p) => p);
 
-pub(super) fn value_to_path_owned(val: Value) -> InterpResult<BezierPath> {
+pub(super) fn value_to_path_owned(val: Value) -> InterpResult<std::sync::Arc<BezierPath>> {
     match val {
-        Value::Path(p) => Ok(p),
+        Value::Path(p) => Ok(p.clone()),
         _ => Err(InterpreterError::new(
             ErrorKind::TypeError,
             format!("Expected path, got {}", val.ty()),

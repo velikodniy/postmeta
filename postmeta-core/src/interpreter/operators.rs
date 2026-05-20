@@ -298,7 +298,7 @@ impl Interpreter {
             }
             UnaryOp::Reverse => {
                 if let Value::Path(p) = input {
-                    Ok((Value::Path(p.reverse()), Type::Path))
+                    Ok((Value::Path(Arc::new(p.reverse())), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -318,7 +318,7 @@ impl Interpreter {
             }
             UnaryOp::MakePath => {
                 if let Value::Pen(p) = input {
-                    Ok((Value::Path(BezierPath::from(p)), Type::Path))
+                    Ok((Value::Path(Arc::new(BezierPath::from(p))), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -329,7 +329,7 @@ impl Interpreter {
             UnaryOp::MakePen => {
                 // mp.web §16987: pair_to_path before makepen
                 let owned_path;
-                let path_ref = match input {
+                let path_ref: &BezierPath = match input {
                     Value::Path(p) => p,
                     Value::Pair(x, y) => {
                         owned_path =
@@ -453,12 +453,12 @@ impl Interpreter {
                         } else if let Some(p) = &nested.bounds_path {
                             p.clone()
                         } else {
-                            BezierPath::from_parts(vec![Point::ZERO], vec![], false)
+                            Arc::new(BezierPath::from_parts(vec![Point::ZERO], vec![], false))
                         }
                     }
                     _ => {
                         // Default: single-knot path at origin
-                        BezierPath::from_parts(vec![Point::ZERO], vec![], false)
+                        Arc::new(BezierPath::from_parts(vec![Point::ZERO], vec![], false))
                     }
                 };
                 Ok((Value::Path(path), Type::Path))
@@ -553,7 +553,7 @@ impl Interpreter {
             PrimaryBinaryOp::SubpathOf => {
                 let (t1, t2) = value_to_pair(first)?;
                 let p = value_to_path(second)?;
-                Ok((Value::Path(p.subpath(t1, t2)), Type::Path))
+                Ok((Value::Path(Arc::new(p.subpath(t1, t2))), Type::Path))
             }
             PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
@@ -721,7 +721,7 @@ impl Interpreter {
                 let pt = Point::new(*x, *y).transformed(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
-            Value::Path(p) => Ok((Value::Path(p.transformed(t)), Type::Path)),
+            Value::Path(p) => Ok((Value::Path(Arc::new(p.transformed(t))), Type::Path)),
             Value::Pen(p) => Ok((Value::Pen(p.transformed(t)), Type::Pen)),
             Value::Picture(p) => Ok((Value::Picture(p.transformed(t)), Type::Picture)),
             Value::Transform(existing) => {

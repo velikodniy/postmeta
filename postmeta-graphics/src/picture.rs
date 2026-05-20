@@ -20,8 +20,8 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
     pub objects: Vec<GraphicsObject>,
-    pub clip_path: Option<BezierPath>,
-    pub bounds_path: Option<BezierPath>,
+    pub clip_path: Option<std::sync::Arc<BezierPath>>,
+    pub bounds_path: Option<std::sync::Arc<BezierPath>>,
 }
 
 impl Picture {
@@ -64,7 +64,7 @@ impl Picture {
     /// Clip the picture to a cyclic path.
     ///
     /// Wraps all existing objects in a nested picture with a `clip_path`.
-    pub fn clip(&mut self, clip_path: BezierPath) {
+    pub fn clip(&mut self, clip_path: std::sync::Arc<BezierPath>) {
         debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
@@ -79,7 +79,7 @@ impl Picture {
     /// Set an artificial bounding box on the picture.
     ///
     /// Wraps all existing objects in a nested picture with a `bounds_path`.
-    pub fn set_bounds(&mut self, bounds_path: BezierPath) {
+    pub fn set_bounds(&mut self, bounds_path: std::sync::Arc<BezierPath>) {
         debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
@@ -107,7 +107,7 @@ mod tests {
         let mut pic = Picture::new();
         let path = test_helpers::square();
         pic.add_fill(FillObject {
-            path,
+            path: std::sync::Arc::new(path),
             color: Color::BLACK,
             pen: None,
             line_join: LineJoin::Round,
@@ -123,7 +123,7 @@ mod tests {
         let path = test_helpers::line();
 
         pic.add_stroke(StrokeObject {
-            path,
+            path: std::sync::Arc::new(path),
             pen: Pen::circle(1.0),
             color: Color::BLACK,
             dash: None,
@@ -153,7 +153,7 @@ mod tests {
         pic.push(GraphicsObject::Picture(Picture::new())); // dummy content
 
         let clip_path = test_helpers::square();
-        pic.clip(clip_path);
+        pic.clip(std::sync::Arc::new(clip_path));
 
         assert_eq!(pic.objects.len(), 1);
         if let GraphicsObject::Picture(nested) = &pic.objects[0] {
@@ -169,7 +169,7 @@ mod tests {
         pic.push(GraphicsObject::Picture(Picture::new())); // dummy content
 
         let bounds = test_helpers::square();
-        pic.set_bounds(bounds);
+        pic.set_bounds(std::sync::Arc::new(bounds));
 
         assert_eq!(pic.objects.len(), 1);
         if let GraphicsObject::Picture(nested) = &pic.objects[0] {

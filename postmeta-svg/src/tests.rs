@@ -137,7 +137,7 @@ fn test_dash_to_svg() {
 #[test]
 fn test_render_fill_produces_svg_path() {
     let fill = FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
@@ -153,7 +153,7 @@ fn test_render_fill_produces_svg_path() {
 #[test]
 fn test_render_stroke_produces_svg_path() {
     let stroke = StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: None,
@@ -175,7 +175,7 @@ fn test_render_stroke_produces_svg_path() {
 #[test]
 fn test_render_stroke_with_dash() {
     let stroke = StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: Some(DashPattern {
@@ -204,7 +204,7 @@ fn test_render_empty_picture() {
 fn test_render_filled_square() {
     let mut pic = Picture::new();
     pic.add_fill(FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(0.0, 0.0, 1.0),
         pen: None,
         line_join: LineJoin::Round,
@@ -222,7 +222,7 @@ fn test_render_filled_square() {
 fn test_render_stroked_line() {
     let mut pic = Picture::new();
     pic.add_stroke(StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: None,
@@ -240,13 +240,13 @@ fn test_render_with_clip() {
     let mut pic = Picture::new();
     let mut nested = Picture::new();
     nested.push(GraphicsObject::Fill(FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
         miter_limit: 10.0,
     }));
-    nested.clip_path = Some(make_square());
+    nested.clip_path = Some(std::sync::Arc::new(make_square()));
     pic.push(GraphicsObject::Picture(nested));
 
     let svg = render_to_string(&pic);
@@ -282,7 +282,7 @@ fn test_render_text() {
 fn test_viewbox_uses_bbox() {
     let mut pic = Picture::new();
     pic.add_fill(FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::BLACK,
         pen: None,
         line_join: LineJoin::Round,

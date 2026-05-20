@@ -269,14 +269,14 @@ impl Transformable for GraphicsObject {
     fn transformed(&self, t: &Transform) -> Self {
         match self {
             Self::Fill(fill) => Self::Fill(FillObject {
-                path: fill.path.transformed(t),
+                path: std::sync::Arc::new(fill.path.transformed(t)),
                 color: fill.color,
                 pen: fill.pen.as_ref().map(|p| p.transformed(t)),
                 line_join: fill.line_join,
                 miter_limit: fill.miter_limit,
             }),
             Self::Stroke(stroke) => Self::Stroke(StrokeObject {
-                path: stroke.path.transformed(t),
+                path: std::sync::Arc::new(stroke.path.transformed(t)),
                 pen: stroke.pen.transformed(t),
                 color: stroke.color,
                 dash: stroke.dash.clone().map(|mut d| {
@@ -315,8 +315,14 @@ impl Transformable for Picture {
     fn transformed(&self, t: &Transform) -> Self {
         Self {
             objects: self.objects.iter().map(|obj| obj.transformed(t)).collect(),
-            clip_path: self.clip_path.as_ref().map(|p| p.transformed(t)),
-            bounds_path: self.bounds_path.as_ref().map(|p| p.transformed(t)),
+            clip_path: self
+                .clip_path
+                .as_ref()
+                .map(|p| std::sync::Arc::new(p.transformed(t))),
+            bounds_path: self
+                .bounds_path
+                .as_ref()
+                .map(|p| std::sync::Arc::new(p.transformed(t))),
         }
     }
 }

@@ -264,7 +264,7 @@ mod tests {
         let mut pic = Picture::new();
         let path = test_helpers::square();
         pic.add_fill(FillObject {
-            path,
+            path: std::sync::Arc::new(path),
             color: Color::BLACK,
             pen: None,
             line_join: LineJoin::Round,
