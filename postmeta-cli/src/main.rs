@@ -1,7 +1,9 @@
 //! `PostMeta` CLI — run `MetaPost` programs and output SVG.
 
+use std::collections::HashMap;
 use std::env;
 use std::fs;
+use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
@@ -102,11 +104,16 @@ fn build_font_provider(
 struct OsFileSystem {
     /// Directories to search for input files.
     search_dirs: Vec<PathBuf>,
+    /// Open file readers for `readfrom`.
+    read_files: HashMap<String, std::io::Lines<BufReader<fs::File>>>,
 }
 
 impl OsFileSystem {
-    const fn new(search_dirs: Vec<PathBuf>) -> Self {
-        Self { search_dirs }
+    fn new(search_dirs: Vec<PathBuf>) -> Self {
+        Self {
+            search_dirs,
+            read_files: HashMap::new(),
+        }
     }
 }
 
@@ -123,6 +130,54 @@ impl FileSystem for OsFileSystem {
             }
         }
         None
+    }
+
+    fn read_line(&mut self, name: &str) -> Option<String> {
+        if !self.read_files.contains_key(name) {
+            let candidates = [name.to_owned(), format!("{name}.mp")];
+            let mut file = None;
+            for dir in &self.search_dirs {
+                for candidate in &candidates {
+                    let path = dir.join(candidate);
+                    if let Ok(f) = fs::File::open(&path) {
+                        file = Some(f);
+                        break;
+                    }
+                }
+                if file.is_some() {
+                    break;
+                }
+            }
+            if file.is_none() {
+                if let Ok(f) = fs::File::open(name) {
+                    file = Some(f);
+                }
+            }
+
+            if let Some(f) = file {
+                self.read_files
+                    .insert(name.to_owned(), BufReader::new(f).lines());
+            } else {
+                return None; // Cannot open file
+            }
+        }
+
+        let lines = self.read_files.get_mut(name)?;
+        match lines.next() {
+            Some(Ok(line)) => Some(line),
+            _ => {
+                // EOF or error
+                Some("\0".to_string())
+            }
+        }
+    }
+
+    fn write_line(&mut self, name: &str, text: &str) -> Result<(), std::io::Error> {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(name)?;
+        writeln!(file, "{text}")
     }
 }
 

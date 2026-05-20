@@ -21,6 +21,16 @@ pub trait FileSystem {
     ///
     /// Returns `None` if the file cannot be found.
     fn read_file(&self, name: &str) -> Option<String>;
+
+    /// Read a single line from an opened file. Returns `None` at EOF or if unsupported.
+    fn read_line(&mut self, _name: &str) -> Option<String> {
+        None
+    }
+
+    /// Write a string to a file, opening or appending to it.
+    fn write_line(&mut self, _name: &str, _text: &str) -> Result<(), std::io::Error> {
+        Ok(())
+    }
 }
 
 /// A no-op filesystem that never finds any files.

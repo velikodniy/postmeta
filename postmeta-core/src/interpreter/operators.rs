@@ -99,6 +99,20 @@ impl Interpreter {
             UnaryOp::YYPart => {
                 return self.extract_part(input, 5, pair_dep, operand_binding.as_ref());
             }
+            UnaryOp::ReadFrom => {
+                let name = value_to_string(input)?;
+                let text = self
+                    .state
+                    .fs
+                    .read_line(&name)
+                    .unwrap_or_else(|| "\0".to_string());
+                return Ok(super::ExprResultValue {
+                    exp: Value::String(Arc::from(text.as_str())),
+                    ty: Type::String,
+                    dep: None,
+                    pair_dep: None,
+                });
+            }
             _ => {}
         }
 
@@ -394,13 +408,7 @@ impl Interpreter {
                     Ok((Value::Numeric(p.turning_number()), Type::Known))
                 }
             }
-            // readfrom: stub — no filesystem access (WASM compatibility).
-            // TODO: Implement via FileSystem trait when I/O support is added.
-            UnaryOp::ReadFrom => {
-                // In MetaPost, readfrom reads the next line from a file.
-                // Without filesystem access we return EOF sentinel (char 0).
-                Ok((Value::String(Arc::from("\0")), Type::String))
-            }
+
             // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
             UnaryOp::CharExists => {
                 // Stub: assume all byte-range character codes exist.
