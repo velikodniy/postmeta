@@ -477,6 +477,10 @@ impl Interpreter {
                     constant_value(&b_dep).is_none() || constant_value(&c_dep).is_none();
 
                 let dep = if a_is_linear && bc_have_linear {
+                    self.report_error(
+                        ErrorKind::IncompatibleTypes,
+                        "Nonlinear dependency in mediation",
+                    );
                     None
                 } else if a_is_linear {
                     Some(dep_add_scaled(&b_dep, &a_dep, cn - bn))
@@ -504,6 +508,10 @@ impl Interpreter {
                     || constant_value(&c_dep_y).is_none();
 
                 let pair_dep = if a_is_linear && pair_has_linear {
+                    self.report_error(
+                        ErrorKind::IncompatibleTypes,
+                        "Nonlinear dependency in mediation",
+                    );
                     None
                 } else if a_is_linear {
                     Some((
@@ -1132,6 +1140,18 @@ impl Interpreter {
                 _ => ExprResultValue::numeric_known(0.0),
             });
         }
+
+        let right_is_linear = right
+            .dep
+            .as_ref()
+            .is_some_and(|d| constant_value(d).is_none());
+        if right_is_linear {
+            self.report_error(
+                ErrorKind::IncompatibleTypes,
+                "Nonlinear dependency in division",
+            );
+        }
+
         Ok(match left_val {
             Value::Numeric(a) => {
                 let divisor = right
@@ -1139,16 +1159,20 @@ impl Interpreter {
                     .as_ref()
                     .and_then(constant_value)
                     .or_else(|| value_to_scalar(&right.exp).ok());
-                let dep = divisor.and_then(|c| {
-                    if c.abs() < f64::EPSILON {
-                        None
-                    } else {
-                        left_dep.map(|mut d| {
-                            dep_scale(&mut d, 1.0 / c);
-                            d
-                        })
-                    }
-                });
+                let dep = if right_is_linear {
+                    None
+                } else {
+                    divisor.and_then(|c| {
+                        if c.abs() < f64::EPSILON {
+                            None
+                        } else {
+                            left_dep.map(|mut d| {
+                                dep_scale(&mut d, 1.0 / c);
+                                d
+                            })
+                        }
+                    })
+                };
                 ExprResultValue {
                     exp: Value::Numeric(a / b),
                     ty: Type::Known,
@@ -1157,15 +1181,20 @@ impl Interpreter {
                 }
             }
             Value::Pair(x, y) => {
-                let (mut dx, mut dy) =
-                    left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
-                dep_scale(&mut dx, 1.0 / b);
-                dep_scale(&mut dy, 1.0 / b);
+                let pair_dep = if right_is_linear {
+                    None
+                } else {
+                    let (mut dx, mut dy) =
+                        left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
+                    dep_scale(&mut dx, 1.0 / b);
+                    dep_scale(&mut dy, 1.0 / b);
+                    Some((dx, dy))
+                };
                 ExprResultValue {
                     exp: Value::Pair(x / b, y / b),
                     ty: Type::PairType,
                     dep: None,
-                    pair_dep: Some((dx, dy)),
+                    pair_dep,
                 }
             }
             _ => {
