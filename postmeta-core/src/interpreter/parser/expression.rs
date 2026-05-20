@@ -664,33 +664,32 @@ impl Interpreter {
         sym.map_or_else(String::new, |s| self.state.symbols.name(s).to_owned())
     }
 
-    /// Parse suffix text after `str` and return its string form.
     fn scan_str_suffix(&mut self) -> InterpResult<String> {
-        let mut name = if let Some(s) = self.cur_symbolic_name() {
-            s.to_owned()
-        } else {
-            return Ok(String::new());
-        };
-        self.get_x_next();
+        let mut name = String::new();
+        let mut first = true;
 
         loop {
             if self.cur.command == Command::TagToken
                 || self.cur.command == Command::InternalQuantity
             {
                 if let Some(s) = self.cur_symbolic_name() {
-                    name.push('.');
+                    if !first {
+                        name.push('.');
+                    }
                     name.push_str(s);
                 }
                 self.get_x_next();
+                first = false;
             } else if self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
                     #[expect(
                         clippy::cast_possible_truncation,
                         reason = "legacy str suffix integer rendering follows MetaPost style"
                     )]
-                    let _ = write!(name, "[{}]", v as i64);
+                    let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{}]", v as i64));
                 }
                 self.get_x_next();
+                first = false;
             } else if self.cur.command == Command::LeftBracket {
                 self.get_x_next(); // skip `[`
                 let subscript_result = self.scan_expression()?;
@@ -702,13 +701,14 @@ impl Interpreter {
                     Value::Numeric(v) => v as i64,
                     _ => 0,
                 };
-                let _ = write!(name, "[{subscript}]");
+                let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{subscript}]"));
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
                 } else {
                     self.report_error(ErrorKind::MissingToken, "Expected `]` in suffix");
                     break;
                 }
+                first = false;
             } else {
                 break;
             }
