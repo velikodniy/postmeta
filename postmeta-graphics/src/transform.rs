@@ -176,7 +176,7 @@ pub trait Transformable {
 
 impl Transformable for Point {
     fn transformed(&self, t: &Transform) -> Self {
-        Point::new(
+        Self::new(
             t.txy.mul_add(self.y, t.txx.mul_add(self.x, t.tx)),
             t.tyy.mul_add(self.y, t.tyx.mul_add(self.x, t.ty)),
         )
