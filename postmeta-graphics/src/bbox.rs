@@ -119,7 +119,6 @@ impl BoundingBox {
     #[must_use]
     pub fn of_picture(pic: &Picture, true_corners: bool) -> Self {
         let mut bb = Self::EMPTY;
-        let mut bounds_stack: Vec<Self> = Vec::new();
 
         for obj in &pic.objects {
             match obj {
@@ -140,21 +139,28 @@ impl BoundingBox {
                 GraphicsObject::Text(text) => {
                     expand_for_text(text, &mut bb);
                 }
-                GraphicsObject::SetBoundsStart(path) if !true_corners => {
-                    bounds_stack.push(bb);
-                    bb = Self::of_path(path);
-                }
-                GraphicsObject::SetBoundsEnd if !true_corners => {
-                    if let Some(prev) = bounds_stack.pop() {
-                        let current = bb;
-                        bb = prev;
-                        bb.union(&current);
+                GraphicsObject::Picture(nested) => {
+                    let mut nested_bb = if !true_corners && nested.bounds_path.is_some() {
+                        Self::of_path(nested.bounds_path.as_ref().unwrap())
+                    } else {
+                        Self::of_picture(nested, true_corners)
+                    };
+
+                    if let Some(clip) = &nested.clip_path {
+                        let clip_bb = Self::of_path(clip);
+                        // Ideally we'd intersect the bounding boxes:
+                        nested_bb.min_x = nested_bb.min_x.max(clip_bb.min_x);
+                        nested_bb.min_y = nested_bb.min_y.max(clip_bb.min_y);
+                        nested_bb.max_x = nested_bb.max_x.min(clip_bb.max_x);
+                        nested_bb.max_y = nested_bb.max_y.min(clip_bb.max_y);
+
+                        // If completely outside clip path, bounds become empty
+                        if nested_bb.min_x > nested_bb.max_x || nested_bb.min_y > nested_bb.max_y {
+                            nested_bb = Self::EMPTY;
+                        }
                     }
+                    bb.union(&nested_bb);
                 }
-                GraphicsObject::ClipStart(_)
-                | GraphicsObject::ClipEnd
-                | GraphicsObject::SetBoundsStart(_)
-                | GraphicsObject::SetBoundsEnd => {}
             }
         }
 

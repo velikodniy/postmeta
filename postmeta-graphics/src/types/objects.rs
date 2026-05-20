@@ -21,14 +21,8 @@ pub enum GraphicsObject {
     Stroke(StrokeObject),
     /// A text label.
     Text(TextObject),
-    /// Begin a clipping region.
-    ClipStart(BezierPath),
-    /// End the most recent clipping region.
-    ClipEnd,
-    /// Begin a bounding-box override region.
-    SetBoundsStart(BezierPath),
-    /// End the most recent bounding-box override.
-    SetBoundsEnd,
+    /// A nested picture (used for grouping, clipping, and bounding).
+    Picture(crate::picture::Picture),
 }
 
 /// A filled contour.

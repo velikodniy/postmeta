@@ -3957,14 +3957,12 @@ fn clip_defaults_to_currentpicture_when_name_omitted() {
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
 
     let objs = &interp.current_picture().objects;
-    assert!(matches!(
-        objs.first(),
-        Some(postmeta_graphics::types::GraphicsObject::ClipStart(_))
-    ));
-    assert!(matches!(
-        objs.last(),
-        Some(postmeta_graphics::types::GraphicsObject::ClipEnd)
-    ));
+    assert_eq!(objs.len(), 1);
+    if let postmeta_graphics::types::GraphicsObject::Picture(nested) = &objs[0] {
+        assert!(nested.clip_path.is_some());
+    } else {
+        panic!("Expected Picture");
+    }
 }
 
 #[test]
@@ -4436,14 +4434,12 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
 
-    assert!(matches!(
-        layer_pic.objects.first(),
-        Some(postmeta_graphics::types::GraphicsObject::ClipStart(_))
-    ));
-    assert!(matches!(
-        layer_pic.objects.last(),
-        Some(postmeta_graphics::types::GraphicsObject::ClipEnd)
-    ));
+    assert_eq!(layer_pic.objects.len(), 1);
+    if let postmeta_graphics::types::GraphicsObject::Picture(nested) = &layer_pic.objects[0] {
+        assert!(nested.clip_path.is_some());
+    } else {
+        panic!("Expected Picture");
+    }
 }
 
 #[test]

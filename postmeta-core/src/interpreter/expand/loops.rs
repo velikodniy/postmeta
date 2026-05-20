@@ -7,7 +7,7 @@ use crate::interpreter::helpers;
 use crate::symbols::SymbolId;
 use crate::types::Value;
 
-use postmeta_graphics::types::{GraphicsObject, Picture};
+use postmeta_graphics::types::Picture;
 
 use super::{ForeverLoopFrame, Interpreter};
 
@@ -576,43 +576,11 @@ impl Interpreter {
 fn split_picture_components(pic: &Picture) -> Vec<Picture> {
     let mut result = Vec::new();
     let objects = &pic.objects;
-    let mut i = 0;
 
-    while i < objects.len() {
-        match &objects[i] {
-            GraphicsObject::ClipStart(_) | GraphicsObject::SetBoundsStart(_) => {
-                // Collect the entire group: start, contents, and matching end.
-                let start = i;
-                let mut depth = 1u32;
-                i += 1;
-                while i < objects.len() && depth > 0 {
-                    match &objects[i] {
-                        GraphicsObject::ClipStart(_) | GraphicsObject::SetBoundsStart(_) => {
-                            depth += 1;
-                        }
-                        GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
-                            depth -= 1;
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-                let mut comp = Picture::new();
-                comp.objects = objects[start..i].to_vec();
-                result.push(comp);
-            }
-            GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
-                // Stray end marker — skip it.
-                i += 1;
-            }
-            _ => {
-                // Single object: Fill, Stroke, or Text.
-                let mut comp = Picture::new();
-                comp.objects.push(objects[i].clone());
-                result.push(comp);
-                i += 1;
-            }
-        }
+    for obj in objects {
+        let mut comp = Picture::new();
+        comp.objects.push(obj.clone());
+        result.push(comp);
     }
 
     result

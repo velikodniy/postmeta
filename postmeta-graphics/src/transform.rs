@@ -306,10 +306,7 @@ impl Transformable for GraphicsObject {
                 color: text.color,
                 transform: text.transform.then(t),
             }),
-            Self::ClipStart(path) => Self::ClipStart(path.transformed(t)),
-            Self::ClipEnd => Self::ClipEnd,
-            Self::SetBoundsStart(path) => Self::SetBoundsStart(path.transformed(t)),
-            Self::SetBoundsEnd => Self::SetBoundsEnd,
+            Self::Picture(nested) => Self::Picture(nested.transformed(t)),
         }
     }
 }
@@ -318,6 +315,8 @@ impl Transformable for Picture {
     fn transformed(&self, t: &Transform) -> Self {
         Self {
             objects: self.objects.iter().map(|obj| obj.transformed(t)).collect(),
+            clip_path: self.clip_path.as_ref().map(|p| p.transformed(t)),
+            bounds_path: self.bounds_path.as_ref().map(|p| p.transformed(t)),
         }
     }
 }

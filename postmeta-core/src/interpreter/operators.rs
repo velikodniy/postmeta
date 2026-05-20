@@ -447,8 +447,14 @@ impl Interpreter {
                 let path = match pic.objects.first() {
                     Some(GraphicsObject::Fill(f)) => f.path.clone(),
                     Some(GraphicsObject::Stroke(s)) => s.path.clone(),
-                    Some(GraphicsObject::ClipStart(p) | GraphicsObject::SetBoundsStart(p)) => {
-                        p.clone()
+                    Some(GraphicsObject::Picture(nested)) => {
+                        if let Some(p) = &nested.clip_path {
+                            p.clone()
+                        } else if let Some(p) = &nested.bounds_path {
+                            p.clone()
+                        } else {
+                            BezierPath::from_parts(vec![Point::ZERO], vec![], false)
+                        }
                     }
                     _ => {
                         // Default: single-knot path at origin
@@ -497,12 +503,18 @@ impl Interpreter {
             }
             UnaryOp::ClippedOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::ClipStart(_)));
+                let result = match pic.objects.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.is_some(),
+                    _ => false,
+                };
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::BoundedOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::SetBoundsStart(_)));
+                let result = match pic.objects.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.bounds_path.is_some(),
+                    _ => false,
+                };
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             // Part-extraction ops are handled in do_unary before calling this.

@@ -8,7 +8,7 @@ use postmeta_graphics::types::{
 
 use crate::objects::{render_fill, render_stroke};
 use crate::path::path_to_d;
-use crate::renderer::find_matching_end;
+
 use crate::util::{color_to_svg, dash_to_svg, fmt_scalar, pen_stroke_width};
 use crate::{RenderOptions, render_to_string};
 
@@ -238,15 +238,16 @@ fn test_render_stroked_line() {
 #[test]
 fn test_render_with_clip() {
     let mut pic = Picture::new();
-    pic.push(GraphicsObject::ClipStart(make_square()));
-    pic.push(GraphicsObject::Fill(FillObject {
+    let mut nested = Picture::new();
+    nested.push(GraphicsObject::Fill(FillObject {
         path: make_square(),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
         miter_limit: 10.0,
     }));
-    pic.push(GraphicsObject::ClipEnd);
+    nested.clip_path = Some(make_square());
+    pic.push(GraphicsObject::Picture(nested));
 
     let svg = render_to_string(&pic);
     assert!(svg.contains("<clipPath"), "missing clipPath def: {svg}");
@@ -275,18 +276,6 @@ fn test_render_text() {
     assert!(svg.contains("Hello"), "missing text content: {svg}");
     assert!(svg.contains("font-family=\"CMR10\""), "missing font: {svg}");
     assert!(svg.contains("-25"), "Y should be negated in text: {svg}");
-}
-
-#[test]
-fn test_find_matching_end_nested() {
-    let objects = vec![
-        GraphicsObject::ClipStart(BezierPath::new()),
-        GraphicsObject::ClipStart(BezierPath::new()),
-        GraphicsObject::ClipEnd,
-        GraphicsObject::ClipEnd,
-    ];
-    assert_eq!(find_matching_end(&objects, 0, true), 3);
-    assert_eq!(find_matching_end(&objects, 1, true), 2);
 }
 
 #[test]
