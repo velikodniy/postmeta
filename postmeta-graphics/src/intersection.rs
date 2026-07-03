@@ -8,7 +8,7 @@
 
 use crate::bezier::CubicSegment;
 use crate::path::BezierPath;
-use crate::types::{Point, Scalar, index_to_scalar};
+use crate::types::{INTERSECT_TOL, Point, Scalar, index_to_scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -107,9 +107,6 @@ const MAX_DEPTH: u32 = 20;
 /// `MetaPost` uses `max_patience = 5000` backtracks. We count all overlap
 /// tests as work units with a comparable budget.
 const MAX_WORK: u32 = 5000;
-
-/// Tolerance for convergence.
-const INTERSECT_TOL: Scalar = 1e-6;
 
 /// A time parameter interval `[lo, hi]` within a single cubic segment.
 #[derive(Clone, Copy)]
