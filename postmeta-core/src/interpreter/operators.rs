@@ -99,6 +99,20 @@ impl Interpreter {
             UnaryOp::YYPart => {
                 return self.extract_part(input, 5, pair_dep, operand_binding.as_ref());
             }
+            UnaryOp::ReadFrom => {
+                let name = value_to_string(input)?;
+                let text = self
+                    .state
+                    .fs
+                    .read_line(&name)
+                    .unwrap_or_else(|| "\0".to_string());
+                return Ok(super::ExprResultValue {
+                    exp: Value::String(Arc::from(text.as_str())),
+                    ty: Type::String,
+                    dep: None,
+                    pair_dep: None,
+                });
+            }
             _ => {}
         }
 
@@ -284,7 +298,7 @@ impl Interpreter {
             }
             UnaryOp::Reverse => {
                 if let Value::Path(p) = input {
-                    Ok((Value::Path(p.reverse()), Type::Path))
+                    Ok((Value::Path(Arc::new(p.reverse())), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -304,7 +318,7 @@ impl Interpreter {
             }
             UnaryOp::MakePath => {
                 if let Value::Pen(p) = input {
-                    Ok((Value::Path(BezierPath::from(p)), Type::Path))
+                    Ok((Value::Path(Arc::new(BezierPath::from(p))), Type::Path))
                 } else {
                     Err(InterpreterError::new(
                         ErrorKind::TypeError,
@@ -315,7 +329,7 @@ impl Interpreter {
             UnaryOp::MakePen => {
                 // mp.web §16987: pair_to_path before makepen
                 let owned_path;
-                let path_ref = match input {
+                let path_ref: &BezierPath = match input {
                     Value::Path(p) => p,
                     Value::Pair(x, y) => {
                         owned_path =
@@ -347,10 +361,10 @@ impl Interpreter {
                         match p {
                             postmeta_graphics::types::Pen::Elliptical(t) => {
                                 for pt in [
-                                    (Point::new(1.0, 0.0)).transformed(&t),
-                                    (Point::new(-1.0, 0.0)).transformed(&t),
-                                    (Point::new(0.0, 1.0)).transformed(&t),
-                                    (Point::new(0.0, -1.0)).transformed(&t),
+                                    (Point::new(1.0, 0.0)).transformed(t),
+                                    (Point::new(-1.0, 0.0)).transformed(t),
+                                    (Point::new(0.0, 1.0)).transformed(t),
+                                    (Point::new(0.0, -1.0)).transformed(t),
                                 ] {
                                     bb.include_point(pt);
                                 }
@@ -394,13 +408,7 @@ impl Interpreter {
                     Ok((Value::Numeric(p.turning_number()), Type::Known))
                 }
             }
-            // readfrom: stub — no filesystem access (WASM compatibility).
-            // TODO: Implement via FileSystem trait when I/O support is added.
-            UnaryOp::ReadFrom => {
-                // In MetaPost, readfrom reads the next line from a file.
-                // Without filesystem access we return EOF sentinel (char 0).
-                Ok((Value::String(Arc::from("\0")), Type::String))
-            }
+
             // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
             UnaryOp::CharExists => {
                 // Stub: assume all byte-range character codes exist.
@@ -439,12 +447,24 @@ impl Interpreter {
                 let path = match pic.objects.first() {
                     Some(GraphicsObject::Fill(f)) => f.path.clone(),
                     Some(GraphicsObject::Stroke(s)) => s.path.clone(),
-                    Some(GraphicsObject::ClipStart(p) | GraphicsObject::SetBoundsStart(p)) => {
-                        p.clone()
-                    }
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.as_ref().map_or_else(
+                        || {
+                            nested.bounds_path.as_ref().map_or_else(
+                                || {
+                                    Arc::new(BezierPath::from_parts(
+                                        vec![Point::ZERO],
+                                        vec![],
+                                        false,
+                                    ))
+                                },
+                                Clone::clone,
+                            )
+                        },
+                        Clone::clone,
+                    ),
                     _ => {
                         // Default: single-knot path at origin
-                        BezierPath::from_parts(vec![Point::ZERO], vec![], false)
+                        Arc::new(BezierPath::from_parts(vec![Point::ZERO], vec![], false))
                     }
                 };
                 Ok((Value::Path(path), Type::Path))
@@ -489,12 +509,18 @@ impl Interpreter {
             }
             UnaryOp::ClippedOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::ClipStart(_)));
+                let result = match pic.objects.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.is_some(),
+                    _ => false,
+                };
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::BoundedOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::SetBoundsStart(_)));
+                let result = match pic.objects.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.bounds_path.is_some(),
+                    _ => false,
+                };
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             // Part-extraction ops are handled in do_unary before calling this.
@@ -533,7 +559,7 @@ impl Interpreter {
             PrimaryBinaryOp::SubpathOf => {
                 let (t1, t2) = value_to_pair(first)?;
                 let p = value_to_path(second)?;
-                Ok((Value::Path(p.subpath(t1, t2)), Type::Path))
+                Ok((Value::Path(Arc::new(p.subpath(t1, t2))), Type::Path))
             }
             PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
@@ -701,7 +727,7 @@ impl Interpreter {
                 let pt = Point::new(*x, *y).transformed(t);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
-            Value::Path(p) => Ok((Value::Path(p.transformed(t)), Type::Path)),
+            Value::Path(p) => Ok((Value::Path(Arc::new(p.transformed(t))), Type::Path)),
             Value::Pen(p) => Ok((Value::Pen(p.transformed(t)), Type::Pen)),
             Value::Picture(p) => Ok((Value::Picture(p.transformed(t)), Type::Picture)),
             Value::Transform(existing) => {

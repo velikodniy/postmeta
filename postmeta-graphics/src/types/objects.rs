@@ -21,20 +21,14 @@ pub enum GraphicsObject {
     Stroke(StrokeObject),
     /// A text label.
     Text(TextObject),
-    /// Begin a clipping region.
-    ClipStart(BezierPath),
-    /// End the most recent clipping region.
-    ClipEnd,
-    /// Begin a bounding-box override region.
-    SetBoundsStart(BezierPath),
-    /// End the most recent bounding-box override.
-    SetBoundsEnd,
+    /// A nested picture (used for grouping, clipping, and bounding).
+    Picture(crate::picture::Picture),
 }
 
 /// A filled contour.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillObject {
-    pub path: BezierPath,
+    pub path: std::sync::Arc<BezierPath>,
     pub color: Color,
     /// Optional pen for "filldraw" (stroke the contour too).
     pub pen: Option<Pen>,
@@ -45,7 +39,7 @@ pub struct FillObject {
 /// A stroked path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrokeObject {
-    pub path: BezierPath,
+    pub path: std::sync::Arc<BezierPath>,
     pub pen: Pen,
     pub color: Color,
     pub dash: Option<DashPattern>,

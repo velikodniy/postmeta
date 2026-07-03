@@ -20,6 +20,8 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
     pub objects: Vec<GraphicsObject>,
+    pub clip_path: Option<std::sync::Arc<BezierPath>>,
+    pub bounds_path: Option<std::sync::Arc<BezierPath>>,
 }
 
 impl Picture {
@@ -27,6 +29,8 @@ impl Picture {
     pub const fn new() -> Self {
         Self {
             objects: Vec::new(),
+            clip_path: None,
+            bounds_path: None,
         }
     }
 
@@ -59,26 +63,32 @@ impl Picture {
 
     /// Clip the picture to a cyclic path.
     ///
-    /// Wraps all existing objects in `ClipStart`/`ClipEnd` brackets.
-    pub fn clip(&mut self, clip_path: BezierPath) {
+    /// Wraps all existing objects in a nested picture with a `clip_path`.
+    pub fn clip(&mut self, clip_path: std::sync::Arc<BezierPath>) {
         debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
-        self.push(GraphicsObject::ClipStart(clip_path));
-        self.objects.extend(existing);
-        self.push(GraphicsObject::ClipEnd);
+        let nested = Self {
+            objects: existing,
+            clip_path: Some(clip_path),
+            bounds_path: None,
+        };
+        self.push(GraphicsObject::Picture(nested));
     }
 
     /// Set an artificial bounding box on the picture.
     ///
-    /// Wraps all existing objects in `SetBoundsStart`/`SetBoundsEnd` brackets.
-    pub fn set_bounds(&mut self, bounds_path: BezierPath) {
+    /// Wraps all existing objects in a nested picture with a `bounds_path`.
+    pub fn set_bounds(&mut self, bounds_path: std::sync::Arc<BezierPath>) {
         debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
-        self.push(GraphicsObject::SetBoundsStart(bounds_path));
-        self.objects.extend(existing);
-        self.push(GraphicsObject::SetBoundsEnd);
+        let nested = Self {
+            objects: existing,
+            clip_path: None,
+            bounds_path: Some(bounds_path),
+        };
+        self.push(GraphicsObject::Picture(nested));
     }
 }
 
@@ -97,7 +107,7 @@ mod tests {
         let mut pic = Picture::new();
         let path = test_helpers::square();
         pic.add_fill(FillObject {
-            path,
+            path: std::sync::Arc::new(path),
             color: Color::BLACK,
             pen: None,
             line_join: LineJoin::Round,
@@ -113,7 +123,7 @@ mod tests {
         let path = test_helpers::line();
 
         pic.add_stroke(StrokeObject {
-            path,
+            path: std::sync::Arc::new(path),
             pen: Pen::circle(1.0),
             color: Color::BLACK,
             dash: None,
@@ -128,10 +138,10 @@ mod tests {
     #[test]
     fn test_merge() {
         let mut pic1 = Picture::new();
-        pic1.push(GraphicsObject::ClipEnd);
+        pic1.push(GraphicsObject::Picture(Picture::new()));
 
         let mut pic2 = Picture::new();
-        pic2.push(GraphicsObject::SetBoundsEnd);
+        pic2.push(GraphicsObject::Picture(Picture::new()));
 
         pic1.merge(pic2);
         assert_eq!(pic1.objects.len(), 2);
@@ -140,27 +150,32 @@ mod tests {
     #[test]
     fn test_clip() {
         let mut pic = Picture::new();
-        pic.push(GraphicsObject::ClipEnd); // dummy content
+        pic.push(GraphicsObject::Picture(Picture::new())); // dummy content
 
         let clip_path = test_helpers::square();
-        pic.clip(clip_path);
+        pic.clip(std::sync::Arc::new(clip_path));
 
-        assert_eq!(pic.objects.len(), 3);
-        assert!(matches!(pic.objects[0], GraphicsObject::ClipStart(_)));
-        assert!(matches!(pic.objects[1], GraphicsObject::ClipEnd));
-        assert!(matches!(pic.objects[2], GraphicsObject::ClipEnd));
+        assert_eq!(pic.objects.len(), 1);
+        if let GraphicsObject::Picture(nested) = &pic.objects[0] {
+            assert!(nested.clip_path.is_some());
+        } else {
+            panic!("Expected Picture");
+        }
     }
 
     #[test]
     fn test_set_bounds() {
         let mut pic = Picture::new();
-        pic.push(GraphicsObject::ClipEnd); // dummy content
+        pic.push(GraphicsObject::Picture(Picture::new())); // dummy content
 
         let bounds = test_helpers::square();
-        pic.set_bounds(bounds);
+        pic.set_bounds(std::sync::Arc::new(bounds));
 
-        assert_eq!(pic.objects.len(), 3);
-        assert!(matches!(pic.objects[0], GraphicsObject::SetBoundsStart(_)));
-        assert!(matches!(pic.objects[2], GraphicsObject::SetBoundsEnd));
+        assert_eq!(pic.objects.len(), 1);
+        if let GraphicsObject::Picture(nested) = &pic.objects[0] {
+            assert!(nested.bounds_path.is_some());
+        } else {
+            panic!("Expected Picture");
+        }
     }
 }

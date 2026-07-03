@@ -21,7 +21,7 @@ use super::helpers::{value_to_path_owned, value_to_scalar};
 
 enum DoublePathTarget {
     Dot { x: f64, y: f64 },
-    Path(postmeta_graphics::path::BezierPath),
+    Path(std::sync::Arc<postmeta_graphics::path::BezierPath>),
 }
 
 impl Interpreter {
@@ -203,7 +203,7 @@ impl Interpreter {
                             let dot = postmeta_graphics::path::BezierPath::from(&ds.pen);
                             let shifted = dot.transformed(&Transform::shifted(x, y));
                             target.add_fill(FillObject {
-                                path: shifted,
+                                path: std::sync::Arc::new(shifted),
                                 color: ds.color,
                                 pen: None,
                                 line_join: ds.line_join,
@@ -322,9 +322,9 @@ impl Interpreter {
             &pic_name,
             |target| {
                 if is_clip {
-                    target.clip(clip_path);
+                    target.clip(clip_path.clone());
                 } else {
-                    target.set_bounds(clip_path);
+                    target.set_bounds(clip_path.clone());
                 }
             },
         );

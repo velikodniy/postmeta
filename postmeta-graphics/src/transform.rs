@@ -176,7 +176,7 @@ pub trait Transformable {
 
 impl Transformable for Point {
     fn transformed(&self, t: &Transform) -> Self {
-        Point::new(
+        Self::new(
             t.txy.mul_add(self.y, t.txx.mul_add(self.x, t.tx)),
             t.tyy.mul_add(self.y, t.tyx.mul_add(self.x, t.ty)),
         )
@@ -269,14 +269,14 @@ impl Transformable for GraphicsObject {
     fn transformed(&self, t: &Transform) -> Self {
         match self {
             Self::Fill(fill) => Self::Fill(FillObject {
-                path: fill.path.transformed(t),
+                path: std::sync::Arc::new(fill.path.transformed(t)),
                 color: fill.color,
                 pen: fill.pen.as_ref().map(|p| p.transformed(t)),
                 line_join: fill.line_join,
                 miter_limit: fill.miter_limit,
             }),
             Self::Stroke(stroke) => Self::Stroke(StrokeObject {
-                path: stroke.path.transformed(t),
+                path: std::sync::Arc::new(stroke.path.transformed(t)),
                 pen: stroke.pen.transformed(t),
                 color: stroke.color,
                 dash: stroke.dash.clone().map(|mut d| {
@@ -306,10 +306,7 @@ impl Transformable for GraphicsObject {
                 color: text.color,
                 transform: text.transform.then(t),
             }),
-            Self::ClipStart(path) => Self::ClipStart(path.transformed(t)),
-            Self::ClipEnd => Self::ClipEnd,
-            Self::SetBoundsStart(path) => Self::SetBoundsStart(path.transformed(t)),
-            Self::SetBoundsEnd => Self::SetBoundsEnd,
+            Self::Picture(nested) => Self::Picture(nested.transformed(t)),
         }
     }
 }
@@ -318,6 +315,14 @@ impl Transformable for Picture {
     fn transformed(&self, t: &Transform) -> Self {
         Self {
             objects: self.objects.iter().map(|obj| obj.transformed(t)).collect(),
+            clip_path: self
+                .clip_path
+                .as_ref()
+                .map(|p| std::sync::Arc::new(p.transformed(t))),
+            bounds_path: self
+                .bounds_path
+                .as_ref()
+                .map(|p| std::sync::Arc::new(p.transformed(t))),
         }
     }
 }

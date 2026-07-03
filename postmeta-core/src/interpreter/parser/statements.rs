@@ -1,5 +1,6 @@
 use crate::command::{Command, MacroSpecialOp};
-use crate::error::{ErrorKind, InterpResult};
+use crate::error::{ErrorKind, InterpResult, InterpreterError};
+use crate::interpreter::helpers::value_to_string;
 use crate::interpreter::{Interpreter, LhsBinding};
 use crate::types::Value;
 
@@ -52,7 +53,7 @@ impl Interpreter {
             Command::RandomSeed => self.do_randomseed(),
             Command::EveryJob => self.do_unimplemented_statement("everyjob"),
             Command::Special => self.do_special(),
-            Command::Write => self.do_unimplemented_statement("write"),
+            Command::Write => self.do_write(),
             Command::DoubleColon => {
                 self.report_error(ErrorKind::UnexpectedToken, "Unexpected `::`");
                 self.get_x_next();
@@ -168,5 +169,26 @@ impl Interpreter {
                 Ok(())
             }
         }
+    }
+
+    /// Implement `write <expr> to <expr>`.
+    fn do_write(&mut self) -> InterpResult<()> {
+        self.get_x_next();
+        let text_res = self.scan_expression()?;
+        if self.cur.command != Command::ToToken {
+            return Err(InterpreterError::new(
+                ErrorKind::MissingToken,
+                "Expected `to` in write statement",
+            ));
+        }
+        self.get_x_next();
+        let file_res = self.scan_expression()?;
+
+        let text_str = value_to_string(&text_res.exp)?;
+        let file_str = value_to_string(&file_res.exp)?;
+
+        let _ = self.state.fs.write_line(&file_str, &text_str);
+
+        Ok(())
     }
 }

@@ -92,33 +92,21 @@ impl<'a> SvgRenderer<'a> {
                     group = self.render_text_object(group, text);
                     i += 1;
                 }
-                GraphicsObject::ClipStart(clip_path) => {
-                    let end = find_matching_end(objects, i, true);
-                    let inner = &objects[i + 1..end];
+                GraphicsObject::Picture(nested) => {
+                    let mut inner_group = self.render_objects(&nested.objects);
 
-                    let clip_id = self.next_clip_id();
-                    let clip_data = path_to_d(clip_path, self.opts.precision);
-                    let clip_def = ClipPath::new()
-                        .set("id", clip_id.as_str())
-                        .add(svg::node::element::Path::new().set("d", clip_data));
-                    self.clip_defs.push(clip_def);
+                    if let Some(clip_path) = &nested.clip_path {
+                        let clip_id = self.next_clip_id();
+                        let clip_data = path_to_d(clip_path, self.opts.precision);
+                        let clip_def = ClipPath::new()
+                            .set("id", clip_id.as_str())
+                            .add(svg::node::element::Path::new().set("d", clip_data));
+                        self.clip_defs.push(clip_def);
 
-                    let inner_group = self.render_objects(inner);
-                    let clipped = Group::new()
-                        .set("clip-path", format!("url(#{clip_id})"))
-                        .add(inner_group);
-                    group = group.add(clipped);
+                        inner_group = inner_group.set("clip-path", format!("url(#{clip_id})"));
+                    }
 
-                    i = end + 1;
-                }
-                GraphicsObject::SetBoundsStart(_) => {
-                    let end = find_matching_end(objects, i, false);
-                    let inner = &objects[i + 1..end];
-                    let inner_group = self.render_objects(inner);
                     group = group.add(inner_group);
-                    i = end + 1;
-                }
-                GraphicsObject::ClipEnd | GraphicsObject::SetBoundsEnd => {
                     i += 1;
                 }
             }
@@ -184,37 +172,11 @@ impl<'a> SvgRenderer<'a> {
             }
 
             if let Some(adv) = font.advance_width(gid) {
-                cursor_x += f64::from(adv) * scale;
+                cursor_x = f64::from(adv).mul_add(scale, cursor_x);
             }
             prev_glyph = Some(gid);
         }
 
         Some(g)
     }
-}
-
-/// Find the matching `ClipEnd` or `SetBoundsEnd` for a start bracket at
-/// index `start`. Returns the index of the matching end bracket.
-pub fn find_matching_end(objects: &[GraphicsObject], start: usize, is_clip: bool) -> usize {
-    let mut depth = 0;
-    for (offset, obj) in objects[start..].iter().enumerate() {
-        match obj {
-            GraphicsObject::ClipStart(_) if is_clip => depth += 1,
-            GraphicsObject::ClipEnd if is_clip => {
-                depth -= 1;
-                if depth == 0 {
-                    return start + offset;
-                }
-            }
-            GraphicsObject::SetBoundsStart(_) if !is_clip => depth += 1,
-            GraphicsObject::SetBoundsEnd if !is_clip => {
-                depth -= 1;
-                if depth == 0 {
-                    return start + offset;
-                }
-            }
-            _ => {}
-        }
-    }
-    objects.len()
 }

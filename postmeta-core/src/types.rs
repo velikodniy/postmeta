@@ -174,7 +174,7 @@ pub enum Value {
     /// String.
     String(Arc<str>),
     /// Path.
-    Path(BezierPath),
+    Path(Arc<BezierPath>),
     /// Pen.
     Pen(Pen),
     /// Picture.
@@ -241,7 +241,7 @@ impl Value {
 
     /// Try to extract a path value.
     #[must_use]
-    pub const fn as_path(&self) -> Option<&BezierPath> {
+    pub const fn as_path(&self) -> Option<&Arc<BezierPath>> {
         if let Self::Path(p) = self {
             Some(p)
         } else {

@@ -5,6 +5,7 @@
 
 use postmeta_graphics::path::KnotPath;
 use postmeta_graphics::types::{Knot, KnotDirection, Point, Scalar};
+use std::sync::Arc;
 
 use crate::command::Command;
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
@@ -220,7 +221,9 @@ impl Interpreter {
         let knot_path = KnotPath::from_knots(knots, is_cyclic);
         let bezier_path = knot_path.resolve();
 
-        Ok(super::ExprResultValue::plain(Value::Path(bezier_path)))
+        Ok(super::ExprResultValue::plain(Value::Path(Arc::new(
+            bezier_path,
+        ))))
     }
 
     /// Concatenate path knots for `&`.

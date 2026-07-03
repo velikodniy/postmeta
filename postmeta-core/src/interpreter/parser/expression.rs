@@ -468,6 +468,7 @@ impl Interpreter {
 
         // a[b,c] = b + a*(c-b) = (1-a)*b + a*c
         let one_minus_a = 1.0 - a;
+        let lerp = |b: f64, c: f64| a.mul_add(c - b, b);
         let result = match (b, c) {
             (Value::Numeric(bn), Value::Numeric(cn)) => {
                 let b_dep = b_dep.unwrap_or_else(|| const_dep(bn));
@@ -477,6 +478,10 @@ impl Interpreter {
                     constant_value(&b_dep).is_none() || constant_value(&c_dep).is_none();
 
                 let dep = if a_is_linear && bc_have_linear {
+                    self.report_error(
+                        ErrorKind::IncompatibleTypes,
+                        "Nonlinear dependency in mediation",
+                    );
                     None
                 } else if a_is_linear {
                     Some(dep_add_scaled(&b_dep, &a_dep, cn - bn))
@@ -504,6 +509,10 @@ impl Interpreter {
                     || constant_value(&c_dep_y).is_none();
 
                 let pair_dep = if a_is_linear && pair_has_linear {
+                    self.report_error(
+                        ErrorKind::IncompatibleTypes,
+                        "Nonlinear dependency in mediation",
+                    );
                     None
                 } else if a_is_linear {
                     Some((
@@ -522,7 +531,7 @@ impl Interpreter {
                     Some((dep_x, dep_y))
                 };
                 ExprResultValue {
-                    exp: Value::Pair(one_minus_a * bx + a * cx, one_minus_a * by + a * cy),
+                    exp: Value::Pair(lerp(bx, cx), lerp(by, cy)),
                     ty: Type::PairType,
                     dep: None,
                     pair_dep,
@@ -530,19 +539,19 @@ impl Interpreter {
             }
             (Value::Color(bc), Value::Color(cc)) => {
                 ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(
-                    one_minus_a * bc.r + a * cc.r,
-                    one_minus_a * bc.g + a * cc.g,
-                    one_minus_a * bc.b + a * cc.b,
+                    lerp(bc.r, cc.r),
+                    lerp(bc.g, cc.g),
+                    lerp(bc.b, cc.b),
                 )))
             }
             (Value::Transform(bt), Value::Transform(ct)) => {
                 ExprResultValue::plain(Value::Transform(postmeta_graphics::types::Transform {
-                    tx: one_minus_a * bt.tx + a * ct.tx,
-                    ty: one_minus_a * bt.ty + a * ct.ty,
-                    txx: one_minus_a * bt.txx + a * ct.txx,
-                    txy: one_minus_a * bt.txy + a * ct.txy,
-                    tyx: one_minus_a * bt.tyx + a * ct.tyx,
-                    tyy: one_minus_a * bt.tyy + a * ct.tyy,
+                    tx: lerp(bt.tx, ct.tx),
+                    ty: lerp(bt.ty, ct.ty),
+                    txx: lerp(bt.txx, ct.txx),
+                    txy: lerp(bt.txy, ct.txy),
+                    tyx: lerp(bt.tyx, ct.tyx),
+                    tyy: lerp(bt.tyy, ct.tyy),
                 }))
             }
             (bv, cv) => {
@@ -664,33 +673,32 @@ impl Interpreter {
         sym.map_or_else(String::new, |s| self.state.symbols.name(s).to_owned())
     }
 
-    /// Parse suffix text after `str` and return its string form.
     fn scan_str_suffix(&mut self) -> InterpResult<String> {
-        let mut name = if let Some(s) = self.cur_symbolic_name() {
-            s.to_owned()
-        } else {
-            return Ok(String::new());
-        };
-        self.get_x_next();
+        let mut name = String::new();
+        let mut first = true;
 
         loop {
             if self.cur.command == Command::TagToken
                 || self.cur.command == Command::InternalQuantity
             {
                 if let Some(s) = self.cur_symbolic_name() {
-                    name.push('.');
+                    if !first {
+                        name.push('.');
+                    }
                     name.push_str(s);
                 }
                 self.get_x_next();
+                first = false;
             } else if self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
                     #[expect(
                         clippy::cast_possible_truncation,
                         reason = "legacy str suffix integer rendering follows MetaPost style"
                     )]
-                    let _ = write!(name, "[{}]", v as i64);
+                    let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{}]", v as i64));
                 }
                 self.get_x_next();
+                first = false;
             } else if self.cur.command == Command::LeftBracket {
                 self.get_x_next(); // skip `[`
                 let subscript_result = self.scan_expression()?;
@@ -702,13 +710,14 @@ impl Interpreter {
                     Value::Numeric(v) => v as i64,
                     _ => 0,
                 };
-                let _ = write!(name, "[{subscript}]");
+                let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{subscript}]"));
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
                 } else {
                     self.report_error(ErrorKind::MissingToken, "Expected `]` in suffix");
                     break;
                 }
+                first = false;
             } else {
                 break;
             }
@@ -1132,6 +1141,18 @@ impl Interpreter {
                 _ => ExprResultValue::numeric_known(0.0),
             });
         }
+
+        let right_is_linear = right
+            .dep
+            .as_ref()
+            .is_some_and(|d| constant_value(d).is_none());
+        if right_is_linear {
+            self.report_error(
+                ErrorKind::IncompatibleTypes,
+                "Nonlinear dependency in division",
+            );
+        }
+
         Ok(match left_val {
             Value::Numeric(a) => {
                 let divisor = right
@@ -1139,16 +1160,20 @@ impl Interpreter {
                     .as_ref()
                     .and_then(constant_value)
                     .or_else(|| value_to_scalar(&right.exp).ok());
-                let dep = divisor.and_then(|c| {
-                    if c.abs() < f64::EPSILON {
-                        None
-                    } else {
-                        left_dep.map(|mut d| {
-                            dep_scale(&mut d, 1.0 / c);
-                            d
-                        })
-                    }
-                });
+                let dep = if right_is_linear {
+                    None
+                } else {
+                    divisor.and_then(|c| {
+                        if c.abs() < f64::EPSILON {
+                            None
+                        } else {
+                            left_dep.map(|mut d| {
+                                dep_scale(&mut d, 1.0 / c);
+                                d
+                            })
+                        }
+                    })
+                };
                 ExprResultValue {
                     exp: Value::Numeric(a / b),
                     ty: Type::Known,
@@ -1157,15 +1182,20 @@ impl Interpreter {
                 }
             }
             Value::Pair(x, y) => {
-                let (mut dx, mut dy) =
-                    left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
-                dep_scale(&mut dx, 1.0 / b);
-                dep_scale(&mut dy, 1.0 / b);
+                let pair_dep = if right_is_linear {
+                    None
+                } else {
+                    let (mut dx, mut dy) =
+                        left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
+                    dep_scale(&mut dx, 1.0 / b);
+                    dep_scale(&mut dy, 1.0 / b);
+                    Some((dx, dy))
+                };
                 ExprResultValue {
                     exp: Value::Pair(x / b, y / b),
                     ty: Type::PairType,
                     dep: None,
-                    pair_dep: Some((dx, dy)),
+                    pair_dep,
                 }
             }
             _ => {

@@ -8,7 +8,7 @@ use postmeta_graphics::types::{
 
 use crate::objects::{render_fill, render_stroke};
 use crate::path::path_to_d;
-use crate::renderer::find_matching_end;
+
 use crate::util::{color_to_svg, dash_to_svg, fmt_scalar, pen_stroke_width};
 use crate::{RenderOptions, render_to_string};
 
@@ -137,7 +137,7 @@ fn test_dash_to_svg() {
 #[test]
 fn test_render_fill_produces_svg_path() {
     let fill = FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
@@ -153,7 +153,7 @@ fn test_render_fill_produces_svg_path() {
 #[test]
 fn test_render_stroke_produces_svg_path() {
     let stroke = StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: None,
@@ -175,7 +175,7 @@ fn test_render_stroke_produces_svg_path() {
 #[test]
 fn test_render_stroke_with_dash() {
     let stroke = StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: Some(DashPattern {
@@ -204,7 +204,7 @@ fn test_render_empty_picture() {
 fn test_render_filled_square() {
     let mut pic = Picture::new();
     pic.add_fill(FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(0.0, 0.0, 1.0),
         pen: None,
         line_join: LineJoin::Round,
@@ -222,7 +222,7 @@ fn test_render_filled_square() {
 fn test_render_stroked_line() {
     let mut pic = Picture::new();
     pic.add_stroke(StrokeObject {
-        path: make_line(),
+        path: std::sync::Arc::new(make_line()),
         pen: Pen::circle(1.0),
         color: Color::BLACK,
         dash: None,
@@ -238,15 +238,16 @@ fn test_render_stroked_line() {
 #[test]
 fn test_render_with_clip() {
     let mut pic = Picture::new();
-    pic.push(GraphicsObject::ClipStart(make_square()));
-    pic.push(GraphicsObject::Fill(FillObject {
-        path: make_square(),
+    let mut nested = Picture::new();
+    nested.push(GraphicsObject::Fill(FillObject {
+        path: std::sync::Arc::new(make_square()),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
         miter_limit: 10.0,
     }));
-    pic.push(GraphicsObject::ClipEnd);
+    nested.clip_path = Some(std::sync::Arc::new(make_square()));
+    pic.push(GraphicsObject::Picture(nested));
 
     let svg = render_to_string(&pic);
     assert!(svg.contains("<clipPath"), "missing clipPath def: {svg}");
@@ -278,22 +279,10 @@ fn test_render_text() {
 }
 
 #[test]
-fn test_find_matching_end_nested() {
-    let objects = vec![
-        GraphicsObject::ClipStart(BezierPath::new()),
-        GraphicsObject::ClipStart(BezierPath::new()),
-        GraphicsObject::ClipEnd,
-        GraphicsObject::ClipEnd,
-    ];
-    assert_eq!(find_matching_end(&objects, 0, true), 3);
-    assert_eq!(find_matching_end(&objects, 1, true), 2);
-}
-
-#[test]
 fn test_viewbox_uses_bbox() {
     let mut pic = Picture::new();
     pic.add_fill(FillObject {
-        path: make_square(),
+        path: std::sync::Arc::new(make_square()),
         color: Color::BLACK,
         pen: None,
         line_join: LineJoin::Round,
