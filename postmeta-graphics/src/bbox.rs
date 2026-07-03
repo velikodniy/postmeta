@@ -11,6 +11,17 @@ use crate::types::{GraphicsObject, Pen, Picture, Point, Scalar, TextObject, Vec2
 // BoundingBox type
 // ---------------------------------------------------------------------------
 
+/// How `setbounds` regions are treated when measuring a picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corners {
+    /// A `setbounds` path overrides the bbox of the objects it wraps.
+    /// This is `MetaPost`’s default behavior (`truecorners = 0`).
+    HonorSetBounds,
+    /// Measure the actual contents, ignoring `setbounds` regions
+    /// (`truecorners = 1`).
+    True,
+}
+
 /// Axis-aligned bounding box.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundingBox {
@@ -149,11 +160,8 @@ impl BoundingBox {
     }
 
     /// Compute the bounding box of a picture.
-    ///
-    /// When `true_corners` is false, `SetBounds` regions override the
-    /// computed bbox. When true, they are ignored.
     #[must_use]
-    pub fn of_picture(pic: &Picture, true_corners: bool) -> Self {
+    pub fn of_picture(pic: &Picture, corners: Corners) -> Self {
         let mut bb = Self::EMPTY;
 
         for obj in pic.objects() {
@@ -176,13 +184,9 @@ impl BoundingBox {
                     expand_for_text(text, &mut bb);
                 }
                 GraphicsObject::Picture(nested) => {
-                    let mut nested_bb = if true_corners {
-                        Self::of_picture(nested, true_corners)
-                    } else {
-                        nested.bounds_path().map_or_else(
-                            || Self::of_picture(nested, true_corners),
-                            |bounds| Self::of_path(bounds),
-                        )
+                    let mut nested_bb = match (corners, nested.bounds_path()) {
+                        (Corners::HonorSetBounds, Some(bounds)) => Self::of_path(bounds),
+                        _ => Self::of_picture(nested, corners),
                     };
 
                     if let Some(clip) = nested.clip_path() {
@@ -300,7 +304,7 @@ mod tests {
             miter_limit: 10.0,
         });
 
-        let bb = BoundingBox::of_picture(&pic, true);
+        let bb = BoundingBox::of_picture(&pic, Corners::True);
         assert!(bb.is_valid());
         assert!(bb.width() > 9.0);
         assert!(bb.height() > 9.0);
@@ -355,7 +359,7 @@ mod tests {
         };
         let mut pic = Picture::new();
         pic.push(GraphicsObject::Text(text));
-        let bb = BoundingBox::of_picture(&pic, false);
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
 
         assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
         assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
@@ -375,7 +379,7 @@ mod tests {
         };
         let mut pic = Picture::new();
         pic.push(GraphicsObject::Text(text));
-        let bb = BoundingBox::of_picture(&pic, false);
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
 
         // Zero metrics → all four corners collapse to the origin.
         assert!(bb.min_x.abs() < EPSILON, "min_x: {}", bb.min_x);
@@ -520,7 +524,7 @@ mod tests {
         });
         pic.clip(Arc::new(test_helpers::square()));
 
-        let bb = BoundingBox::of_picture(&pic, false);
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
         assert!(bb.is_valid());
         assert!(bb.max_x <= 10.0 + EPSILON, "max_x: {}", bb.max_x);
         assert!(bb.max_y <= 10.0 + EPSILON, "max_y: {}", bb.max_y);

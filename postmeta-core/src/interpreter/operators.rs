@@ -6,7 +6,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use postmeta_fonts::FontProvider;
-use postmeta_graphics::bbox::BoundingBox;
+use postmeta_graphics::bbox::{BoundingBox, Corners};
 use postmeta_graphics::math;
 use postmeta_graphics::path::BezierPath;
 use postmeta_graphics::transform::Transformable;
@@ -354,7 +354,7 @@ impl Interpreter {
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 let bb = match input {
-                    Value::Picture(pic) => BoundingBox::of_picture(pic, false),
+                    Value::Picture(pic) => BoundingBox::of_picture(pic, Corners::HonorSetBounds),
                     Value::Path(p) => BoundingBox::of_path(p),
                     Value::Pen(p) => {
                         let mut bb = BoundingBox::EMPTY;
