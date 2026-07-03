@@ -13,6 +13,7 @@
 //! - `scan_tertiary`: `+`, `-`, `++`, `+-+`
 //! - `scan_expression`: `=`, `<`, `>`, path construction
 
+mod dep_arith;
 mod equation;
 mod expand;
 pub(crate) mod helpers;
