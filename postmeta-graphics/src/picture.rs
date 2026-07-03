@@ -38,6 +38,47 @@ impl Picture {
         self.objects.push(obj);
     }
 
+    /// The objects in this picture, in paint order.
+    #[must_use]
+    pub fn objects(&self) -> &[GraphicsObject] {
+        &self.objects
+    }
+
+    /// Iterate over the objects in paint order.
+    pub fn iter(&self) -> std::slice::Iter<'_, GraphicsObject> {
+        self.objects.iter()
+    }
+
+    /// The first object, if any.
+    #[must_use]
+    pub fn first(&self) -> Option<&GraphicsObject> {
+        self.objects.first()
+    }
+
+    /// Number of objects in the picture.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Whether the picture contains no objects.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// The clip path applied to this picture's objects, if any.
+    #[must_use]
+    pub const fn clip_path(&self) -> Option<&std::sync::Arc<BezierPath>> {
+        self.clip_path.as_ref()
+    }
+
+    /// The artificial bounding path set by `setbounds`, if any.
+    #[must_use]
+    pub const fn bounds_path(&self) -> Option<&std::sync::Arc<BezierPath>> {
+        self.bounds_path.as_ref()
+    }
+
     /// Append all objects from another picture.
     pub fn merge(&mut self, other: Self) {
         self.objects.extend(other.objects);
@@ -89,6 +130,15 @@ impl Picture {
             bounds_path: Some(bounds_path),
         };
         self.push(GraphicsObject::Picture(nested));
+    }
+}
+
+impl<'a> IntoIterator for &'a Picture {
+    type Item = &'a GraphicsObject;
+    type IntoIter = std::slice::Iter<'a, GraphicsObject>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 
