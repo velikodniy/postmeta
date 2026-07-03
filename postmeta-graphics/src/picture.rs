@@ -9,7 +9,7 @@
 //! - `clip <pic> to <path>` — clip to a region
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
-use crate::path::BezierPath;
+use crate::path::SharedPath;
 use crate::types::{FillObject, GraphicsObject, StrokeObject};
 
 // ---------------------------------------------------------------------------
@@ -25,8 +25,8 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
     pub(crate) objects: Vec<GraphicsObject>,
-    pub(crate) clip_path: Option<std::sync::Arc<BezierPath>>,
-    pub(crate) bounds_path: Option<std::sync::Arc<BezierPath>>,
+    pub(crate) clip_path: Option<SharedPath>,
+    pub(crate) bounds_path: Option<SharedPath>,
 }
 
 impl Picture {
@@ -74,13 +74,13 @@ impl Picture {
 
     /// The clip path applied to this picture's objects, if any.
     #[must_use]
-    pub const fn clip_path(&self) -> Option<&std::sync::Arc<BezierPath>> {
+    pub const fn clip_path(&self) -> Option<&SharedPath> {
         self.clip_path.as_ref()
     }
 
     /// The artificial bounding path set by `setbounds`, if any.
     #[must_use]
-    pub const fn bounds_path(&self) -> Option<&std::sync::Arc<BezierPath>> {
+    pub const fn bounds_path(&self) -> Option<&SharedPath> {
         self.bounds_path.as_ref()
     }
 
@@ -110,7 +110,8 @@ impl Picture {
     /// Clip the picture to a cyclic path.
     ///
     /// Wraps all existing objects in a nested picture with a `clip_path`.
-    pub fn clip(&mut self, clip_path: std::sync::Arc<BezierPath>) {
+    pub fn clip(&mut self, clip_path: impl Into<SharedPath>) {
+        let clip_path = clip_path.into();
         debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
@@ -125,7 +126,8 @@ impl Picture {
     /// Set an artificial bounding box on the picture.
     ///
     /// Wraps all existing objects in a nested picture with a `bounds_path`.
-    pub fn set_bounds(&mut self, bounds_path: std::sync::Arc<BezierPath>) {
+    pub fn set_bounds(&mut self, bounds_path: impl Into<SharedPath>) {
+        let bounds_path = bounds_path.into();
         debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);

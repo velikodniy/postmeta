@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use super::geometry::Scalar;
 use super::style::{Color, DashPattern, LineCap, LineJoin};
-use crate::path::BezierPath;
+use crate::path::SharedPath;
 use crate::pen::Pen;
 use crate::transform::Transform;
 
@@ -28,7 +28,7 @@ pub enum GraphicsObject {
 /// A filled contour.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FillObject {
-    pub path: std::sync::Arc<BezierPath>,
+    pub path: SharedPath,
     pub color: Color,
     /// Optional pen for "filldraw" (stroke the contour too).
     pub pen: Option<Pen>,
@@ -39,7 +39,7 @@ pub struct FillObject {
 /// A stroked path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct StrokeObject {
-    pub path: std::sync::Arc<BezierPath>,
+    pub path: SharedPath,
     pub pen: Pen,
     pub color: Color,
     pub dash: Option<DashPattern>,

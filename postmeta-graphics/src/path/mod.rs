@@ -11,6 +11,12 @@ pub(crate) mod tridiagonal;
 
 pub use bezier_path::{BezierPath, SegmentControls};
 
+/// A shared, immutable resolved path.
+///
+/// Paths are reference-counted so that pictures, capsules, and drawing
+/// state can share them without cloning the underlying control points.
+pub type SharedPath = std::sync::Arc<BezierPath>;
+
 use crate::types::{Knot, KnotDirection};
 
 // ---------------------------------------------------------------------------
