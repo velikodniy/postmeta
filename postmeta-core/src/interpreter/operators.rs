@@ -564,7 +564,9 @@ impl Interpreter {
             PrimaryBinaryOp::PenOffsetOf => {
                 let (dx, dy) = value_to_pair(first)?;
                 let p = value_to_pen(second)?;
-                let pt = p.offset(Vec2::new(dx, dy));
+                // Degenerate pens (e.g. nullpen) have no support point;
+                // MetaPost treats their offset as the origin.
+                let pt = p.offset(Vec2::new(dx, dy)).unwrap_or(Point::ZERO);
                 Ok((Value::Pair(pt.x, pt.y), Type::PairType))
             }
             PrimaryBinaryOp::SubstringOf => {
