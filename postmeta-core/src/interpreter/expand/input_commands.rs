@@ -1,6 +1,6 @@
 use crate::command::Command;
 use crate::error::ErrorKind;
-use crate::input::{StoredToken, TokenList};
+use crate::input::TokenList;
 use crate::interpreter::ExprResultValue;
 use crate::interpreter::operators::compute_text_metrics;
 use crate::types::Value;
@@ -205,16 +205,6 @@ impl Interpreter {
         self.expand_current();
     }
 
-    /// Convert `self.cur` to a `StoredToken`, if possible.
-    fn resolved_to_stored(&self) -> Option<StoredToken> {
-        match &self.cur.token.kind {
-            crate::token::TokenKind::Symbolic(_) => self.cur.sym.map(StoredToken::Symbol),
-            crate::token::TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
-            crate::token::TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
-            crate::token::TokenKind::Capsule | crate::token::TokenKind::Eof => None,
-        }
-    }
-
     /// Push-only variant of `expand_scantokens` for use by `expandafter`.
     ///
     /// Same as `expand_scantokens` but does NOT call `get_next();
@@ -239,9 +229,10 @@ impl Interpreter {
     fn expand_expandafter_push_only(&mut self) {
         // Read token A without expanding.
         self.get_next();
-        let saved_a: TokenList = std::iter::once_with(|| self.resolved_to_stored())
-            .flatten()
-            .collect();
+        let saved_a: TokenList =
+            std::iter::once_with(|| crate::input::resolved_to_stored_token(&self.cur))
+                .flatten()
+                .collect();
 
         // Read token B without expanding.
         self.get_next();

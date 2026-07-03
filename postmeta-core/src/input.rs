@@ -331,61 +331,6 @@ impl InputSystem {
                 *pos += 1;
 
                 match stored {
-                    StoredToken::Symbol(id) => {
-                        let id = *id;
-                        let entry = symbols.get(id);
-                        // Avoid allocating a String for the name on the hot path.
-                        // Consumers that need the name use `symbols.name(sym)`.
-                        LevelAction::Token(ResolvedToken {
-                            command: entry.command,
-                            modifier: entry.modifier,
-                            sym: Some(id),
-                            token: Token {
-                                kind: TokenKind::Symbolic(String::new()),
-                                span: crate::token::Span::at(0),
-                            },
-                            capsule: None,
-                        })
-                    }
-                    StoredToken::Numeric(v) => {
-                        let v = *v;
-                        LevelAction::Token(ResolvedToken {
-                            command: Command::NumericToken,
-                            modifier: 0,
-                            sym: None,
-                            token: Token {
-                                kind: TokenKind::Numeric(v),
-                                span: crate::token::Span::at(0),
-                            },
-                            capsule: None,
-                        })
-                    }
-                    StoredToken::StringLit(s) => {
-                        let s = s.clone();
-                        LevelAction::Token(ResolvedToken {
-                            command: Command::StringToken,
-                            modifier: 0,
-                            sym: None,
-                            token: Token {
-                                kind: TokenKind::StringLit(s),
-                                span: crate::token::Span::at(0),
-                            },
-                            capsule: None,
-                        })
-                    }
-                    StoredToken::Capsule(payload) => {
-                        let payload = payload.clone();
-                        LevelAction::Token(ResolvedToken {
-                            command: Command::CapsuleToken,
-                            modifier: 0,
-                            sym: None,
-                            token: Token {
-                                kind: TokenKind::Capsule,
-                                span: crate::token::Span::at(0),
-                            },
-                            capsule: Some(payload),
-                        })
-                    }
                     StoredToken::Param(idx) => {
                         let idx = *idx;
                         if idx < params.len() {
@@ -396,6 +341,8 @@ impl InputSystem {
                             LevelAction::Continue
                         }
                     }
+                    other => stored_to_resolved(other, symbols)
+                        .map_or(LevelAction::Continue, LevelAction::Token),
                 }
             }
         }
@@ -457,7 +404,68 @@ fn resolve_token(token: &Token, symbols: &mut SymbolTable) -> ResolvedToken {
     }
 }
 
-fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
+/// Resolve a stored token (from a macro body, loop, or token list) into a
+/// [`ResolvedToken`].
+///
+/// Returns `None` for [`StoredToken::Param`]: parameter references have no
+/// direct resolution — substitution pushes a new input level instead.
+/// Symbol names are not materialized on this hot path; consumers that need
+/// the name use `symbols.name(sym)`.
+fn stored_to_resolved(stored: &StoredToken, symbols: &SymbolTable) -> Option<ResolvedToken> {
+    let blank_span = crate::token::Span::at(0);
+    match stored {
+        StoredToken::Symbol(id) => {
+            let entry = symbols.get(*id);
+            Some(ResolvedToken {
+                command: entry.command,
+                modifier: entry.modifier,
+                sym: Some(*id),
+                token: Token {
+                    kind: TokenKind::Symbolic(String::new()),
+                    span: blank_span,
+                },
+                capsule: None,
+            })
+        }
+        StoredToken::Numeric(v) => Some(ResolvedToken {
+            command: Command::NumericToken,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::Numeric(*v),
+                span: blank_span,
+            },
+            capsule: None,
+        }),
+        StoredToken::StringLit(s) => Some(ResolvedToken {
+            command: Command::StringToken,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::StringLit(s.clone()),
+                span: blank_span,
+            },
+            capsule: None,
+        }),
+        StoredToken::Capsule(payload) => Some(ResolvedToken {
+            command: Command::CapsuleToken,
+            modifier: 0,
+            sym: None,
+            token: Token {
+                kind: TokenKind::Capsule,
+                span: blank_span,
+            },
+            capsule: Some(payload.clone()),
+        }),
+        StoredToken::Param(_) => None,
+    }
+}
+
+/// Convert a resolved token back into its storable form.
+///
+/// Returns `None` for tokens with no storable representation (EOF, or a
+/// capsule token that lost its payload).
+pub(crate) fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
     if tok.command == Command::CapsuleToken {
         if let Some(payload) = &tok.capsule {
             return Some(StoredToken::Capsule(payload.clone()));
