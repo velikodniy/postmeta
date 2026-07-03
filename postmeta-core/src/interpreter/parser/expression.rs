@@ -33,6 +33,10 @@ use crate::interpreter::{ExprResultValue, Interpreter, LhsBinding};
 /// numeric value always produce the same key. Integer values are formatted
 /// without decimals (e.g., `[1]`) for backward compatibility; fractional
 /// values use Rust's shortest round-trip representation (e.g., `[0.08]`).
+///
+/// This is the ONLY subscript formatter: variable identity and the `str`
+/// operator both go through it, so a subscript always round-trips to the
+/// same key/text.
 fn write_subscript_key(name: &mut String, v: f64) {
     let rounded = v.round();
     if (v - rounded).abs() < 1e-10 {
@@ -690,11 +694,7 @@ impl Interpreter {
                 first = false;
             } else if self.cur.command == Command::NumericToken {
                 if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "legacy str suffix integer rendering follows MetaPost style"
-                    )]
-                    let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{}]", v as i64));
+                    write_subscript_key(&mut name, v);
                 }
                 self.get_x_next();
                 first = false;
@@ -702,14 +702,10 @@ impl Interpreter {
                 self.get_x_next(); // skip `[`
                 let subscript_result = self.scan_expression(EqualsMode::Relation)?;
                 let subscript = match subscript_result.exp {
-                    #[expect(
-                        clippy::cast_possible_truncation,
-                        reason = "legacy str suffix integer rendering follows MetaPost style"
-                    )]
-                    Value::Numeric(v) => v as i64,
-                    _ => 0,
+                    Value::Numeric(v) => v,
+                    _ => 0.0,
                 };
-                let _ = std::fmt::Write::write_fmt(&mut name, format_args!("[{subscript}]"));
+                write_subscript_key(&mut name, subscript);
                 if self.cur.command == Command::RightBracket {
                     self.get_x_next();
                 } else {

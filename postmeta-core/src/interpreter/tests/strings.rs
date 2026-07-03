@@ -198,3 +198,16 @@ fn string_comparison_false() {
     let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
+
+#[test]
+fn str_fractional_subscript_matches_variable_identity() {
+    // The str operator and variable-key formatting share one subscript
+    // formatter: fractional subscripts keep their decimals.
+    let mut interp = TestInterp::new();
+    interp.run("numeric a[]; show str a[0.5];");
+    assert!(
+        interp.first_show().contains("a[0.5]"),
+        "expected a[0.5] in: {}",
+        interp.first_show()
+    );
+}
