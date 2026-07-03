@@ -1,51 +1,30 @@
+mod helpers;
+
 use super::*;
-use crate::filesystem::FileSystem;
-
-struct PlainMpFs;
-
-fn read_plain_mp() -> Option<String> {
-    std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("workspace root")
-            .join("lib/plain.mp"),
-    )
-    .ok()
-}
-
-impl FileSystem for PlainMpFs {
-    fn read_file(&self, name: &str) -> Option<String> {
-        if name == "plain" || name == "plain.mp" {
-            read_plain_mp()
-        } else {
-            None
-        }
-    }
-}
+use helpers::TestInterp;
 
 #[test]
 fn eval_numeric_literal() {
-    let mut interp = Interpreter::new();
-    interp.run("show 42;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("show 42;");
     // Should have a show message
-    assert!(!interp.state.errors.is_empty());
-    let msg = &interp.state.errors[0].message;
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
 #[test]
 fn eval_arithmetic() {
-    let mut interp = Interpreter::new();
-    interp.run("show 3 + 4;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show 3 + 4;");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn eval_multiplication() {
-    let mut interp = Interpreter::new();
-    interp.run("show 3 * 5;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show 3 * 5;");
+    let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -54,166 +33,164 @@ fn division_by_variable() {
     // Regression: `360/n` was miscomputed as `360*n` because the
     // fraction check in scan_primary consumed `/` without restoring
     // it when the denominator was a variable (not a numeric literal).
-    let mut interp = Interpreter::new();
-    interp.run("numeric n; n := 5; show 360/n;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric n; n := 5; show 360/n;");
+    let msg = interp.first_show();
     assert!(msg.contains("72"), "expected 72 in: {msg}");
 }
 
 #[test]
 fn eval_string() {
-    let mut interp = Interpreter::new();
-    interp.run("show \"hello\";").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show \"hello\";");
+    let msg = interp.first_show();
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
 #[test]
 fn eval_boolean() {
-    let mut interp = Interpreter::new();
-    interp.run("show true;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show true;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn eval_pair() {
-    let mut interp = Interpreter::new();
-    interp.run("show (3, 4);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show (3, 4);");
+    let msg = interp.first_show();
     assert!(msg.contains("(3,4)"), "expected (3,4) in: {msg}");
 }
 
 #[test]
 fn eval_unary_minus() {
-    let mut interp = Interpreter::new();
-    interp.run("show -5;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show -5;");
+    let msg = interp.first_show();
     assert!(msg.contains("-5"), "expected -5 in: {msg}");
 }
 
 #[test]
 fn eval_sqrt() {
-    let mut interp = Interpreter::new();
-    interp.run("show sqrt 9;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show sqrt 9;");
+    let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
 #[test]
 fn eval_sind() {
-    let mut interp = Interpreter::new();
-    interp.run("show sind 90;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show sind 90;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
 #[test]
 fn eval_comparison() {
-    let mut interp = Interpreter::new();
-    interp.run("show 3 < 5;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show 3 < 5;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn eval_operator_precedence_layers() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("show 1 + 2 * 3 = 7; show 1 + 2 * 3 > 6; show (1 + 2) * 3 = 9;")
-        .unwrap();
-    assert_eq!(interp.state.errors.len(), 3);
+    let mut interp = TestInterp::new();
+    interp.run("show 1 + 2 * 3 = 7; show 1 + 2 * 3 > 6; show (1 + 2) * 3 = 9;");
+    assert_eq!(interp.shows().len(), 3);
     assert!(
-        interp.state.errors[0].message.contains("true"),
+        interp.shows()[0].contains("true"),
         "expected true in: {}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     assert!(
-        interp.state.errors[1].message.contains("true"),
+        interp.shows()[1].contains("true"),
         "expected true in: {}",
-        interp.state.errors[1].message
+        interp.shows()[1]
     );
     assert!(
-        interp.state.errors[2].message.contains("true"),
+        interp.shows()[2].contains("true"),
         "expected true in: {}",
-        interp.state.errors[2].message
+        interp.shows()[2]
     );
 }
 
 #[test]
 fn eval_left_associative_infix_ops() {
-    let mut interp = Interpreter::new();
-    interp.run("show 10 - 3 - 2; show 20 / 5 / 2;").unwrap();
-    assert_eq!(interp.state.errors.len(), 2);
+    let mut interp = TestInterp::new();
+    interp.run("show 10 - 3 - 2; show 20 / 5 / 2;");
+    assert_eq!(interp.shows().len(), 2);
     assert!(
-        interp.state.errors[0].message.contains("5"),
+        interp.shows()[0].contains("5"),
         "expected 5 in: {}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     assert!(
-        interp.state.errors[1].message.contains("2"),
+        interp.shows()[1].contains("2"),
         "expected 2 in: {}",
-        interp.state.errors[1].message
+        interp.shows()[1]
     );
 }
 
 #[test]
 fn eval_expression_rhs_parses_tighter_precedence() {
-    let mut interp = Interpreter::new();
-    interp.run("show 1 = 1 + 0; show 1 < 2 + 3 * 4;").unwrap();
-    assert_eq!(interp.state.errors.len(), 2);
+    let mut interp = TestInterp::new();
+    interp.run("show 1 = 1 + 0; show 1 < 2 + 3 * 4;");
+    assert_eq!(interp.shows().len(), 2);
     assert!(
-        interp.state.errors[0].message.contains("true"),
+        interp.shows()[0].contains("true"),
         "expected true in: {}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     assert!(
-        interp.state.errors[1].message.contains("true"),
+        interp.shows()[1].contains("true"),
         "expected true in: {}",
-        interp.state.errors[1].message
+        interp.shows()[1]
     );
 }
 
 #[test]
 fn eval_expression_operators_are_left_associative() {
-    let mut interp = Interpreter::new();
-    interp.run("show 1 < 2 = true; show 3 > 2 = true;").unwrap();
-    assert_eq!(interp.state.errors.len(), 2);
+    let mut interp = TestInterp::new();
+    interp.run("show 1 < 2 = true; show 3 > 2 = true;");
+    assert_eq!(interp.shows().len(), 2);
     assert!(
-        interp.state.errors[0].message.contains("true"),
+        interp.shows()[0].contains("true"),
         "expected true in: {}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     assert!(
-        interp.state.errors[1].message.contains("true"),
+        interp.shows()[1].contains("true"),
         "expected true in: {}",
-        interp.state.errors[1].message
+        interp.shows()[1]
     );
 }
 
 #[test]
 fn parser_split_keeps_equation_vs_assignment_behavior() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric a, b, c; a = 7; b := c := 9;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric a, b, c; a = 7; b := c := 9;");
 
-    let a_sym = interp.state.symbols.lookup("a");
-    let b_sym = interp.state.symbols.lookup("b");
-    let c_sym = interp.state.symbols.lookup("c");
+    let a_sym = interp.interp.state.symbols.lookup("a");
+    let b_sym = interp.interp.state.symbols.lookup("b");
+    let c_sym = interp.interp.state.symbols.lookup("c");
 
-    let a_id = interp.state.variables.lookup_by_sym(a_sym, "a");
-    let b_id = interp.state.variables.lookup_by_sym(b_sym, "b");
-    let c_id = interp.state.variables.lookup_by_sym(c_sym, "c");
+    let a_id = interp.interp.state.variables.lookup_by_sym(a_sym, "a");
+    let b_id = interp.interp.state.variables.lookup_by_sym(b_sym, "b");
+    let c_id = interp.interp.state.variables.lookup_by_sym(c_sym, "c");
 
-    assert_eq!(interp.state.variables.known_value(a_id), Some(7.0));
-    assert_eq!(interp.state.variables.known_value(b_id), Some(9.0));
-    assert_eq!(interp.state.variables.known_value(c_id), Some(9.0));
+    assert_eq!(interp.interp.state.variables.known_value(a_id), Some(7.0));
+    assert_eq!(interp.interp.state.variables.known_value(b_id), Some(9.0));
+    assert_eq!(interp.interp.state.variables.known_value(c_id), Some(9.0));
 }
 
 #[test]
 fn eval_string_concat() {
-    let mut interp = Interpreter::new();
-    interp.run("show \"hello\" & \" world\";").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show \"hello\" & \" world\";");
+    let msg = interp.first_show();
     assert!(
         msg.contains("hello world"),
         "expected 'hello world' in: {msg}"
@@ -222,134 +199,123 @@ fn eval_string_concat() {
 
 #[test]
 fn chained_string_concat() {
-    let mut interp = Interpreter::new();
-    interp.run("show \"a\" & \"b\" & \"c\" & \"d\";").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show \"a\" & \"b\" & \"c\" & \"d\";");
+    let msg = interp.first_show();
     assert!(msg.contains("abcd"), "expected 'abcd' in: {msg}");
 }
 
 #[test]
 fn eval_multiple_statements() {
-    let mut interp = Interpreter::new();
-    interp.run("show 1; show 2; show 3;").unwrap();
-    assert_eq!(interp.state.errors.len(), 3);
+    let mut interp = TestInterp::new();
+    interp.run("show 1; show 2; show 3;");
+    assert_eq!(interp.shows().len(), 3);
 }
 
 #[test]
 fn eval_internal_quantity() {
-    let mut interp = Interpreter::new();
-    interp.run("show linecap;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show linecap;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 (round) in: {msg}");
 }
 
 #[test]
 fn eval_pencircle() {
-    let mut interp = Interpreter::new();
-    interp.run("show pencircle;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show pencircle;");
+    let msg = interp.first_show();
     assert!(msg.contains("pen"), "expected pen in: {msg}");
 }
 
 #[test]
 fn eval_if_true() {
-    let mut interp = Interpreter::new();
-    interp.run("show if true: 42 fi;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show if true: 42 fi;");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
 #[test]
 fn eval_if_false_else() {
-    let mut interp = Interpreter::new();
-    interp.run("show if false: 1 else: 2 fi;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show if false: 1 else: 2 fi;");
+    let msg = interp.first_show();
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
 #[test]
 fn eval_if_false_no_else() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // `if false: show 1; fi; show 2;` — only show 2 should execute
-    interp.run("if false: show 1; fi; show 2;").unwrap();
+    interp.run("if false: show 1; fi; show 2;");
     assert_eq!(
-        interp.state.errors.len(),
+        interp.shows().len(),
         1,
         "expected only 1 show, got {:?}",
-        interp.state.errors
+        interp.interp.state.errors
     );
-    let msg = &interp.state.errors[0].message;
+    let msg = interp.first_show();
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
 #[test]
 fn eval_if_elseif() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("if false: show 1; elseif true: show 2; fi;")
-        .unwrap();
-    assert_eq!(interp.state.errors.len(), 1);
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("if false: show 1; elseif true: show 2; fi;");
+    assert_eq!(interp.shows().len(), 1);
+    let msg = interp.first_show();
     assert!(msg.contains("2"), "expected 2 in: {msg}");
 }
 
 #[test]
 fn eval_if_nested() {
-    let mut interp = Interpreter::new();
-    interp.run("if true: if true: show 42; fi; fi;").unwrap();
-    assert_eq!(interp.state.errors.len(), 1);
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("if true: if true: show 42; fi; fi;");
+    assert_eq!(interp.shows().len(), 1);
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
 #[test]
 fn eval_for_loop() {
-    let mut interp = Interpreter::new();
-    interp.run("for i = 1, 2, 3: show i; endfor;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("for i = 1, 2, 3: show i; endfor;");
     assert_eq!(
-        interp.state.errors.len(),
+        interp.shows().len(),
         3,
         "expected 3 shows: {:?}",
-        interp.state.errors
+        interp.interp.state.errors
     );
-    assert!(interp.state.errors[0].message.contains("1"));
-    assert!(interp.state.errors[1].message.contains("2"));
-    assert!(interp.state.errors[2].message.contains("3"));
+    assert!(interp.shows()[0].contains("1"));
+    assert!(interp.shows()[1].contains("2"));
+    assert!(interp.shows()[2].contains("3"));
 }
 
 #[test]
 fn eval_for_loop_step() {
     // Accumulate sum inside a for loop
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;");
     // s should be 1+2+3 = 6
-    let msg = &interp.state.errors[0].message;
+    let msg = interp.first_show();
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
 #[test]
 fn eval_forever_exitif() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric n; n := 0; forever: n := n + 1; exitif n > 3; endfor; show n;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric n; n := 0; forever: n := n + 1; exitif n > 3; endfor; show n;");
+    let msg = interp.first_show();
     assert!(msg.contains("4"), "expected 4 in: {msg}");
 }
 
 #[test]
 fn exitif_outside_loop_reports_error() {
-    let mut interp = Interpreter::new();
-    interp.run("exitif true;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("exitif true;");
 
-    let errs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errs = interp.errors();
     assert!(
         errs.iter()
             .any(|e| e.kind == crate::error::ErrorKind::BadExitIf),
@@ -359,35 +325,22 @@ fn exitif_outside_loop_reports_error() {
 
 #[test]
 fn exitif_outside_loop_does_not_leak_into_future_forever() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric n; n := 0;\n",
-            "exitif true;\n",
-            "forever: n := n + 1; exitif n = 2; endfor;\n",
-            "show n;\n",
-        ))
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric n; n := 0;\n",
+        "exitif true;\n",
+        "forever: n := n + 1; exitif n = 2; endfor;\n",
+        "show n;\n",
+    ));
 
-    let errs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errs = interp.errors();
     assert!(
         errs.iter()
             .any(|e| e.kind == crate::error::ErrorKind::BadExitIf),
         "expected BadExitIf from top-level exitif, got: {errs:?}"
     );
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains('2')),
         "expected loop to reach n=2, got infos: {infos:?}"
@@ -399,34 +352,17 @@ fn exitif_in_for_step_until_stops_loop() {
     // `exitif` inside a `for step until` loop must stop iteration.
     // Regression: previously, `for` pre-pushed all iterations so `exitif`
     // had no loop frame to set the exit flag on.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric t;\n",
-            "for i:=0 step 1 until 10:\n",
-            "  t := i;\n",
-            "  exitif i > 2;\n",
-            "endfor;\n",
-            "show t;\n",
-        ))
-        .unwrap();
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "exitif in for-step-until should not produce errors: {errors:?}"
-    );
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .unwrap_or("");
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric t;\n",
+        "for i:=0 step 1 until 10:\n",
+        "  t := i;\n",
+        "  exitif i > 2;\n",
+        "endfor;\n",
+        "show t;\n",
+    ));
+    interp.assert_no_errors();
+    let msg = interp.first_show();
     assert!(msg.contains('3'), "expected t=3 in: {msg}");
 }
 
@@ -434,94 +370,74 @@ fn exitif_in_for_step_until_stops_loop() {
 fn nested_forever_loops_keep_outer_replay_state() {
     // Regression: nested `forever` loops used a single pending body slot,
     // so an inner loop could clobber outer replay state.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric nouter; nouter := 0;\n",
-            "forever:\n",
-            "  nouter := nouter + 1;\n",
-            "  forever: exitif true; endfor;\n",
-            "  exitif nouter > 2;\n",
-            "endfor;\n",
-            "show nouter;\n",
-        ))
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric nouter; nouter := 0;\n",
+        "forever:\n",
+        "  nouter := nouter + 1;\n",
+        "  forever: exitif true; endfor;\n",
+        "  exitif nouter > 2;\n",
+        "endfor;\n",
+        "show nouter;\n",
+    ));
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 }
 
 #[test]
 fn filled_returns_true_for_fill_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show filled p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show filled p;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn stroked_returns_true_for_stroke_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p doublepath ((0,0)..(10,0)); show stroked p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p doublepath ((0,0)..(10,0)); show stroked p;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn clipped_returns_false_for_empty_picture() {
-    let mut interp = Interpreter::new();
-    interp.run("picture p; show clipped p;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; show clipped p;");
+    let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
 #[test]
 fn textpart_extracts_text_from_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"picture p; p = "hello" infont "cmr10"; show textpart p;"#)
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"picture p; p = "hello" infont "cmr10"; show textpart p;"#);
+    let msg = interp.first_show();
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
 #[test]
 fn fontpart_extracts_font_from_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"picture p; p = "abc" infont "cmr10"; show fontpart p;"#)
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"picture p; p = "abc" infont "cmr10"; show fontpart p;"#);
+    let msg = interp.first_show();
     assert!(msg.contains("cmr10"), "expected cmr10 in: {msg}");
 }
 
 #[test]
 fn textpart_returns_empty_for_non_text_picture() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textpart p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textpart p;");
+    let msg = interp.first_show();
     // Empty string shows as ""
     assert!(msg.contains("\"\""), "expected empty string in: {msg}");
 }
 
 #[test]
 fn pathpart_extracts_path_from_fill() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show pathpart p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show pathpart p;");
+    let msg = interp.first_show();
     // Should show a path, not an error
     assert!(
         !msg.contains("Unimplemented"),
@@ -531,11 +447,9 @@ fn pathpart_extracts_path_from_fill() {
 
 #[test]
 fn penpart_returns_pen_for_stroke() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p doublepath ((0,0)..(10,0)); show penpart p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p doublepath ((0,0)..(10,0)); show penpart p;");
+    let msg = interp.first_show();
     assert!(
         !msg.contains("Unimplemented"),
         "penpart should not error: {msg}"
@@ -544,11 +458,9 @@ fn penpart_returns_pen_for_stroke() {
 
 #[test]
 fn dashpart_returns_picture_for_stroke() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; addto p doublepath ((0,0)..(10,0)); show dashpart p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("picture p; addto p doublepath ((0,0)..(10,0)); show dashpart p;");
+    let msg = interp.first_show();
     assert!(
         !msg.contains("Unimplemented"),
         "dashpart should not error: {msg}"
@@ -557,55 +469,51 @@ fn dashpart_returns_picture_for_stroke() {
 
 #[test]
 fn charexists_valid_code() {
-    let mut interp = Interpreter::new();
-    interp.run("show charexists 65;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show charexists 65;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn charexists_out_of_range() {
-    let mut interp = Interpreter::new();
-    interp.run("show charexists 256;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show charexists 256;");
+    let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
 #[test]
 fn charexists_negative() {
-    let mut interp = Interpreter::new();
-    interp.run("show charexists -1;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show charexists -1;");
+    let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
 #[test]
 fn fontsize_returns_ten() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show fontsize "cmr10";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show fontsize "cmr10";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
 #[test]
 fn directiontime_east_on_right_path() {
     // Path going right: direction (1,0) should be found at time ~0
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0)..(10,0); show directiontime (1,0) of p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := (0,0)..(10,0); show directiontime (1,0) of p;");
+    let msg = interp.first_show();
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
 #[test]
 fn directiontime_not_found() {
     // Path going right: direction (-1,0) should return -1
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0)..(10,0); show directiontime (-1,0) of p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := (0,0)..(10,0); show directiontime (-1,0) of p;");
+    let msg = interp.first_show();
     assert!(msg.contains("-1"), "expected -1 in: {msg}");
 }
 
@@ -613,29 +521,25 @@ fn directiontime_not_found() {
 fn turningnumber_counterclockwise() {
     // A counterclockwise triangle should have turningnumber = 1
     // Use `..` (primitive path join), not `--` (plain.mp macro)
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0)..(10,0)..(5,10)..cycle; show turningnumber p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := (0,0)..(10,0)..(5,10)..cycle; show turningnumber p;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
 #[test]
 fn turningnumber_pair_returns_zero() {
-    let mut interp = Interpreter::new();
-    interp.run("show turningnumber (3,4);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show turningnumber (3,4);");
+    let msg = interp.first_show();
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
 #[test]
 fn turningnumber_open_path_returns_zero() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0)..(10,0); show turningnumber p;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := (0,0)..(10,0); show turningnumber p;");
+    let msg = interp.first_show();
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
@@ -643,36 +547,22 @@ fn turningnumber_open_path_returns_zero() {
 fn nested_forever_exitif_equals_is_comparison() {
     // Regression: `exitif i = 2` inside expansion context must be parsed
     // as a boolean comparison, not statement equation semantics.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric nouter, i;\n",
-            "nouter := 0;\n",
-            "forever:\n",
-            "  nouter := nouter + 1;\n",
-            "  i := 0;\n",
-            "  forever: i := i + 1; exitif i = 2; endfor;\n",
-            "  exitif nouter = 2;\n",
-            "endfor;\n",
-            "show nouter; show i;\n",
-        ))
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric nouter, i;\n",
+        "nouter := 0;\n",
+        "forever:\n",
+        "  nouter := nouter + 1;\n",
+        "  i := 0;\n",
+        "  forever: i := i + 1; exitif i = 2; endfor;\n",
+        "  exitif nouter = 2;\n",
+        "endfor;\n",
+        "show nouter; show i;\n",
+    ));
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains('2')),
         "expected show outputs containing 2, got infos: {infos:?}"
@@ -681,222 +571,152 @@ fn nested_forever_exitif_equals_is_comparison() {
 
 #[test]
 fn eval_xpart_ypart_pair() {
-    let mut interp = Interpreter::new();
-    interp.run("show xpart (3, 7);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show xpart (3, 7);");
+    let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 
-    let mut interp = Interpreter::new();
-    interp.run("show ypart (3, 7);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show ypart (3, 7);");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn eval_assignment_numeric() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x := 42; show x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 42; show x;");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
 #[test]
 fn eval_assignment_string() {
-    let mut interp = Interpreter::new();
-    interp.run("string s; s := \"hello\"; show s;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("string s; s := \"hello\"; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
 #[test]
 fn eval_assignment_overwrite() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x := 10; x := 20; show x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 10; x := 20; show x;");
+    let msg = interp.first_show();
     assert!(msg.contains("20"), "expected 20 in: {msg}");
 }
 
 #[test]
 fn eval_assignment_internal() {
-    let mut interp = Interpreter::new();
-    interp.run("linecap := 0; show linecap;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("linecap := 0; show linecap;");
+    let msg = interp.first_show();
     assert!(msg.contains("0"), "expected 0 in: {msg}");
 }
 
 #[test]
 fn eval_assignment_expr() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x := 3 + 4; show x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 3 + 4; show x;");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn eval_def_simple() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("def double(expr x) = 2 * x enddef; show double(5);")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("def double(expr x) = 2 * x enddef; show double(5);");
+    let msg = interp.first_show();
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
 #[test]
 fn eval_def_no_params() {
-    let mut interp = Interpreter::new();
-    interp.run("def seven = 7 enddef; show seven;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("def seven = 7 enddef; show seven;");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn eval_def_two_params() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("def add(expr a, expr b) = a + b enddef; show add(3, 4);")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("def add(expr a, expr b) = a + b enddef; show add(3, 4);");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn eval_def_multiple_calls() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("def sq(expr x) = x * x enddef; show sq(3); show sq(5);")
-        .unwrap();
-    assert_eq!(interp.state.errors.len(), 2);
-    assert!(interp.state.errors[0].message.contains("9"), "expected 9");
-    assert!(interp.state.errors[1].message.contains("25"), "expected 25");
+    let mut interp = TestInterp::new();
+    interp.run("def sq(expr x) = x * x enddef; show sq(3); show sq(5);");
+    assert_eq!(interp.shows().len(), 2);
+    assert!(interp.shows()[0].contains("9"), "expected 9");
+    assert!(interp.shows()[1].contains("25"), "expected 25");
 }
 
 #[test]
 fn eval_def_nested_call() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("def double(expr x) = 2 * x enddef; show double(double(3));")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("def double(expr x) = 2 * x enddef; show double(double(3));");
+    let msg = interp.first_show();
     assert!(msg.contains("12"), "expected 12 in: {msg}");
 }
 
 #[test]
 fn eval_vardef() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef triple(expr x) = 3 * x enddef; show triple(4);")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef triple(expr x) = 3 * x enddef; show triple(4);");
+    let msg = interp.first_show();
     assert!(msg.contains("12"), "expected 12 in: {msg}");
 }
 
 #[test]
 fn eval_def_with_body_statements() {
     // A macro that assigns to a variable
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric result; def setresult(expr x) = result := x enddef; setresult(42); show result;")
-        .unwrap();
-    // Find the show message (skip any info/error messages before it)
-    let show_msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.message.contains(">>"))
-        .map(|e| &e.message);
-    assert!(
-        show_msg.is_some() && show_msg.unwrap().contains("42"),
-        "expected show 42, got errors: {:?}",
-        interp
-            .state
-            .errors
-            .iter()
-            .map(|e| &e.message)
-            .collect::<Vec<_>>()
+    let mut interp = TestInterp::new();
+    interp.run(
+        "numeric result; def setresult(expr x) = result := x enddef; setresult(42); show result;",
     );
+    // Find the show message (skip any info/error messages before it)
+    let msg = interp.first_show();
+    assert!(msg.contains("42"), "expected show 42, got: {msg}");
 }
 
 #[test]
 fn eval_def_in_for_loop() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     interp
-        .run("def inc(expr x) = x + 1 enddef; numeric s; s := 0; for i = 1, 2, 3: s := s + inc(i); endfor; show s;")
-        .unwrap();
+        .run("def inc(expr x) = x + 1 enddef; numeric s; s := 0; for i = 1, 2, 3: s := s + inc(i); endfor; show s;");
     // inc(1) + inc(2) + inc(3) = 2 + 3 + 4 = 9
-    let show_msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.message.contains(">>"))
-        .map(|e| &e.message);
-    assert!(
-        show_msg.is_some() && show_msg.unwrap().contains("9"),
-        "expected show 9, got errors: {:?}",
-        interp
-            .state
-            .errors
-            .iter()
-            .map(|e| &e.message)
-            .collect::<Vec<_>>()
-    );
+    let msg = interp.first_show();
+    assert!(msg.contains("9"), "expected show 9, got: {msg}");
 }
 
 #[test]
 fn eval_def_with_conditional() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     interp
-        .run("def myabs(expr x) = if x < 0: -x else: x fi enddef; show myabs(-5); show myabs(3);")
-        .unwrap();
-    assert_eq!(interp.state.errors.len(), 2);
-    assert!(interp.state.errors[0].message.contains("5"), "expected 5");
-    assert!(interp.state.errors[1].message.contains("3"), "expected 3");
+        .run("def myabs(expr x) = if x < 0: -x else: x fi enddef; show myabs(-5); show myabs(3);");
+    assert_eq!(interp.shows().len(), 2);
+    assert!(interp.shows()[0].contains("5"), "expected 5");
+    assert!(interp.shows()[1].contains("3"), "expected 3");
 }
 
 #[test]
 fn eval_scantokens_basic() {
-    let mut interp = Interpreter::new();
-    interp.run("show scantokens \"3 + 4\";").unwrap();
-    let show_msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.message.contains(">>"))
-        .map(|e| &e.message);
-    assert!(
-        show_msg.is_some() && show_msg.unwrap().contains("7"),
-        "expected show 7, got: {:?}",
-        interp
-            .state
-            .errors
-            .iter()
-            .map(|e| &e.message)
-            .collect::<Vec<_>>()
-    );
+    let mut interp = TestInterp::new();
+    interp.run("show scantokens \"3 + 4\";");
+    let msg = interp.first_show();
+    assert!(msg.contains("7"), "expected show 7, got: {msg}");
 }
 
 #[test]
 fn eval_scantokens_define_and_use() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("scantokens \"def foo = 99 enddef\"; show foo;")
-        .unwrap();
-    let show_msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.message.contains(">>"))
-        .map(|e| &e.message);
-    assert!(
-        show_msg.is_some() && show_msg.unwrap().contains("99"),
-        "expected show 99, got: {:?}",
-        interp
-            .state
-            .errors
-            .iter()
-            .map(|e| &e.message)
-            .collect::<Vec<_>>()
-    );
+    let mut interp = TestInterp::new();
+    interp.run("scantokens \"def foo = 99 enddef\"; show foo;");
+    let msg = interp.first_show();
+    assert!(msg.contains("99"), "expected show 99, got: {msg}");
 }
 
 #[test]
@@ -904,24 +724,16 @@ fn expandafter_text_macro_scantokens() {
     // expandafter mymac scantokens "abc"; should NOT consume the
     // statement after it.  The `;` terminates the text parameter,
     // and `message "B"` must still execute.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "def mymac text t = message \"in mymac\"; enddef;\n",
-            "message \"A\";\n",
-            "expandafter mymac scantokens \"abc\";\n",
-            "message \"B\";\n",
-            "message \"C\";\n",
-            "end\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "def mymac text t = message \"in mymac\"; enddef;\n",
+        "message \"A\";\n",
+        "expandafter mymac scantokens \"abc\";\n",
+        "message \"B\";\n",
+        "message \"C\";\n",
+        "end\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(
         msgs,
         vec!["A", "in mymac", "B", "C"],
@@ -932,15 +744,9 @@ fn expandafter_text_macro_scantokens() {
 #[test]
 fn expandafter_simple_token() {
     // expandafter with a non-expandable B should just reorder.
-    let mut interp = Interpreter::new();
-    interp.run("expandafter message \"hello\"; end").unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("expandafter message \"hello\"; end");
+    let msgs = interp.shows();
     assert_eq!(msgs, vec!["hello"]);
 }
 
@@ -959,24 +765,16 @@ fn expandafter_triple_redefine_macro() {
     //   5. `=` is placed in front → scanner sees `= <old body>`
     //   6. Back in step 2: `clearboxes` is placed in front → `clearboxes = <old body>`
     //   7. Back in step 1: `def` is placed in front → `def clearboxes = <old body> message "hi"; enddef;`
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "def clearboxes = enddef;\n",
-            "expandafter def expandafter clearboxes expandafter =\n",
-            "  clearboxes message \"hi\";\n",
-            "enddef;\n",
-            "clearboxes;\n",
-            "end\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "def clearboxes = enddef;\n",
+        "expandafter def expandafter clearboxes expandafter =\n",
+        "  clearboxes message \"hi\";\n",
+        "enddef;\n",
+        "clearboxes;\n",
+        "end\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(
         msgs,
         vec!["hi"],
@@ -987,27 +785,19 @@ fn expandafter_triple_redefine_macro() {
 #[test]
 fn expandafter_triple_accumulate() {
     // Multiple rounds of triple-expandafter accumulation.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "def clearboxes = enddef;\n",
-            "expandafter def expandafter clearboxes expandafter =\n",
-            "  clearboxes message \"A\";\n",
-            "enddef;\n",
-            "expandafter def expandafter clearboxes expandafter =\n",
-            "  clearboxes message \"B\";\n",
-            "enddef;\n",
-            "clearboxes;\n",
-            "end\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "def clearboxes = enddef;\n",
+        "expandafter def expandafter clearboxes expandafter =\n",
+        "  clearboxes message \"A\";\n",
+        "enddef;\n",
+        "expandafter def expandafter clearboxes expandafter =\n",
+        "  clearboxes message \"B\";\n",
+        "enddef;\n",
+        "clearboxes;\n",
+        "end\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(
         msgs,
         vec!["A", "B"],
@@ -1017,27 +807,19 @@ fn expandafter_triple_accumulate() {
 
 #[test]
 fn known_unknown_operators() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric x;\n",
-            "if unknown x: message \"x unknown\"; fi\n",
-            "x := 5;\n",
-            "if known x: message \"x known\"; fi\n",
-            "pair p;\n",
-            "if unknown xpart p: message \"xpart p unknown\"; fi\n",
-            "p := (1,2);\n",
-            "if known xpart p: message \"xpart p known\"; fi\n",
-            "end\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric x;\n",
+        "if unknown x: message \"x unknown\"; fi\n",
+        "x := 5;\n",
+        "if known x: message \"x known\"; fi\n",
+        "pair p;\n",
+        "if unknown xpart p: message \"xpart p unknown\"; fi\n",
+        "p := (1,2);\n",
+        "if known xpart p: message \"xpart p known\"; fi\n",
+        "end\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(
         msgs,
         vec!["x unknown", "x known", "xpart p unknown", "xpart p known"]
@@ -1046,17 +828,19 @@ fn known_unknown_operators() {
 
 #[test]
 fn eval_input_file_not_found() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Should report error but not crash
-    interp.run("input nonexistent;").unwrap();
+    interp.run("input nonexistent;");
     assert!(
         interp
+            .interp
             .state
             .errors
             .iter()
             .any(|e| e.message.contains("not found")),
         "expected file-not-found error: {:?}",
         interp
+            .interp
             .state
             .errors
             .iter()
@@ -1103,11 +887,10 @@ fn eval_input_with_filesystem() {
 
 #[test]
 fn eval_primarydef() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     interp
-        .run("primarydef a dotprod b = xpart a * xpart b + ypart a * ypart b enddef; show (3,4) dotprod (1,2);")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+        .run("primarydef a dotprod b = xpart a * xpart b + ypart a * ypart b enddef; show (3,4) dotprod (1,2);");
+    let msg = interp.first_show();
     // 3*1 + 4*2 = 11
     assert!(msg.contains("11"), "expected 11 in: {msg}");
 }
@@ -1115,14 +898,14 @@ fn eval_primarydef() {
 #[test]
 fn eval_xpart_shifted_pair() {
     // (3, 7) shifted (10, 20) = (13, 27)
-    let mut interp = Interpreter::new();
-    interp.run("show xpart ((3,7) shifted (10,20));").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show xpart ((3,7) shifted (10,20));");
+    let msg = interp.first_show();
     assert!(msg.contains("13"), "expected 13 in: {msg}");
 
-    let mut interp = Interpreter::new();
-    interp.run("show ypart ((3,7) shifted (10,20));").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show ypart ((3,7) shifted (10,20));");
+    let msg = interp.first_show();
     assert!(msg.contains("27"), "expected 27 in: {msg}");
 }
 
@@ -1132,51 +915,49 @@ fn eval_xpart_shifted_pair() {
 
 #[test]
 fn type_declaration_numeric() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x := 42; show x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 42; show x;");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
 #[test]
 fn type_declaration_string() {
-    let mut interp = Interpreter::new();
-    interp.run("string s; s := \"hello\"; show s;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("string s; s := \"hello\"; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("hello"), "expected hello in: {msg}");
 }
 
 #[test]
 fn type_declaration_boolean() {
-    let mut interp = Interpreter::new();
-    interp.run("boolean b; b := true; show b;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("boolean b; b := true; show b;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn type_declaration_pair() {
-    let mut interp = Interpreter::new();
-    interp.run("pair p; p := (3, 7); show p;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("pair p; p := (3, 7); show p;");
+    let msg = interp.first_show();
     assert!(msg.contains("(3,7)"), "expected (3,7) in: {msg}");
 }
 
 #[test]
 fn type_declaration_color() {
-    let mut interp = Interpreter::new();
-    interp.run("color c; c := (1, 0, 0); show c;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("color c; c := (1, 0, 0); show c;");
+    let msg = interp.first_show();
     assert!(msg.contains("(1,0,0)"), "expected (1,0,0) in: {msg}");
 }
 
 #[test]
 fn type_declaration_multiple() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric a, b; a := 10; b := 20; show a + b;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric a, b; a := 10; b := 20; show a + b;");
+    let msg = interp.first_show();
     assert!(msg.contains("30"), "expected 30 in: {msg}");
 }
 
@@ -1186,17 +967,17 @@ fn type_declaration_multiple() {
 
 #[test]
 fn delimiters_custom() {
-    let mut interp = Interpreter::new();
-    interp.run("delimiters {{ }}; show {{ 3 + 4 }};").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("delimiters {{ }}; show {{ 3 + 4 }};");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn delimiters_pair() {
-    let mut interp = Interpreter::new();
-    interp.run("delimiters {{ }}; show {{ 2, 5 }};").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("delimiters {{ }}; show {{ 2, 5 }};");
+    let msg = interp.first_show();
     assert!(msg.contains("(2,5)"), "expected (2,5) in: {msg}");
 }
 
@@ -1206,21 +987,17 @@ fn delimiters_pair() {
 
 #[test]
 fn newinternal_basic() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("newinternal myvar; myvar := 7; show myvar;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("newinternal myvar; myvar := 7; show myvar;");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn newinternal_multiple() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("newinternal a, b; a := 3; b := 5; show a + b;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("newinternal a, b; a := 3; b := 5; show a + b;");
+    let msg = interp.first_show();
     assert!(msg.contains("8"), "expected 8 in: {msg}");
 }
 
@@ -1230,51 +1007,43 @@ fn newinternal_multiple() {
 
 #[test]
 fn mediation_basic() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // 0.5[10,20] = 15
-    interp.run("show 0.5[10, 20];").unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("show 0.5[10, 20];");
+    let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
 #[test]
 fn mediation_endpoints() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // 0[a,b] = a
-    interp.run("show 0[3, 7];").unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("show 0[3, 7];");
+    let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // 1[a,b] = b
-    interp.run("show 1[3, 7];").unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("show 1[3, 7];");
+    let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
 }
 
 #[test]
 fn mediation_fraction() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // 1/4[0,100] = 25
-    interp.run("show 1/4[0, 100];").unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("show 1/4[0, 100];");
+    let msg = interp.first_show();
     assert!(msg.contains("25"), "expected 25 in: {msg}");
 }
 
 #[test]
 fn mediation_preserves_numeric_endpoint_dependencies() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric a,b,c,x; a := 0.25; x = a[b,c]; b = 2; c = 10; show x;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric a,b,c,x; a := 0.25; x = a[b,c]; b = 2; c = 10; show x;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains('4')),
         "expected x=4 in: {infos:?}"
@@ -1283,18 +1052,10 @@ fn mediation_preserves_numeric_endpoint_dependencies() {
 
 #[test]
 fn mediation_preserves_pair_endpoint_dependencies() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric a; pair b,c,p; a := 0.5; p = a[b,c]; b = (2,4); c = (6,8); show p;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric a; pair b,c,p; a := 0.5; p = a[b,c]; b = (2,4); c = (6,8); show p;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("(4,6)")),
         "expected p=(4,6) in: {infos:?}"
@@ -1307,45 +1068,37 @@ fn mediation_preserves_pair_endpoint_dependencies() {
 
 #[test]
 fn for_step_until() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Sum 1 through 5
-    interp
-        .run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
 #[test]
 fn for_step_until_by_two() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Sum 0, 2, 4, 6, 8, 10 = 30
-    interp
-        .run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("30"), "expected 30 in: {msg}");
 }
 
 #[test]
 fn for_step_until_negative() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Count down: 5, 4, 3, 2, 1 = 15
-    interp
-        .run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
 #[test]
 fn for_step_until_accepts_assignment_syntax() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // MetaPost allows both `for k=...` and `for k:=...`.
-    interp
-        .run("numeric s; s := 0; for k:=1 step 1 until 5: s := s + k; endfor; show s;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    interp.run("numeric s; s := 0; for k:=1 step 1 until 5: s := s + k; endfor; show s;");
+    let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
 }
 
@@ -1355,25 +1108,25 @@ fn for_step_until_accepts_assignment_syntax() {
 
 #[test]
 fn str_operator() {
-    let mut interp = Interpreter::new();
-    interp.run("show str x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show str x;");
+    let msg = interp.first_show();
     assert!(msg.contains("x"), "expected x in: {msg}");
 }
 
 #[test]
 fn str_operator_multi_char() {
-    let mut interp = Interpreter::new();
-    interp.run("show str foo;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show str foo;");
+    let msg = interp.first_show();
     assert!(msg.contains("foo"), "expected foo in: {msg}");
 }
 
 #[test]
 fn str_operator_collects_suffix_chain() {
-    let mut interp = Interpreter::new();
-    interp.run("show str foo.bar.baz;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show str foo.bar.baz;");
+    let msg = interp.first_show();
     assert!(
         msg.contains("foo.bar.baz"),
         "expected suffix chain in: {msg}"
@@ -1382,9 +1135,9 @@ fn str_operator_collects_suffix_chain() {
 
 #[test]
 fn str_operator_collects_subscript_suffix() {
-    let mut interp = Interpreter::new();
-    interp.run("show str z[1+1].x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show str z[1+1].x;");
+    let msg = interp.first_show();
     assert!(
         msg.contains("z[2].x"),
         "expected subscript suffix in: {msg}"
@@ -1397,31 +1150,25 @@ fn str_operator_collects_subscript_suffix() {
 
 #[test]
 fn eval_def_undelimited_primary() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef double primary x = 2*x enddef; show double 5;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef double primary x = 2*x enddef; show double 5;");
+    let msg = interp.first_show();
     assert!(msg.contains("10"), "expected 10 in: {msg}");
 }
 
 #[test]
 fn eval_def_undelimited_secondary() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef neg secondary x = -x enddef; show neg 3;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef neg secondary x = -x enddef; show neg 3;");
+    let msg = interp.first_show();
     assert!(msg.contains("-3"), "expected -3 in: {msg}");
 }
 
 #[test]
 fn eval_def_undelimited_expr() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef id expr x = x enddef; show id 5+3;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef id expr x = x enddef; show id 5+3;");
+    let msg = interp.first_show();
     assert!(msg.contains("8"), "expected 8 in: {msg}");
 }
 
@@ -1431,15 +1178,13 @@ fn eval_def_undelimited_expr() {
 
 #[test]
 fn curl_direction_in_def() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // This should define -- as a macro without error
-    interp
-        .run(
-            "def -- = {curl 1}..{curl 1} enddef; \
+    interp.run(
+        "def -- = {curl 1}..{curl 1} enddef; \
              path p; p = (0,0)--(1,0); show p;",
-        )
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    );
+    let msg = interp.first_show();
     assert!(msg.contains("path"), "expected path in: {msg}");
 }
 
@@ -1449,45 +1194,40 @@ fn curl_direction_in_def() {
 
 #[test]
 fn let_does_not_expand_rhs() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Without fix, this crashes with "Expected pair, got known numeric"
     // because the let would try to expand foo's body
-    interp
-        .run(
-            "def foo(expr z, d) = shifted -z rotated d shifted z enddef; \
+    interp.run(
+        "def foo(expr z, d) = shifted -z rotated d shifted z enddef; \
              let bar = foo; show 1;",
-        )
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    );
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
 #[test]
 fn let_copies_macro_info() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "tertiarydef p _on_ d = d enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "tertiarydef p _on_ d = d enddef; \
              let on = _on_; show 5 on 3;",
-        )
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    );
+    let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
 #[test]
 fn let_rebinding_to_non_macro_clears_stale_vardef_metadata() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef f(expr x) = x + 1 enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef f(expr x) = x + 1 enddef; \
              let g = mitered; \
              let f = g; \
              show f 2;",
-        )
-        .unwrap();
+    );
 
     let msg = interp
+        .interp
         .state
         .errors
         .last()
@@ -1506,19 +1246,19 @@ fn let_rebinding_to_non_macro_clears_stale_vardef_metadata() {
 
 #[test]
 fn chained_equation() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Chained equation with unary-minus LHS: right = -left = (1,0)
-    interp
-        .run("pair right,left; right=-left=(1,0); show right; show left;")
-        .unwrap();
+    interp.run("pair right,left; right=-left=(1,0); show right; show left;");
     assert!(
         interp
+            .interp
             .state
             .errors
             .iter()
             .any(|e| e.message.contains(">> (1,0)") || e.message.contains(">> (1,-0)")),
         "expected right=(1,0), got: {:?}",
         interp
+            .interp
             .state
             .errors
             .iter()
@@ -1527,12 +1267,14 @@ fn chained_equation() {
     );
     assert!(
         interp
+            .interp
             .state
             .errors
             .iter()
             .any(|e| e.message.contains(">> (-1,0)") || e.message.contains(">> (-1,-0)")),
         "expected left=(-1,0), got: {:?}",
         interp
+            .interp
             .state
             .errors
             .iter()
@@ -1543,12 +1285,11 @@ fn chained_equation() {
 
 #[test]
 fn linear_equation_system_solves() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric x,y; x+y=5; x-y=1; show x; show y;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x,y; x+y=5; x-y=1; show x; show y;");
 
     let messages: Vec<_> = interp
+        .interp
         .state
         .errors
         .iter()
@@ -1568,25 +1309,15 @@ fn linear_equation_system_solves() {
 
 #[test]
 fn chained_assignment() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("newinternal a,b,c; a:=b:=c:=0; show a; show b; show c;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("newinternal a,b,c; a:=b:=c:=0; show a; show b; show c;");
 
-    let error_count = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(error_count == 0, "expected 0 errors, got {error_count}");
+    interp.assert_no_errors();
 
     let shows: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.message.contains(">>"))
-        .map(|e| e.message.as_str())
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
     assert!(
         shows.iter().filter(|m| m.contains(">> 0")).count() >= 3,
@@ -1601,33 +1332,31 @@ fn chained_assignment() {
 
 #[test]
 fn type_declaration_subscript_array() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Should not hang
-    interp.run("pair z_[];").unwrap();
+    interp.run("pair z_[];");
 }
 
 #[test]
 fn type_declaration_compound_suffix() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // Should not hang
-    interp.run("path path_.l, path_.r;").unwrap();
+    interp.run("path path_.l, path_.r;");
 }
 
 #[test]
 fn type_declaration_clears_subscripted_descendants() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     // First pass: assign t[0] and t[1]
-    interp
-        .run("numeric t[]; t[0] := 10; t[1] := 20; show t[0];")
-        .unwrap();
+    interp.run("numeric t[]; t[0] := 10; t[1] := 20; show t[0];");
     assert!(
-        interp.state.errors[0].message.contains("10"),
+        interp.shows()[0].contains("10"),
         "first assignment: expected 10 in {:?}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     // Re-declare: clears old subscripted values
-    interp.run("numeric t[]; t[0] := 99; show t[0];").unwrap();
-    let msg = &interp.state.errors[1].message;
+    interp.run("numeric t[]; t[0] := 99; show t[0];");
+    let msg = interp.shows()[1];
     assert!(
         msg.contains("99"),
         "after re-declaration: expected 99, got: {msg}"
@@ -1638,23 +1367,21 @@ fn type_declaration_clears_subscripted_descendants() {
 fn type_declaration_generic_subscript_clears_existing() {
     // Declaring `pair a[].off` must clear any pre-existing `a[N].off`
     // that was auto-created as numeric by prior reference.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "show (pair a1.off);\n", // false: a1.off auto-created as numeric
-            "pair a[].off;\n",       // should clear a[1].off and redeclare as pair
-            "show (pair a1.off);\n", // should be true now
-        ))
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "show (pair a1.off);\n", // false: a1.off auto-created as numeric
+        "pair a[].off;\n",       // should clear a[1].off and redeclare as pair
+        "show (pair a1.off);\n", // should be true now
+    ));
     assert!(
-        interp.state.errors[0].message.contains("false"),
+        interp.shows()[0].contains("false"),
         "before: expected false, got {:?}",
-        interp.state.errors[0].message
+        interp.shows()[0]
     );
     assert!(
-        interp.state.errors[1].message.contains("true"),
+        interp.shows()[1].contains("true"),
         "after: expected true, got {:?}",
-        interp.state.errors[1].message
+        interp.shows()[1]
     );
 }
 
@@ -1753,32 +1480,27 @@ fn back_expr_numeric_in_expression() {
 #[test]
 fn vardef_suffix_in_equation() {
     // laboff.lft where lft is a vardef — should work as variable, not expand
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef lft primary x = x enddef; pair laboff.lft; laboff.lft = (1,2); show 1;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef lft primary x = x enddef; pair laboff.lft; laboff.lft = (1,2); show 1;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
 #[test]
 fn vardef_suffix_undeclared_equation() {
     // labxf.lft where labxf is undeclared and lft is a vardef
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef lft primary x = x enddef; labxf.lft = 1; show 1;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef lft primary x = x enddef; labxf.lft = 1; show 1;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
 #[test]
 fn tertiarydef_with_picture() {
     // Simplified _on_: just shift a picture
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            r#"
+    let mut interp = TestInterp::new();
+    interp.run(
+        r#"
         delimiters ();
         tertiarydef p _on_ d =
           begingroup
@@ -1787,14 +1509,8 @@ fn tertiarydef_with_picture() {
         enddef;
         show nullpicture _on_ 3;
     "#,
-        )
-        .unwrap();
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    );
+    let errors = interp.errors();
     for e in &errors {
         eprintln!("  tertiarydef error: {}", e.message);
     }
@@ -1804,10 +1520,11 @@ fn tertiarydef_with_picture() {
 #[test]
 fn error_recovery_skips_to_semicolon() {
     // Statement with unexpected comma should skip to ; and continue
-    let mut interp = Interpreter::new();
-    interp.run(",,,; show 1;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(",,,; show 1;");
     // Should have errors for the commas but still process "show 1"
     let show_msgs: Vec<_> = interp
+        .interp
         .state
         .errors
         .iter()
@@ -1818,15 +1535,10 @@ fn error_recovery_skips_to_semicolon() {
 
 #[test]
 fn reports_missing_right_paren_in_parenthesized_expression() {
-    let mut interp = Interpreter::new();
-    interp.run("show (1+2; show 7;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("show (1+2; show 7;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors.iter().any(|e| {
             e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `)`")
@@ -1837,15 +1549,10 @@ fn reports_missing_right_paren_in_parenthesized_expression() {
 
 #[test]
 fn reports_missing_right_bracket_in_mediation() {
-    let mut interp = Interpreter::new();
-    interp.run("show 0.5[(0,0),(2,2); show 9;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("show 0.5[(0,0),(2,2); show 9;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors.iter().any(|e| {
             e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `]`")
@@ -1856,17 +1563,10 @@ fn reports_missing_right_bracket_in_mediation() {
 
 #[test]
 fn reports_missing_right_brace_in_path_direction() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p := (0,0){curl 1..(1,0); show 1;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := (0,0){curl 1..(1,0); show 1;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors.iter().any(|e| {
             e.kind == crate::error::ErrorKind::MissingToken && e.message.contains("Expected `}`")
@@ -1877,15 +1577,10 @@ fn reports_missing_right_brace_in_path_direction() {
 
 #[test]
 fn scanner_unterminated_string_is_reported() {
-    let mut interp = Interpreter::new();
-    interp.run("show \"unterminated").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("show \"unterminated");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors
             .iter()
@@ -1896,16 +1591,11 @@ fn scanner_unterminated_string_is_reported() {
 
 #[test]
 fn scanner_invalid_character_is_reported() {
-    let mut interp = Interpreter::new();
+    let mut interp = TestInterp::new();
     let src = format!("show 1;{}show 2;", '\u{1f}');
-    interp.run(&src).unwrap();
+    interp.run(&src);
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors
             .iter()
@@ -1916,10 +1606,9 @@ fn scanner_invalid_character_is_reported() {
 
 #[test]
 fn dashpattern_basic() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            r#"
+    let mut interp = TestInterp::new();
+    interp.run(
+        r#"
         delimiters ();
         tertiarydef p _on_ d =
           begingroup save pic;
@@ -1943,15 +1632,9 @@ fn dashpattern_basic() {
         enddef;
         show dashpattern(on 3 off 3);
     "#,
-        )
-        .unwrap();
+    );
     // Should produce a picture, not a "Cannot transform" error
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     for e in &errors {
         eprintln!("  dashpattern error: {}", e.message);
     }
@@ -1962,10 +1645,9 @@ fn dashpattern_basic() {
 fn dashed_line_produces_dash_pattern() {
     // Verify that `dashed dashpattern(...)` applies stroke-dasharray to the
     // output picture and doesn't leak intermediate strokes.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            r#"
+    let mut interp = TestInterp::new();
+    interp.run(
+        r#"
         delimiters ();
         tertiarydef p _on_ d =
           begingroup save pic;
@@ -1990,16 +1672,9 @@ fn dashed_line_produces_dash_pattern() {
         addto currentpicture doublepath (0,0)..(30,0)
           dashed dashpattern(on 2 off 3);
     "#,
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "errors: {errors:?}");
+    interp.assert_no_errors();
 
     // The picture should have exactly one Stroke object (the dashed line).
     let objects = &interp.current_picture().objects;
@@ -2030,10 +1705,9 @@ fn dashed_line_produces_dash_pattern() {
 fn dashed_withdots_uses_leading_offset() {
     // `dashpattern(off 2.5 on 0 off 2.5)` should produce one zero-length
     // dash every 5 units, offset by 2.5 from the path start.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            r#"
+    let mut interp = TestInterp::new();
+    interp.run(
+        r#"
         delimiters ();
         tertiarydef p _on_ d =
           begingroup save pic;
@@ -2058,16 +1732,9 @@ fn dashed_withdots_uses_leading_offset() {
         addto currentpicture doublepath (0,0)..(30,0)
           dashed dashpattern(off 2.5 on 0 off 2.5);
     "#,
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "errors: {errors:?}");
+    interp.assert_no_errors();
 
     let objects = &interp.current_picture().objects;
     assert_eq!(objects.len(), 1, "expected 1 object, got {}", objects.len());
@@ -2090,49 +1757,45 @@ fn dashed_withdots_uses_leading_offset() {
 #[test]
 fn vardef_stays_tag_token() {
     // After defining a vardef, the symbol should remain TagToken
-    let mut interp = Interpreter::new();
-    interp.run("vardef foo primary x = x + 1 enddef;").unwrap();
-    let sym = interp.state.symbols.lookup("foo");
-    let entry = interp.state.symbols.get(sym);
+    let mut interp = TestInterp::new();
+    interp.run("vardef foo primary x = x + 1 enddef;");
+    let sym = interp.interp.state.symbols.lookup("foo");
+    let entry = interp.interp.state.symbols.get(sym);
     assert_eq!(entry.command, Command::TagToken);
-    assert!(interp.state.macros.get(sym).is_some());
+    assert!(interp.interp.state.macros.get(sym).is_some());
 }
 
 #[test]
 fn implicit_multiplication() {
-    let mut interp = Interpreter::new();
-    interp.run("bp := 1; show 3bp;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("bp := 1; show 3bp;");
+    let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
 #[test]
 fn implicit_multiplication_pair() {
-    let mut interp = Interpreter::new();
-    interp.run("show 2(3,4);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show 2(3,4);");
+    let msg = interp.first_show();
     assert!(msg.contains("(6,8)"), "expected (6,8) in: {msg}");
 }
 
 #[test]
 fn vardef_expands_in_expression() {
     // vardef macro should expand when used as standalone primary
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef foo primary x = x + 1 enddef; show foo 5;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("vardef foo primary x = x + 1 enddef; show foo 5;");
     // show produces an error with the value
-    let msg = &interp.state.errors[0].message;
+    let msg = interp.first_show();
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
 #[test]
 fn vardef_suffix_not_expanded() {
     // A vardef symbol appearing as a suffix should NOT be expanded
-    let mut interp = Interpreter::new();
-    interp
-        .run("pair p.foo; vardef foo primary x = x enddef; p.foo = (1,2);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("pair p.foo; vardef foo primary x = x enddef; p.foo = (1,2);");
 }
 
 // -----------------------------------------------------------------------
@@ -2141,11 +1804,9 @@ fn vardef_suffix_not_expanded() {
 
 #[test]
 fn vardef_at_suffix_parses() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef foo@#(expr x) = x enddef; show 1;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef foo@#(expr x) = x enddef; show 1;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -2155,11 +1816,9 @@ fn vardef_at_suffix_parses() {
 
 #[test]
 fn vardef_expr_of_pattern() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef direction expr t of p = t enddef; show 1;")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef direction expr t of p = t enddef; show 1;");
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected 1 in: {msg}");
 }
 
@@ -2169,17 +1828,9 @@ fn vardef_expr_of_pattern() {
 
 #[test]
 fn multiple_delimited_param_groups() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef foo(expr u)(expr v) = show u; show v enddef; foo(1)(2);")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("vardef foo(expr u)(expr v) = show u; show v enddef; foo(1)(2);");
+    let infos = interp.shows();
     assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
     assert!(
         infos.iter().any(|m| m.contains('1')),
@@ -2193,26 +1844,12 @@ fn multiple_delimited_param_groups() {
 
 #[test]
 fn multiple_delimited_groups_allow_boundary_comma() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef foo(expr u)(expr v)=show u; show v enddef; foo(4,5);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("vardef foo(expr u)(expr v)=show u; show v enddef; foo(4,5);");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains('4')),
         "expected u=4 in: {infos:?}"
@@ -2225,18 +1862,10 @@ fn multiple_delimited_groups_allow_boundary_comma() {
 
 #[test]
 fn pair_equation_assigns_components() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric t, u; (t,u) = (3.5, -2); show t; show u;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric t, u; (t,u) = (3.5, -2); show t; show u;");
 
-    let messages: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let messages = interp.shows();
     assert!(
         messages.iter().any(|m| m.contains("3.5")),
         "expected t=3.5 in messages: {messages:?}"
@@ -2249,26 +1878,17 @@ fn pair_equation_assigns_components() {
 
 #[test]
 fn pair_equation_preserves_dep_when_length_minus_unknown() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              path p;
              p := fullcircle;
              numeric t, u;
              (t, length p - u) = (1, 2);
              show u;",
-        )
-        .unwrap();
+    );
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
 
     assert!(
         infos.iter().any(|m| m.contains('6')),
@@ -2280,29 +1900,15 @@ fn pair_equation_preserves_dep_when_length_minus_unknown() {
 fn vardef_expr_param_preserves_pair_deps() {
     // Regression: passing an unknown pair through a vardef expr parameter
     // must preserve equation deps so the solver can determine the variable.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef assign(expr m, v) = m = v enddef;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef assign(expr m, v) = m = v enddef;
              pair A; assign(A, (3,7)); show A;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("(3,7)")),
         "expected A=(3,7), got: {infos:?}"
@@ -2313,29 +1919,15 @@ fn vardef_expr_param_preserves_pair_deps() {
 fn vardef_expr_param_preserves_numeric_deps() {
     // Passing an unknown numeric through a vardef expr parameter must
     // preserve its dependency so the equation solver can determine it.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef assign(expr m, v) = m = v enddef;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef assign(expr m, v) = m = v enddef;
              numeric x; assign(x, 42); show x;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("42")),
         "expected x=42, got: {infos:?}"
@@ -2350,34 +1942,20 @@ fn vardef_expr_param_chained_pair_equations() {
     //   bar(B, A,  P1, C)  =>  B = 1/3*A  + 1/3*P1 + 1/3*C
     //   bar(C, B,  P2, P3) =>  C = 1/3*B  + 1/3*P2 + 1/3*P3
     // With P0..P4 known, the system is fully determined.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef bar(expr m,a,b,c) = m = 1/3a + 1/3b + 1/3c enddef;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef bar(expr m,a,b,c) = m = 1/3a + 1/3b + 1/3c enddef;
              pair A, B, C;
              bar(A, (9,0), (0,9), B);
              bar(B, A, (0,0), C);
              bar(C, B, (9,0), (0,9));
              show A; show B; show C;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     // Verify that all three pairs are known (not (0,0) placeholders).
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show messages, got: {infos:?}");
     // None of the solved pairs should be (0,0) — that would indicate
     // deps were lost and the solver couldn't determine the variables.
@@ -2392,29 +1970,15 @@ fn vardef_expr_param_chained_pair_equations() {
 #[test]
 fn def_expr_param_preserves_pair_deps() {
     // Same as the vardef test, but with `def` (no group scope).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "def assign(expr m, v) = m = v enddef;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "def assign(expr m, v) = m = v enddef;
              pair A; assign(A, (5,11)); show A;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("(5,11)")),
         "expected A=(5,11), got: {infos:?}"
@@ -2424,29 +1988,15 @@ fn def_expr_param_preserves_pair_deps() {
 #[test]
 fn undelimited_expr_param_preserves_pair_deps() {
     // Undelimited primary/expr params also need dep preservation.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "def assign(expr m) primary v = m = v enddef;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "def assign(expr m) primary v = m = v enddef;
              pair A; assign(A) (4,8); show A;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("(4,8)")),
         "expected A=(4,8), got: {infos:?}"
@@ -2459,53 +2009,33 @@ fn undelimited_expr_param_preserves_pair_deps() {
 
 #[test]
 fn plain_mp_error_count() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp.run("input plain;").unwrap();
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run("input plain;");
 
-    let error_count = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    // plain.mp should load without errors.
-    assert!(error_count == 0, "expected 0 errors, got {error_count}");
+    interp.assert_no_errors();
 }
 
 #[test]
 fn plain_mp_loads() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
+    let mut interp = TestInterp::with_plain_mp();
     // Should not return Err (hard error) — warnings are OK
-    interp.run("input plain;").unwrap();
+    interp.run("input plain;");
 }
 
 #[test]
 fn plain_beginfig_draw_endfig() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run("input plain; beginfig(1); draw (0,0)..(10,10); endfig; end;")
-        .unwrap();
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run("input plain; beginfig(1); draw (0,0)..(10,10); endfig; end;");
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
     assert!(!interp.output().is_empty(), "expected shipped pictures");
 }
 
 #[test]
 fn plain_path_examples_39_and_56() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              beginfig(39);
                draw (0,0) --- (0,1cm) .. (1cm,0) .. (1cm,1cm);
              endfig;
@@ -2513,34 +2043,18 @@ fn plain_path_examples_39_and_56() {
                draw (0,0) .. tension 2 .. (1cm,1cm) .. (2cm,0);
              endfig;
              end;",
-        )
-        .unwrap();
+    );
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
     assert!(interp.output().len() >= 2, "expected shipped pictures");
 }
 
 #[test]
 fn plain_fill_has_no_stroke_pen() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run("input plain; beginfig(1); fill fullcircle scaled 10bp; endfig; end;")
-        .unwrap();
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run("input plain; beginfig(1); fill fullcircle scaled 10bp; endfig; end;");
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
 
     let pic = interp.output().last().expect("expected shipped picture");
     let fill = match pic.objects.first().expect("expected one object") {
@@ -2552,25 +2066,16 @@ fn plain_fill_has_no_stroke_pen() {
 
 #[test]
 fn plain_filldraw_withpen_sets_stroke_pen() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              beginfig(1);
                filldraw fullcircle scaled 10bp withpen pencircle scaled 2bp;
              endfig;
              end;",
-        )
-        .unwrap();
+    );
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
 
     let pic = interp.output().last().expect("expected shipped picture");
     let fill = match pic.objects.first().expect("expected one object") {
@@ -2591,44 +2096,34 @@ fn plain_filldraw_withpen_sets_stroke_pen() {
 #[test]
 fn plain_hide_postfix_preserves_left_expression() {
     use crate::variables::VarValue;
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              path p;
              cuttings := (0,0)--(1cm,0);
              p := ((0,0)--(1cm,0)) hide(cuttings:=reverse cuttings);
              end;",
-        )
-        .unwrap();
+    );
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
 
     let pid = interp
+        .interp
         .state
         .variables
         .lookup_existing("p")
         .expect("path variable p should exist");
     assert!(matches!(
-        interp.state.variables.get(pid),
+        interp.interp.state.variables.get(pid),
         VarValue::Known(crate::types::Value::Path(_))
     ));
 }
 
 #[test]
 fn plain_drawarrow_example_17() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              beginfig(17);
                pair A, B, C;
                A := (0,0); B := (1cm,0); C := (0,1cm);
@@ -2636,26 +2131,17 @@ fn plain_drawarrow_example_17() {
                drawarrow A--C withpen pencircle scaled 2bp;
              endfig;
              end;",
-        )
-        .unwrap();
+    );
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
     assert!(!interp.output().is_empty(), "expected shipped pictures");
 }
 
 #[test]
 fn plain_drawdblarrow_example_18() {
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(
-            "input plain;
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain;
              beginfig(18);
                pair A, B, C;
                A := (0,0); B := (1cm,0); C := (0,1cm);
@@ -2663,16 +2149,9 @@ fn plain_drawdblarrow_example_18() {
                drawdblarrow A--C withpen pencircle scaled 2bp;
              endfig;
              end;",
-        )
-        .unwrap();
+    );
 
-    let errors = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .count();
-    assert!(errors == 0, "expected 0 errors, got {errors}");
+    interp.assert_no_errors();
     assert!(!interp.output().is_empty(), "expected shipped pictures");
 }
 
@@ -2682,25 +2161,25 @@ fn plain_drawdblarrow_example_18() {
 
 #[test]
 fn type_test_numeric() {
-    let mut interp = Interpreter::new();
-    interp.run("show numeric 5;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show numeric 5;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn type_test_pen() {
-    let mut interp = Interpreter::new();
-    interp.run("show pen pencircle;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show pen pencircle;");
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn type_test_numeric_on_pen() {
-    let mut interp = Interpreter::new();
-    interp.run("show numeric pencircle;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show numeric pencircle;");
+    let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -2710,9 +2189,9 @@ fn type_test_numeric_on_pen() {
 
 #[test]
 fn subscript_bracket() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric a[]; a[1] := 42; show a[1];").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric a[]; a[1] := 42; show a[1];");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -2724,92 +2203,47 @@ fn subscript_bracket() {
 fn trailing_tokens_after_undelimited_expr() {
     // A macro with undelimited `primary` param stops scanning after the
     // primary.  The trailing `;` must survive and terminate the statement.
-    let mut interp = Interpreter::new();
-    interp
-        .run("def greet primary x = show x enddef; greet 42;")
-        .unwrap();
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
-    let show_msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info);
-    assert!(
-        show_msg.is_some() && show_msg.unwrap().message.contains("42"),
-        "expected show 42"
-    );
+    let mut interp = TestInterp::new();
+    interp.run("def greet primary x = show x enddef; greet 42;");
+    interp.assert_no_errors();
+    let msg = interp.first_show();
+    assert!(msg.contains("42"), "expected show 42, got: {msg}");
 }
 
 #[test]
 fn vardef_returns_value() {
     // A vardef should return the value of its last expression.
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef triple(expr x) = 3 * x enddef; show triple(7);")
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("vardef triple(expr x) = 3 * x enddef; show triple(7);");
+    let msg = interp.first_show();
     assert!(msg.contains("21"), "expected 21 in: {msg}");
 }
 
 #[test]
 fn save_restores_variable_binding() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric x; x := 1; begingroup save x; x := 2; endgroup; show x;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 1; begingroup save x; x := 2; endgroup; show x;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .unwrap_or_default();
+    let msg = interp.first_show();
     assert!(msg.contains("1"), "expected x to restore to 1, got: {msg}");
 }
 
 #[test]
 fn whatever_calls_are_independent() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef whatever = save ?; ? enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef whatever = save ?; ? enddef; \
              numeric a,b; \
              a=whatever; b=whatever; \
              a=0; b=1; \
              show a; show b;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos
             .iter()
@@ -2824,60 +2258,55 @@ fn whatever_calls_are_independent() {
 
 #[test]
 fn whatever_times_pair_preserves_dependency() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef whatever = save ?; ? enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef whatever = save ?; ? enddef; \
              pair o; \
              o-(1,2)=whatever*(3,4); \
              o-(5,6)=whatever*(7,8); \
              show o;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 }
 
 #[test]
 fn whatever_line_intersection_solves_point() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef whatever = save ?; ? enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef whatever = save ?; ? enddef; \
              pair A,B,C,D,M; \
              A=(0,0); B=(2,3); \
              C=(1,0); D=(-1,2); \
              M = whatever [A,B]; \
              M = whatever [C,D];",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let mid = interp
+        .interp
         .state
         .variables
         .lookup_existing("M")
         .expect("M should exist");
-    let (xid, yid) = match interp.state.variables.get(mid) {
+    let (xid, yid) = match interp.interp.state.variables.get(mid) {
         crate::variables::VarValue::Pair { x, y } => (*x, *y),
         other => panic!("M should be a pair, got {other:?}"),
     };
 
-    let mx = interp.state.variables.known_value(xid).unwrap_or(0.0);
-    let my = interp.state.variables.known_value(yid).unwrap_or(0.0);
+    let mx = interp
+        .interp
+        .state
+        .variables
+        .known_value(xid)
+        .unwrap_or(0.0);
+    let my = interp
+        .interp
+        .state
+        .variables
+        .known_value(yid)
+        .unwrap_or(0.0);
 
     assert!((mx - 0.4).abs() < 0.01, "mx={mx}");
     assert!((my - 0.6).abs() < 0.01, "my={my}");
@@ -2885,37 +2314,40 @@ fn whatever_line_intersection_solves_point() {
 
 #[test]
 fn whatever_perpendicular_bisectors_solve_circumcenter() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef whatever = save ?; ? enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef whatever = save ?; ? enddef; \
              pair A,B,C,O; \
              A=(0,0); B=(3,0); C=(1,2); \
              O - 1/2[B,C] = whatever * (B-C) rotated 90; \
              O - 1/2[A,B] = whatever * (A-B) rotated 90;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let oid = interp
+        .interp
         .state
         .variables
         .lookup_existing("O")
         .expect("O should exist");
-    let (xid, yid) = match interp.state.variables.get(oid) {
+    let (xid, yid) = match interp.interp.state.variables.get(oid) {
         crate::variables::VarValue::Pair { x, y } => (*x, *y),
         other => panic!("O should be a pair, got {other:?}"),
     };
 
-    let ox = interp.state.variables.known_value(xid).unwrap_or(0.0);
-    let oy = interp.state.variables.known_value(yid).unwrap_or(0.0);
+    let ox = interp
+        .interp
+        .state
+        .variables
+        .known_value(xid)
+        .unwrap_or(0.0);
+    let oy = interp
+        .interp
+        .state
+        .variables
+        .known_value(yid)
+        .unwrap_or(0.0);
 
     assert!((ox - 1.5).abs() < 0.01, "ox={ox}");
     assert!((oy - 0.5).abs() < 0.01, "oy={oy}");
@@ -2923,10 +2355,9 @@ fn whatever_perpendicular_bisectors_solve_circumcenter() {
 
 #[test]
 fn save_localizes_suffix_bindings_in_recursive_vardef() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef test(expr n) = \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef test(expr n) = \
                save a; numeric a[]; \
                a[1] := n; \
                if n>0: \
@@ -2936,24 +2367,11 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
                show a[1]; \
              enddef; \
              test(3);",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
 
     assert_eq!(
         infos.len(),
@@ -2975,11 +2393,9 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
 #[test]
 fn btex_etex_produces_picture() {
     // btex ... etex should produce a picture capsule (not a string).
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"picture p; p = btex Hello World etex; show p;"#)
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"picture p; p = btex Hello World etex; show p;"#);
+    let msg = interp.first_show();
     assert!(
         msg.contains("(picture)"),
         "expected picture type in show output: {msg}"
@@ -2989,11 +2405,10 @@ fn btex_etex_produces_picture() {
 #[test]
 fn btex_etex_picture_is_transformable() {
     // btex...etex result can be shifted without error, since it's a picture.
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; p = btex test etex shifted (10,20);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("picture p; p = btex test etex shifted (10,20);");
     let errors: Vec<_> = interp
+        .interp
         .state
         .errors
         .iter()
@@ -3010,12 +2425,10 @@ fn btex_etex_picture_is_transformable() {
 fn btex_etex_draw_shifted_no_error() {
     // `draw btex...etex shifted z` — the pattern from examples 203-207.
     // Should work with plain.mp loaded (addto currentpicture).
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run("input plain; beginfig(1); draw btex Q etex shifted (5,5); endfig; end;")
-        .unwrap();
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run("input plain; beginfig(1); draw btex Q etex shifted (5,5); endfig; end;");
     let errors: Vec<_> = interp
+        .interp
         .state
         .errors
         .iter()
@@ -3035,12 +2448,10 @@ fn btex_etex_draw_shifted_no_error() {
 #[test]
 fn infont_produces_picture() {
     // "abc" infont "cmr10" should produce a picture
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"picture p; p = "abc" infont "cmr10"; show p;"#)
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(r#"picture p; p = "abc" infont "cmr10"; show p;"#);
     // The show output should indicate a picture value
-    let msg = &interp.state.errors[0].message;
+    let msg = interp.first_show();
     // A picture show typically shows the type or contents
     assert!(
         !msg.contains("error"),
@@ -3051,11 +2462,9 @@ fn infont_produces_picture() {
 #[test]
 fn infont_text_has_bbox() {
     // Corner operators on an infont picture should give non-zero bbox
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"picture p; p = "Hello" infont "cmr10"; show lrcorner p;"#)
-        .unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"picture p; p = "Hello" infont "cmr10"; show lrcorner p;"#);
+    let msg = interp.first_show();
     // lrcorner should have positive x and negative y (descender)
     assert!(msg.contains(','), "expected a pair in: {msg}");
 }
@@ -3063,51 +2472,27 @@ fn infont_text_has_bbox() {
 #[test]
 fn corner_operators_on_picture() {
     // Test all four corners on a simple filled picture
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; p = \"test\" infont \"cmr10\"; show llcorner p; show urcorner p;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("picture p; p = \"test\" infont \"cmr10\"; show llcorner p; show urcorner p;");
+    let infos = interp.shows();
     assert_eq!(infos.len(), 2, "expected 2 corner values, got: {infos:?}");
 }
 
 #[test]
 fn corner_operators_on_path() {
     // Corner operators should work on paths too
-    let mut interp = Interpreter::new();
-    interp
-        .run("path p; p = (0,0)..(10,20)..(30,5); show llcorner p; show urcorner p;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("path p; p = (0,0)..(10,20)..(30,5); show llcorner p; show urcorner p;");
+    let infos = interp.shows();
     assert_eq!(infos.len(), 2, "expected 2 corner values, got: {infos:?}");
 }
 
 #[test]
 fn vardef_at_suffix_with_params() {
     // vardef foo@#(expr s) should bind @# to the suffix and s to the arg
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"vardef foo@#(expr s) = show str @#; show s enddef; foo.bar("hello");"#)
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(r#"vardef foo@#(expr s) = show str @#; show s enddef; foo.bar("hello");"#);
+    let infos = interp.shows();
     assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
     assert!(
         infos[0].contains("bar"),
@@ -3128,27 +2513,27 @@ fn vardef_at_suffix_with_params() {
 #[test]
 fn substring_of_basic() {
     // substring (1,3) of "hello" = "el"
-    let mut interp = Interpreter::new();
-    interp.run(r#"show substring (1,3) of "hello";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show substring (1,3) of "hello";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("el"), "expected 'el' in: {msg}");
 }
 
 #[test]
 fn substring_of_full_range() {
     // substring (0,5) of "hello" = "hello"
-    let mut interp = Interpreter::new();
-    interp.run(r#"show substring (0,5) of "hello";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show substring (0,5) of "hello";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("hello"), "expected 'hello' in: {msg}");
 }
 
 #[test]
 fn substring_of_empty() {
     // substring (2,2) of "hello" = ""
-    let mut interp = Interpreter::new();
-    interp.run(r#"show substring (2,2) of "hello";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show substring (2,2) of "hello";"#);
+    let msg = interp.first_show();
     // Empty string shows as ""
     assert!(
         msg.contains("\"\"") || msg.contains(">>  ") || msg.ends_with(">> "),
@@ -3159,30 +2544,30 @@ fn substring_of_empty() {
 #[test]
 fn substring_of_utf8_is_char_boundary_safe() {
     // Regression: substring used byte slicing and could panic on UTF-8.
-    let mut interp = Interpreter::new();
-    interp.run("show substring (1,2) of \"a😊b\";").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show substring (1,2) of \"a😊b\";");
+    let msg = interp.first_show();
     assert!(msg.contains("😊"), "expected emoji substring in: {msg}");
 }
 
 #[test]
 fn length_of_utf8_counts_characters() {
-    let mut interp = Interpreter::new();
-    interp.run("show length \"a😊b\";").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show length \"a😊b\";");
+    let msg = interp.first_show();
     assert!(msg.contains('3'), "expected length 3 in: {msg}");
 }
 
 #[test]
 fn length_of_numeric_returns_abs() {
-    let mut interp = Interpreter::new();
-    interp.run("show length -5;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("show length -5;");
+    let msg = interp.first_show();
     assert!(msg.contains('5'), "expected abs value 5 in: {msg}");
 
-    let mut interp2 = Interpreter::new();
-    interp2.run("show length 3.7;").unwrap();
-    let msg2 = &interp2.state.errors[0].message;
+    let mut interp2 = TestInterp::new();
+    interp2.run("show length 3.7;");
+    let msg2 = interp2.first_show();
     assert!(msg2.contains("3.7"), "expected 3.7 in: {msg2}");
 }
 
@@ -3190,9 +2575,9 @@ fn length_of_numeric_returns_abs() {
 fn abs_of_numeric_via_plain_mp_let() {
     // plain.mp line 135: `let abs = length;`
     // abs should work on numerics since length does
-    let mut interp = Interpreter::new();
-    interp.run("let abs = length; show abs(-42);").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("let abs = length; show abs(-42);");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -3200,23 +2585,15 @@ fn abs_of_numeric_via_plain_mp_let() {
 fn delimited_suffix_comma_shares_type() {
     // (suffix a, b) — both a and b should be suffix params (mp.web §12882).
     // Previously, b was defaulting to expr.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "def mytwo(suffix aa, bb) =\n",
-            "  message str aa;\n",
-            "  message str bb;\n",
-            "enddef;\n",
-            "mytwo(foo, bar);\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "def mytwo(suffix aa, bb) =\n",
+        "  message str aa;\n",
+        "  message str bb;\n",
+        "enddef;\n",
+        "mytwo(foo, bar);\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(msgs, vec!["foo", "bar"], "both suffix params: {msgs:?}");
 }
 
@@ -3225,21 +2602,13 @@ fn delimited_suffix_in_def_endbox_pattern() {
     // The endbox_ pattern from boxes.mp: `def endbox_(suffix cl, $) = cl($); enddef`
     // Both cl and $ are suffix params. When expanded, cl($) should call
     // the macro named by cl with $ as its suffix argument.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "vardef myfunc(suffix $) = message str $; enddef;\n",
-            "def wrapper(suffix cl, $) = cl($); enddef;\n",
-            "wrapper(myfunc, hello);\n",
-        ))
-        .unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "vardef myfunc(suffix $) = message str $; enddef;\n",
+        "def wrapper(suffix cl, $) = cl($); enddef;\n",
+        "wrapper(myfunc, hello);\n",
+    ));
+    let msgs = interp.shows();
     assert_eq!(msgs, vec!["hello"], "suffix passed through: {msgs:?}");
 }
 
@@ -3249,27 +2618,14 @@ fn cutbefore_after_path_construction() {
     // inline path construction: `(0,0)--(1cm,0) cutbefore fullcircle`
     // Previously, path construction returned Break from the Pratt loop,
     // so `cutbefore` was never reached.
-    let mut interp = Interpreter::new();
-    interp.set_filesystem(Box::new(PlainMpFs));
-    interp
-        .run(concat!(
-            "input plain;\n",
-            "beginfig(1)\n",
-            "  draw (0,0)--(28.34645,0) cutbefore fullcircle scaled 5;\n",
-            "endfig;\n",
-        ))
-        .unwrap();
-    let errors: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .map(|e| e.message.as_str())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "cutbefore after path construction should not error: {errors:?}"
-    );
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(concat!(
+        "input plain;\n",
+        "beginfig(1)\n",
+        "  draw (0,0)--(28.34645,0) cutbefore fullcircle scaled 5;\n",
+        "endfig;\n",
+    ));
+    interp.assert_no_errors();
 }
 
 // -----------------------------------------------------------------------
@@ -3279,15 +2635,9 @@ fn cutbefore_after_path_construction() {
 #[test]
 fn equals_as_comparison_in_if() {
     // Inside `if`, `=` should be a comparison, not an equation
-    let mut interp = Interpreter::new();
-    interp.run("if 3 = 3: message \"yes\"; fi").unwrap();
-    let msgs: Vec<&str> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("if 3 = 3: message \"yes\"; fi");
+    let msgs = interp.shows();
     assert_eq!(msgs, vec!["yes"]);
 }
 
@@ -3295,21 +2645,13 @@ fn equals_as_comparison_in_if() {
 fn equals_as_comparison_in_exitif() {
     // `exitif n = 3` — the `=` must be comparison, not equation.
     // `exitif` finishes the current iteration body; loop stops at endfor.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric n, s; n := 0; s := 0;\n",
-            "forever: s := s + 1; n := n + 1; exitif n = 3; endfor;\n",
-            "show n;\n",
-        ))
-        .unwrap();
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .unwrap_or("");
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric n, s; n := 0; s := 0;\n",
+        "forever: s := s + 1; n := n + 1; exitif n = 3; endfor;\n",
+        "show n;\n",
+    ));
+    let msg = interp.first_show();
     // Loop runs 3 times (n=1,2,3), exits when n=3
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
@@ -3317,9 +2659,9 @@ fn equals_as_comparison_in_exitif() {
 #[test]
 fn equals_as_equation_in_statement() {
     // At statement level, `=` should be an equation
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x = 42; show x;").unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x = 42; show x;");
+    let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
 
@@ -3331,28 +2673,14 @@ fn equals_as_equation_in_statement() {
 fn tertiarydef_or_in_text_param() {
     // `or` is a tertiarydef. Using it inside a text parameter of a macro
     // should not duplicate the closing delimiter.
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "tertiarydef a or b = if a: a else: b fi enddef;\n",
-            "def test(text t) = t enddef;\n",
-            "show test(false or true);\n",
-        ))
-        .unwrap();
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .unwrap_or("");
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "tertiarydef a or b = if a: a else: b fi enddef;\n",
+        "def test(text t) = t enddef;\n",
+        "show test(false or true);\n",
+    ));
+    interp.assert_no_errors();
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
@@ -3362,41 +2690,41 @@ fn tertiarydef_or_in_text_param() {
 
 #[test]
 fn string_less_than() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show "a" < "b";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show "a" < "b";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn string_greater_than() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show "z" > "a";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show "z" > "a";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn string_less_equal() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show "abc" <= "abd";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show "abc" <= "abd";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn string_greater_equal_same() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show "abc" >= "abc";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show "abc" >= "abc";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("true"), "expected true in: {msg}");
 }
 
 #[test]
 fn string_comparison_false() {
-    let mut interp = Interpreter::new();
-    interp.run(r#"show "b" < "a";"#).unwrap();
-    let msg = &interp.state.errors[0].message;
+    let mut interp = TestInterp::new();
+    interp.run(r#"show "b" < "a";"#);
+    let msg = interp.first_show();
     assert!(msg.contains("false"), "expected false in: {msg}");
 }
 
@@ -3407,15 +2735,9 @@ fn string_comparison_false() {
 #[test]
 fn for_as_expression_sum() {
     // `for i=1,2,3: i + endfor 0` should evaluate to 6
-    let mut interp = Interpreter::new();
-    interp.run("show for i=1,2,3: i + endfor 0;").unwrap();
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .unwrap_or("");
+    let mut interp = TestInterp::new();
+    interp.run("show for i=1,2,3: i + endfor 0;");
+    let msg = interp.first_show();
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
@@ -3423,18 +2745,10 @@ fn for_as_expression_sum() {
 fn nested_for_substitutes_outer_loop_variable() {
     // Regression: outer `for` variables must substitute inside nested
     // loop bodies (example 132 relies on this).
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=1 step 1 until 2: for j=1 step 1 until 2: show i; endfor; endfor;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("for i=1 step 1 until 2: for j=1 step 1 until 2: show i; endfor; endfor;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
 
     assert_eq!(infos.len(), 4, "expected 4 show outputs, got: {infos:?}");
     assert!(infos[0].contains("1"), "expected 1, got: {}", infos[0]);
@@ -3447,18 +2761,10 @@ fn nested_for_substitutes_outer_loop_variable() {
 fn nested_for_same_name_shadows_outer_loop_variable() {
     // Guardrail: if an inner loop reuses the same variable name, it
     // should shadow the outer loop variable.
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=1 step 1 until 2: for i=10 step 1 until 11: show i; endfor; endfor;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("for i=1 step 1 until 2: for i=10 step 1 until 11: show i; endfor; endfor;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
 
     assert_eq!(infos.len(), 4, "expected 4 show outputs, got: {infos:?}");
     assert!(infos[0].contains("10"), "expected 10, got: {}", infos[0]);
@@ -3470,18 +2776,10 @@ fn nested_for_same_name_shadows_outer_loop_variable() {
 #[test]
 fn collective_pair_subscript_is_pair_typed() {
     // Regression: `pair A[]` must make `A[1]` a pair, not a numeric.
-    let mut interp = Interpreter::new();
-    interp
-        .run("pair A[]; show pair A[1]; show numeric A[1];")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("pair A[]; show pair A[1]; show numeric A[1];");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
 
     assert_eq!(infos.len(), 2, "expected 2 show outputs, got: {infos:?}");
     assert!(
@@ -3513,23 +2811,15 @@ fn collective_pair_subscript_works_in_for_sum_expression() {
 #[test]
 fn forsuffixes_iterates_suffixes() {
     // forsuffixes should iterate over suffix values
-    let mut interp = Interpreter::new();
-    interp
-        .run(concat!(
-            "numeric a.x, a.y, a.z;\n",
-            "a.x := 10; a.y := 20; a.z := 30;\n",
-            "numeric s; s := 0;\n",
-            "forsuffixes $=x,y,z: s := s + a$; endfor;\n",
-            "show s;\n",
-        ))
-        .unwrap();
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .unwrap_or("");
+    let mut interp = TestInterp::new();
+    interp.run(concat!(
+        "numeric a.x, a.y, a.z;\n",
+        "a.x := 10; a.y := 20; a.z := 30;\n",
+        "numeric s; s := 0;\n",
+        "forsuffixes $=x,y,z: s := s + a$; endfor;\n",
+        "show s;\n",
+    ));
+    let msg = interp.first_show();
     assert!(msg.contains("60"), "expected 60 in: {msg}");
 }
 
@@ -3541,17 +2831,9 @@ fn forsuffixes_iterates_suffixes() {
 fn for_loop_implicit_multiplication() {
     // `for i=0 step 1 until 2: show 72i; endfor`
     // should produce 0, 72, 144 via implicit multiplication 72*i
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=0 step 1 until 2: show 72i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=0 step 1 until 2: show 72i; endfor;");
+    let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show outputs, got: {infos:?}");
     assert!(infos[0].contains("0"), "expected 0, got: {}", infos[0]);
     assert!(infos[1].contains("72"), "expected 72, got: {}", infos[1]);
@@ -3568,29 +2850,19 @@ fn for_loop_implicit_multiplication() {
 #[test]
 fn equality_comparison_uses_interpreter_tolerance() {
     // 1 = 1.00005 should be true (diff < 1e-4) in MetaPost semantics
-    let mut interp = Interpreter::new();
-    interp.run("if 1 = 1.00005: show 1; fi;").unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("if 1 = 1.00005: show 1; fi;");
+    let infos = interp.shows();
     assert!(!infos.is_empty(), "expected equality to hold for diff 5e-5");
 }
 
 #[test]
 fn equality_comparison_detects_large_diff() {
     // 1 = 1.001 should be false (diff > 1e-4 threshold for equation consistency)
-    let mut interp = Interpreter::new();
-    interp.run("if 1 = 1.001: show 1; fi;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("if 1 = 1.001: show 1; fi;");
     // Should NOT have any info messages if comparison is false
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.is_empty(),
         "1 = 1.001 should be false, but show executed"
@@ -3599,18 +2871,10 @@ fn equality_comparison_detects_large_diff() {
 
 #[test]
 fn undelimited_macro_arg_parse_error_does_not_reuse_stale_cur_expr() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("def f primary p = show p; enddef; show 99; f;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("def f primary p = show p; enddef; show 99; f;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .collect();
+    let infos = interp.shows();
 
     let shows_99 = infos.iter().filter(|msg| msg.contains("99")).count();
     assert_eq!(
@@ -3624,33 +2888,18 @@ fn undelimited_macro_arg_parse_error_does_not_reuse_stale_cur_expr() {
 #[test]
 fn for_step_until_zero_step_no_hang() {
     // Zero step should produce no iterations (avoids infinite loop)
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=1 step 0 until 5: show i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=1 step 0 until 5: show i; endfor;");
+    let infos = interp.shows();
     assert!(infos.is_empty(), "zero step should produce no iterations");
 }
 
 #[test]
 fn for_step_until_inclusive_endpoint() {
     // `for i=0 step 1 until 3` should include i=3
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=0 step 1 until 3: show i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=0 step 1 until 3: show i; endfor;");
+    let infos = interp.shows();
     assert_eq!(
         infos.len(),
         4,
@@ -3661,17 +2910,9 @@ fn for_step_until_inclusive_endpoint() {
 #[test]
 fn for_step_until_negative_direction() {
     // `for i=3 step -1 until 1` should produce 3,2,1
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=3 step -1 until 1: show i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=3 step -1 until 1: show i; endfor;");
+    let infos = interp.shows();
     assert_eq!(
         infos.len(),
         3,
@@ -3682,17 +2923,9 @@ fn for_step_until_negative_direction() {
 #[test]
 fn for_step_until_fractional_inclusive() {
     // `for i=0 step 0.1 until 0.3` should include 0.3 (within tolerance)
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=0 step 0.1 until 0.3: show i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=0 step 0.1 until 0.3: show i; endfor;");
+    let infos = interp.shows();
     assert!(
         infos.len() >= 4,
         "expected at least 4 iterations (0, 0.1, 0.2, 0.3), got {}: {infos:?}",
@@ -3703,16 +2936,9 @@ fn for_step_until_fractional_inclusive() {
 #[test]
 fn for_step_until_wrong_direction_no_iterations() {
     // `for i=1 step -1 until 5` goes the wrong way: should produce no iterations
-    let mut interp = Interpreter::new();
-    interp
-        .run("for i=1 step -1 until 5: show i; endfor;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("for i=1 step -1 until 5: show i; endfor;");
+    let infos = interp.shows();
     assert!(
         infos.is_empty(),
         "wrong direction should produce no iterations, got: {infos:?}"
@@ -3724,15 +2950,9 @@ fn for_step_until_wrong_direction_no_iterations() {
 #[test]
 fn scantokens_preserves_terminator() {
     // scantokens should not eat the `;` after the string expression
-    let mut interp = Interpreter::new();
-    interp.run(r#"scantokens "show 42"; show 99;"#).unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(r#"scantokens "show 42"; show 99;"#);
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("42")),
         "scantokens should show 42: {infos:?}"
@@ -3746,15 +2966,9 @@ fn scantokens_preserves_terminator() {
 #[test]
 fn expandafter_scantokens_same_as_direct() {
     // expandafter scantokens should produce same result
-    let mut interp = Interpreter::new();
-    interp.run(r#"expandafter show scantokens "42";"#).unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run(r#"expandafter show scantokens "42";"#);
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("42")),
         "expandafter scantokens should show 42: {infos:?}"
@@ -3793,15 +3007,10 @@ fn nested_source_levels_lifo_order() {
 fn nonlinear_equation_does_not_assign_bindable_lhs() {
     // Regression: nonlinear equations like `z = x*y` must not silently
     // degrade into assignment (`z := 0`) when dependency tracking is absent.
-    let mut interp = Interpreter::new();
-    interp.run("numeric x, y, z; z = x*y;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x, y, z; z = x*y;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors.iter().any(|e| {
             e.kind == crate::error::ErrorKind::IncompatibleTypes && e.message.contains("Nonlinear")
@@ -3810,13 +3019,14 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
     );
 
     let z_id = interp
+        .interp
         .state
         .variables
         .lookup_existing("z")
         .expect("z should exist after declaration");
     assert!(
         !matches!(
-            interp.state.variables.get(z_id),
+            interp.interp.state.variables.get(z_id),
             crate::variables::VarValue::NumericVar(crate::variables::NumericState::Known(_))
         ),
         "nonlinear equation must not force z to known value"
@@ -3826,17 +3036,9 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
 #[test]
 fn transitive_equations_solve_correctly() {
     // x + y = 5; y + z = 7; x = 1 => y = 4, z = 3
-    let mut interp = Interpreter::new();
-    interp
-        .run("numeric x, y, z; x + y = 5; y + z = 7; x = 1; show y; show z;")
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x, y, z; x + y = 5; y + z = 7; x = 1; show y; show z;");
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("4")),
         "expected y=4: {infos:?}"
@@ -3851,21 +3053,13 @@ fn transitive_equations_solve_correctly() {
 
 #[test]
 fn save_root_does_not_affect_similar_prefix() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "numeric a, ab; a := 1; ab := 2; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "numeric a, ab; a := 1; ab := 2; \
              begingroup save a; a := 99; endgroup; \
              show a; show ab;",
-        )
-        .unwrap();
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    );
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains(">> 1")),
         "a should restore to 1: {infos:?}"
@@ -3896,16 +3090,10 @@ fn scan_expression_internal_usage() {
 fn implicit_mul_scales_pair_dependencies() {
     // Regression: implicit multiplication (3z) must scale pair dependencies,
     // not just the computed placeholder value.
-    let mut interp = Interpreter::new();
-    interp.run("pair z; 3z = (6,9); show z;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("pair z; 3z = (6,9); show z;");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains("(2,3)")),
         "expected z=(2,3), got: {infos:?}"
@@ -3914,18 +3102,10 @@ fn implicit_mul_scales_pair_dependencies() {
 
 #[test]
 fn addto_defaults_to_currentpicture_when_name_omitted() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("addto contour ((0,0)..(1,0)..(1,1)..cycle);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("addto contour ((0,0)..(1,0)..(1,1)..cycle);");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     assert_eq!(
         interp.current_picture().objects.len(),
@@ -3940,21 +3120,13 @@ fn addto_defaults_to_currentpicture_when_name_omitted() {
 
 #[test]
 fn clip_defaults_to_currentpicture_when_name_omitted() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "addto contour ((0,0)..(1,0)..(1,1)..cycle); \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "addto contour ((0,0)..(1,0)..(1,1)..cycle); \
              clip to ((-1,-1)..(2,-1)..(2,2)..(-1,2)..cycle);",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let objs = &interp.current_picture().objects;
     assert_eq!(objs.len(), 1);
@@ -3967,30 +3139,20 @@ fn clip_defaults_to_currentpicture_when_name_omitted() {
 
 #[test]
 fn refactor_guard_save_hides_and_restores_vardef_across_group() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef f = 42 enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef f = 42 enddef; \
              show f; \
              begingroup save f; numeric f; f := 99; show f; endgroup; \
              show f;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let show_outputs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
-        .map(|e| e.message.clone())
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
     assert_eq!(
         show_outputs.len(),
@@ -4016,30 +3178,20 @@ fn refactor_guard_save_hides_and_restores_vardef_across_group() {
 
 #[test]
 fn refactor_guard_save_hides_and_restores_macro_across_group() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "def greet = show 77 enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "def greet = show 77 enddef; \
              greet; \
              begingroup save greet; greet; endgroup; \
              greet;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let show_outputs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
-        .map(|e| e.message.clone())
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
     assert_eq!(
         show_outputs.len(),
@@ -4060,30 +3212,19 @@ fn refactor_guard_save_hides_and_restores_macro_across_group() {
 
 #[test]
 fn refactor_guard_begingroup_expression_value_survives_endgroup() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "numeric y; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "numeric y; \
              y := begingroup numeric x; x := 4; x + 5 endgroup; \
              show y;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let show_outputs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.as_str())
-        .filter(|msg| msg.contains(">>"))
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
     assert_eq!(
         show_outputs.len(),
@@ -4099,10 +3240,9 @@ fn refactor_guard_begingroup_expression_value_survives_endgroup() {
 
 #[test]
 fn refactor_guard_nested_group_restore_order() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "numeric x; x := 1; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "numeric x; x := 1; \
              begingroup \
                save x; \
                x := 2; \
@@ -4115,23 +3255,14 @@ fn refactor_guard_nested_group_restore_order() {
                show x; \
              endgroup; \
              show x;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let show_outputs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
-        .map(|e| e.message.clone())
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
 
     assert_eq!(
@@ -4163,10 +3294,9 @@ fn refactor_guard_nested_group_restore_order() {
 
 #[test]
 fn refactor_guard_root_fast_save_discards_group_descendants() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "numeric x; x := 1; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "numeric x; x := 1; \
              begingroup \
                save x; \
                x := 2; \
@@ -4174,23 +3304,14 @@ fn refactor_guard_root_fast_save_discards_group_descendants() {
              endgroup; \
              show x; \
              show known x.foo;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     let show_outputs: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info && e.message.contains(">>"))
-        .map(|e| e.message.clone())
+        .shows()
+        .into_iter()
+        .filter(|m| m.contains(">>"))
         .collect();
 
     assert_eq!(
@@ -4212,32 +3333,22 @@ fn refactor_guard_root_fast_save_discards_group_descendants() {
 
 #[test]
 fn refactor_guard_currentpicture_roundtrip_assignment_stays_stable() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("addto contour ((0,0)..(1,0)..(1,1)..cycle);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("addto contour ((0,0)..(1,0)..(1,1)..cycle);");
     let original_picture = interp.current_picture().clone();
     assert!(
         !original_picture.objects.is_empty(),
         "precondition: currentpicture should be non-empty before roundtrip"
     );
 
-    interp
-        .run(
-            "picture snap; \
+    interp.run(
+        "picture snap; \
              snap := currentpicture; \
              currentpicture := nullpicture; \
              currentpicture := snap;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
     assert!(
         interp.current_picture().objects.is_empty(),
@@ -4247,15 +3358,10 @@ fn refactor_guard_currentpicture_roundtrip_assignment_stays_stable() {
 
 #[test]
 fn shipout_non_picture_reports_type_error() {
-    let mut interp = Interpreter::new();
-    interp.run("shipout 123;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("shipout 123;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors
             .iter()
@@ -4267,15 +3373,10 @@ fn shipout_non_picture_reports_type_error() {
 
 #[test]
 fn empty_path_cycle_reports_error_without_panic() {
-    let mut interp = Interpreter::new();
-    interp.run("path p; p := p .. cycle; show 1;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("path p; p := p .. cycle; show 1;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(!errors.is_empty(), "expected an error for empty-path cycle");
 }
 
@@ -4292,28 +3393,17 @@ fn ampersand_requires_pair_or_path_rhs() {
 #[test]
 fn undelimited_text_macro_stops_at_endgroup() {
     // Regression: undelimited text args must stop at endgroup as well as ';'.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "def t text x = message \"in\" enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "def t text x = message \"in\" enddef; \
              begingroup t a endgroup; \
              message \"after\";",
-        )
-        .unwrap();
-
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
-    assert!(
-        infos.iter().any(|m| m == "in"),
-        "expected message 'in': {infos:?}"
     );
+
+    let infos = interp.shows();
+    assert!(infos.contains(&"in"), "expected message 'in': {infos:?}");
     assert!(
-        infos.iter().any(|m| m == "after"),
+        infos.contains(&"after"),
         "expected message 'after': {infos:?}"
     );
 }
@@ -4322,24 +3412,16 @@ fn undelimited_text_macro_stops_at_endgroup() {
 fn vardef_at_suffix_only_preserves_trailing_token() {
     // Regression: for vardef with only @# suffix param, the trailing token after
     // a macro call must still be preserved.
-    let mut interp = Interpreter::new();
-    interp
-        .run("vardef f@# = 1 enddef; show f.x; message \"after\";")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("vardef f@# = 1 enddef; show f.x; message \"after\";");
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains(">> 1")),
         "expected show output for f.x: {infos:?}"
     );
     assert!(
-        infos.iter().any(|m| m == "after"),
+        infos.contains(&"after"),
         "expected trailing message after macro call: {infos:?}"
     );
 }
@@ -4365,15 +3447,10 @@ fn mismatched_custom_delimiters_report_error() {
 
 #[test]
 fn known_equation_reports_inconsistency_without_assignment() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x; x := 1; x = 2; show x;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x; x := 1; x = 2; show x;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors
             .iter()
@@ -4382,27 +3459,32 @@ fn known_equation_reports_inconsistency_without_assignment() {
     );
 
     let x_id = interp
+        .interp
         .state
         .variables
         .lookup_existing("x")
         .expect("x should exist after declaration");
-    let x = interp.state.variables.known_value(x_id).unwrap_or(f64::NAN);
+    let x = interp
+        .interp
+        .state
+        .variables
+        .known_value(x_id)
+        .unwrap_or(f64::NAN);
     assert!((x - 1.0).abs() < 1e-12, "x should remain 1, got {x}");
 }
 
 #[test]
 fn addto_picture_target_accepts_symbolic_suffixes() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture pic.layer; addto pic.layer contour ((0,0)..(1,0)..(1,1)..cycle);")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("picture pic.layer; addto pic.layer contour ((0,0)..(1,0)..(1,1)..cycle);");
 
     let layer_id = interp
+        .interp
         .state
         .variables
         .lookup_existing("pic.layer")
         .expect("pic.layer should exist");
-    let layer_pic = match interp.state.variables.get(layer_id) {
+    let layer_pic = match interp.interp.state.variables.get(layer_id) {
         crate::variables::VarValue::Known(Value::Picture(p)) => p,
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
@@ -4415,21 +3497,20 @@ fn addto_picture_target_accepts_symbolic_suffixes() {
 
 #[test]
 fn clip_picture_target_accepts_symbolic_suffixes() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic.layer; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic.layer; \
              addto pic.layer contour ((0,0)..(1,0)..(1,1)..cycle); \
              clip pic.layer to ((-1,-1)..(2,-1)..(2,2)..(-1,2)..cycle);",
-        )
-        .unwrap();
+    );
 
     let layer_id = interp
+        .interp
         .state
         .variables
         .lookup_existing("pic.layer")
         .expect("pic.layer should exist");
-    let layer_pic = match interp.state.variables.get(layer_id) {
+    let layer_pic = match interp.interp.state.variables.get(layer_id) {
         crate::variables::VarValue::Known(Value::Picture(p)) => p,
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
@@ -4444,15 +3525,10 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
 
 #[test]
 fn nonlinear_equation_without_bindable_lhs_reports_error() {
-    let mut interp = Interpreter::new();
-    interp.run("numeric x, y; x*x = y;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("numeric x, y; x*x = y;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
+    let errors = interp.errors();
     assert!(
         errors
             .iter()
@@ -4477,24 +3553,12 @@ fn path_tension_rejects_non_primary_expression() {
 
 #[test]
 fn relax_command_is_accepted_as_noop() {
-    let mut interp = Interpreter::new();
-    interp.run("relax; show 1;").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("relax; show 1;");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert!(
         infos.iter().any(|m| m.contains(">> 1")),
         "show output: {infos:?}"
@@ -4503,60 +3567,35 @@ fn relax_command_is_accepted_as_noop() {
 
 #[test]
 fn randomseed_statement_sets_seed() {
-    let mut interp = Interpreter::new();
-    interp.run("randomseed := 123;").unwrap();
-    assert_eq!(interp.state.random_seed, 123);
+    let mut interp = TestInterp::new();
+    interp.run("randomseed := 123;");
+    assert_eq!(interp.interp.state.random_seed, 123);
 }
 
 #[test]
 fn special_statement_is_accepted_as_noop() {
-    let mut interp = Interpreter::new();
-    interp.run("special \"x\";").unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("special \"x\";");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "expected no diagnostics, got: {errors:?}"
-    );
+    interp.assert_no_errors();
 }
 
 /// mp.web §302: makepen auto-closes non-cyclic paths.
 #[test]
 fn makepen_accepts_non_cyclic_path() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("pen p; p := makepen ((0,0)..(100,0));")
-        .expect("makepen should accept non-cyclic path");
+    let mut interp = TestInterp::new();
+    interp.run("pen p; p := makepen ((0,0)..(100,0));");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 }
 
 /// mp.web §16987: makepen accepts a pair (pair_to_path).
 #[test]
 fn makepen_accepts_pair() {
-    let mut interp = Interpreter::new();
-    interp
-        .run("pen p; p := makepen (5,3);")
-        .expect("makepen should accept a pair");
+    let mut interp = TestInterp::new();
+    interp.run("pen p; p := makepen (5,3);");
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 }
 
 // -----------------------------------------------------------------------
@@ -4566,23 +3605,20 @@ fn makepen_accepts_pair() {
 #[test]
 fn verbatimtex_is_skipped() {
     // verbatimtex ... etex should be silently skipped without errors.
-    let mut interp = Interpreter::new();
-    interp
-        .run(r#"verbatimtex \documentstyle{article} \begin{document} etex show 42;"#)
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run(r#"verbatimtex \documentstyle{article} \begin{document} etex show 42;"#);
     // The `show 42` after etex should execute normally.
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("42")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("42")),
         "show 42 should produce output after verbatimtex block"
     );
     // No errors about unexpected tokens from the TeX content.
-    let real_errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(real_errors.is_empty(), "unexpected errors: {real_errors:?}");
+    interp.assert_no_errors();
 }
 
 // -----------------------------------------------------------------------
@@ -4593,19 +3629,22 @@ fn verbatimtex_is_skipped() {
 fn for_within_iterates_picture_components() {
     // Build a picture with two strokes, iterate with `for ... within`.
     // Use `..` (primitive path join) instead of `--` (plain.mp macro).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              addto pic doublepath (0,0)..(1,1);
              addto pic doublepath (2,2)..(3,3);
              numeric n; n := 0;
              for q within pic: n := n + 1; endfor
              show n;",
-        )
-        .unwrap();
+    );
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("2")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("2")),
         "should iterate over 2 components"
     );
 }
@@ -4614,19 +3653,22 @@ fn for_within_iterates_picture_components() {
 fn for_within_extracts_pathpart() {
     // Iterate and extract pathpart from each component.
     // Use `..` (primitive path join) instead of `--` (plain.mp macro).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              addto pic doublepath (10,20)..(30,40);
              for q within pic:
                show xpart point 0 of pathpart q;
                exitif true;
              endfor",
-        )
-        .unwrap();
+    );
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("10")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("10")),
         "pathpart should yield the original path's first point x=10"
     );
 }
@@ -4634,17 +3676,20 @@ fn for_within_extracts_pathpart() {
 #[test]
 fn for_within_empty_picture() {
     // Iterating over an empty picture should execute zero iterations.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              numeric n; n := 0;
              for q within pic: n := n + 1; endfor
              show n;",
-        )
-        .unwrap();
+    );
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("0")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("0")),
         "empty picture should produce 0 iterations"
     );
 }
@@ -4657,12 +3702,15 @@ fn for_within_empty_picture() {
 fn xxpart_of_text_picture() {
     // xxpart of a btex picture should return the xx component of the text transform.
     // For default btex output, the transform is identity, so xxpart = 1.
-    let mut interp = Interpreter::new();
-    interp
-        .run("picture p; p = btex X etex; show xxpart p;")
-        .unwrap();
+    let mut interp = TestInterp::new();
+    interp.run("picture p; p = btex X etex; show xxpart p;");
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("1")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("1")),
         "xxpart of btex picture should be 1 (identity transform)"
     );
 }
@@ -4671,16 +3719,19 @@ fn xxpart_of_text_picture() {
 fn colormodel_of_stroke() {
     // colormodel of an RGB stroked picture should return 5.
     // Use `..` (primitive path join) instead of `--` (plain.mp macro).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              addto pic doublepath (0,0)..(1,1) withcolor (1,0,0);
              for q within pic: show colormodel q; exitif true; endfor",
-        )
-        .unwrap();
+    );
     assert!(
-        interp.state.errors.iter().any(|e| e.message.contains("5")),
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("5")),
         "colormodel of RGB stroke should be 5"
     );
 }
@@ -4689,16 +3740,15 @@ fn colormodel_of_stroke() {
 fn redpart_of_picture_component() {
     // redpart of a picture component should extract the red channel.
     // Use `..` (primitive path join) instead of `--` (plain.mp macro).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              addto pic doublepath (0,0)..(1,1) withcolor (0.75, 0.5, 0.25);
              for q within pic: show redpart q; exitif true; endfor",
-        )
-        .unwrap();
+    );
     assert!(
         interp
+            .interp
             .state
             .errors
             .iter()
@@ -4710,10 +3760,9 @@ fn redpart_of_picture_component() {
 #[test]
 fn stroked_filled_textual_predicates() {
     // Use `..` (primitive path join) instead of `--` (plain.mp macro).
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "picture pic; pic := nullpicture;
+    let mut interp = TestInterp::new();
+    interp.run(
+        "picture pic; pic := nullpicture;
              addto pic doublepath (0,0)..(1,1);
              for q within pic:
                show stroked q;
@@ -4721,10 +3770,15 @@ fn stroked_filled_textual_predicates() {
                show textual q;
                exitif true;
              endfor",
-        )
-        .unwrap();
+    );
     // stroked should be true, filled/textual should be false.
-    let msgs: Vec<_> = interp.state.errors.iter().map(|e| &e.message).collect();
+    let msgs: Vec<_> = interp
+        .interp
+        .state
+        .errors
+        .iter()
+        .map(|e| &e.message)
+        .collect();
     assert!(
         msgs.iter().any(|m| m.contains("true")),
         "stroked should be true: {msgs:?}"
@@ -4746,34 +3800,20 @@ fn save_hides_vardef_in_group() {
     // Regression: `save pic` inside a group must hide the vardef `pic`
     // so that `picture pic; pic=p;` treats `pic` as a plain variable,
     // not as the vardef.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef pic suffix $ = $ enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef pic suffix $ = $ enddef; \
              begingroup \
                save pic; \
                picture pic; \
                pic := nullpicture; \
                show pic; \
              endgroup;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let msg = interp
-        .state
-        .errors
-        .iter()
-        .find(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .unwrap_or_default();
+    let msg = interp.first_show();
     assert!(
         msg.contains("(picture)"),
         "expected pic to be a picture, got: {msg}"
@@ -4783,31 +3823,17 @@ fn save_hides_vardef_in_group() {
 #[test]
 fn save_restores_vardef_after_endgroup() {
     // After `endgroup`, the vardef should be restored and callable again.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "vardef f = 42 enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "vardef f = 42 enddef; \
              show f; \
              begingroup save f; numeric f; f := 99; show f; endgroup; \
              show f;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show outputs: {infos:?}");
     // First and third calls should invoke the vardef and produce 42.
     assert!(
@@ -4833,31 +3859,17 @@ fn save_hides_defined_macro_in_group() {
     // Inside the group, `greet` becomes an unknown tag so the macro body
     // is NOT invoked (the `show 99` in its body does NOT fire).
     // After endgroup the macro is restored.
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "def greet = show 99 enddef; \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "def greet = show 99 enddef; \
              greet; \
              begingroup save greet; endgroup; \
              greet;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     // Only the two calls outside the group should produce output.
     assert_eq!(infos.len(), 2, "expected 2 show outputs: {infos:?}");
     assert!(infos[0].contains("99"), "first greet: {}", infos[0]);
@@ -4874,31 +3886,17 @@ fn save_hides_defined_macro_in_group() {
 
 #[test]
 fn for_loop_numeric_equation() {
-    let mut interp = Interpreter::new();
-    interp
-        .run(
-            "for p=3, 7, 11: \
+    let mut interp = TestInterp::new();
+    interp.run(
+        "for p=3, 7, 11: \
                numeric a; a = p; \
                show a; \
              endfor;",
-        )
-        .unwrap();
+    );
 
-    let errors: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Error)
-        .collect();
-    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    interp.assert_no_errors();
 
-    let infos: Vec<_> = interp
-        .state
-        .errors
-        .iter()
-        .filter(|e| e.severity == crate::error::Severity::Info)
-        .map(|e| e.message.clone())
-        .collect();
+    let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show outputs: {infos:?}");
     assert!(infos[0].contains("3"), "first iteration: {}", infos[0]);
     assert!(infos[1].contains("7"), "second iteration: {}", infos[1]);
