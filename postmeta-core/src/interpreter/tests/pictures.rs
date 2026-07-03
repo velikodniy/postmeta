@@ -168,7 +168,7 @@ fn dashed_line_produces_dash_pattern() {
     interp.assert_no_errors();
 
     // The picture should have exactly one Stroke object (the dashed line).
-    let objects = &interp.current_picture().objects;
+    let objects = interp.current_picture().objects();
     assert_eq!(
         objects.len(),
         1,
@@ -227,7 +227,7 @@ fn dashed_withdots_uses_leading_offset() {
 
     interp.assert_no_errors();
 
-    let objects = &interp.current_picture().objects;
+    let objects = interp.current_picture().objects();
     assert_eq!(objects.len(), 1, "expected 1 object, got {}", objects.len());
 
     if let postmeta_graphics::types::GraphicsObject::Stroke(ref stroke) = objects[0] {
@@ -354,12 +354,12 @@ fn addto_defaults_to_currentpicture_when_name_omitted() {
     interp.assert_no_errors();
 
     assert_eq!(
-        interp.current_picture().objects.len(),
+        interp.current_picture().objects().len(),
         1,
         "expected one object in currentpicture"
     );
     assert!(matches!(
-        interp.current_picture().objects[0],
+        interp.current_picture().objects()[0],
         postmeta_graphics::types::GraphicsObject::Fill(_)
     ));
 }
@@ -374,10 +374,10 @@ fn clip_defaults_to_currentpicture_when_name_omitted() {
 
     interp.assert_no_errors();
 
-    let objs = &interp.current_picture().objects;
+    let objs = &interp.current_picture().objects();
     assert_eq!(objs.len(), 1);
     if let postmeta_graphics::types::GraphicsObject::Picture(nested) = &objs[0] {
-        assert!(nested.clip_path.is_some());
+        assert!(nested.clip_path().is_some());
     } else {
         panic!("Expected Picture");
     }
@@ -389,7 +389,7 @@ fn refactor_guard_currentpicture_roundtrip_assignment_stays_stable() {
     interp.run("addto contour ((0,0)..(1,0)..(1,1)..cycle);");
     let original_picture = interp.current_picture().clone();
     assert!(
-        !original_picture.objects.is_empty(),
+        !original_picture.objects().is_empty(),
         "precondition: currentpicture should be non-empty before roundtrip"
     );
 
@@ -403,7 +403,7 @@ fn refactor_guard_currentpicture_roundtrip_assignment_stays_stable() {
     interp.assert_no_errors();
 
     assert!(
-        interp.current_picture().objects.is_empty(),
+        interp.current_picture().objects().is_empty(),
         "current semantics are stable: after `snap := currentpicture; currentpicture := nullpicture; currentpicture := snap;`, currentpicture remains nullpicture"
     );
 }
@@ -439,7 +439,7 @@ fn addto_picture_target_accepts_symbolic_suffixes() {
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
     assert_eq!(
-        layer_pic.objects.len(),
+        layer_pic.objects().len(),
         1,
         "expected contour on pic.layer picture"
     );
@@ -465,9 +465,9 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
         other => panic!("pic.layer should be picture, got {other:?}"),
     };
 
-    assert_eq!(layer_pic.objects.len(), 1);
-    if let postmeta_graphics::types::GraphicsObject::Picture(nested) = &layer_pic.objects[0] {
-        assert!(nested.clip_path.is_some());
+    assert_eq!(layer_pic.objects().len(), 1);
+    if let postmeta_graphics::types::GraphicsObject::Picture(nested) = &layer_pic.objects()[0] {
+        assert!(nested.clip_path().is_some());
     } else {
         panic!("Expected Picture");
     }

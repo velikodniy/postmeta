@@ -17,11 +17,16 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 // ---------------------------------------------------------------------------
 
 /// An ordered collection of graphical objects.
+///
+/// The fields are crate-private: external consumers build pictures through
+/// [`Picture::push`]/[`Picture::add_fill`]/[`Picture::add_stroke`]/
+/// [`Picture::clip`]/[`Picture::set_bounds`] and read them through the
+/// accessor methods, so the storage layout can evolve without breaking them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
-    pub objects: Vec<GraphicsObject>,
-    pub clip_path: Option<std::sync::Arc<BezierPath>>,
-    pub bounds_path: Option<std::sync::Arc<BezierPath>>,
+    pub(crate) objects: Vec<GraphicsObject>,
+    pub(crate) clip_path: Option<std::sync::Arc<BezierPath>>,
+    pub(crate) bounds_path: Option<std::sync::Arc<BezierPath>>,
 }
 
 impl Picture {

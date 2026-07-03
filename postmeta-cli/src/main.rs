@@ -320,7 +320,7 @@ fn write_output(
     }
 
     // If no pictures shipped but current picture has content, output it
-    if interp.output().is_empty() && !interp.current_picture().objects.is_empty() {
+    if interp.output().is_empty() && !interp.current_picture().is_empty() {
         let svg_str = render_with_fonts(interp.current_picture(), &opts, fonts).to_string();
         let filename = format!("{}.svg", interp.job_name());
         write_svg(output_dir, &filename, &svg_str);

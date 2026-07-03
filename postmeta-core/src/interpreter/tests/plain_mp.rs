@@ -56,7 +56,7 @@ fn plain_fill_has_no_stroke_pen() {
     interp.assert_no_errors();
 
     let pic = interp.output().last().expect("expected shipped picture");
-    let fill = match pic.objects.first().expect("expected one object") {
+    let fill = match pic.objects().first().expect("expected one object") {
         postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
         other => panic!("expected Fill object, got {other:?}"),
     };
@@ -77,7 +77,7 @@ fn plain_filldraw_withpen_sets_stroke_pen() {
     interp.assert_no_errors();
 
     let pic = interp.output().last().expect("expected shipped picture");
-    let fill = match pic.objects.first().expect("expected one object") {
+    let fill = match pic.objects().first().expect("expected one object") {
         postmeta_graphics::types::GraphicsObject::Fill(fill) => fill,
         other => panic!("expected Fill object, got {other:?}"),
     };

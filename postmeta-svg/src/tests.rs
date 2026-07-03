@@ -238,16 +238,14 @@ fn test_render_stroked_line() {
 #[test]
 fn test_render_with_clip() {
     let mut pic = Picture::new();
-    let mut nested = Picture::new();
-    nested.push(GraphicsObject::Fill(FillObject {
+    pic.push(GraphicsObject::Fill(FillObject {
         path: std::sync::Arc::new(make_square()),
         color: Color::new(1.0, 0.0, 0.0),
         pen: None,
         line_join: LineJoin::Round,
         miter_limit: 10.0,
     }));
-    nested.clip_path = Some(std::sync::Arc::new(make_square()));
-    pic.push(GraphicsObject::Picture(nested));
+    pic.clip(std::sync::Arc::new(make_square()));
 
     let svg = render_to_string(&pic);
     assert!(svg.contains("<clipPath"), "missing clipPath def: {svg}");
