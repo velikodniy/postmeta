@@ -5,6 +5,7 @@ use crate::interpreter::{ExprResultValue, Interpreter};
 use crate::types::{Type, Value};
 
 use super::helpers::TestInterp;
+use crate::interpreter::EqualsMode;
 
 // -----------------------------------------------------------------------
 // Delimiters
@@ -109,7 +110,7 @@ fn back_expr_numeric_in_expression() {
         pair_dep: None,
     });
     interp.get_x_next();
-    let result = interp.scan_expression().unwrap();
+    let result = interp.scan_expression(EqualsMode::Relation).unwrap();
     // Should evaluate to 7 + 3 = 10
     assert_eq!(result.exp, Value::Numeric(10.0));
 }
@@ -235,7 +236,7 @@ fn scan_expression_internal_usage() {
     let mut interp = Interpreter::new();
     interp.state.input.push_source("3 + 4;");
     interp.get_x_next();
-    let result = interp.scan_expression().unwrap();
+    let result = interp.scan_expression(EqualsMode::Relation).unwrap();
     assert_eq!(result.exp, Value::Numeric(7.0));
 }
 

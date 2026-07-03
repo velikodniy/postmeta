@@ -22,6 +22,7 @@ use crate::symbols::SymbolId;
 use crate::types::{Type, Value};
 use crate::variables::SuffixSegment;
 
+use crate::interpreter::EqualsMode;
 use crate::interpreter::helpers::{value_to_bool, value_to_scalar};
 use crate::interpreter::{ExprResultValue, Interpreter, LhsBinding};
 
@@ -178,7 +179,7 @@ impl Interpreter {
                 // "expr X of Y" pattern
                 let op = self.cur.modifier;
                 self.get_x_next();
-                let first_result = self.scan_expression()?;
+                let first_result = self.scan_expression(EqualsMode::Relation)?;
                 // Expect "of"
                 if self.cur.command != Command::OfToken {
                     return Err(InterpreterError::new(
@@ -337,7 +338,7 @@ impl Interpreter {
     fn scan_primary_delimited(&mut self) -> InterpResult<ExprResultValue> {
         let expected_delimiter = self.cur.modifier;
         self.get_x_next();
-        let first_result = self.scan_expression()?;
+        let first_result = self.scan_expression(EqualsMode::Relation)?;
 
         let result = if self.cur.command == Command::Comma {
             // Pair or color
@@ -347,14 +348,14 @@ impl Interpreter {
             let _ = second_dep_backup; // unused in pair/color
             let first_binding = self.lhs_tracking.last_lhs_binding.clone();
             self.get_x_next();
-            let second_result = self.scan_expression()?;
+            let second_result = self.scan_expression(EqualsMode::Relation)?;
             let second = second_result.exp;
             let second_binding = self.lhs_tracking.last_lhs_binding.clone();
 
             if self.cur.command == Command::Comma {
                 // Color: (r, g, b)
                 self.get_x_next();
-                let third_result = self.scan_expression()?;
+                let third_result = self.scan_expression(EqualsMode::Relation)?;
                 let third = third_result.exp;
                 let third_binding = self.lhs_tracking.last_lhs_binding.clone();
 
@@ -428,7 +429,7 @@ impl Interpreter {
 
         let a_dep = primary.dep.unwrap_or_else(|| const_dep(a));
         self.get_x_next();
-        let b_result = self.scan_expression()?;
+        let b_result = self.scan_expression(EqualsMode::Relation)?;
         let b_binding = self.lhs_tracking.last_lhs_binding.clone();
         let b_dep = b_result.dep.or_else(|| {
             if let Some(LhsBinding::Variable { id, .. }) = b_binding {
@@ -447,7 +448,7 @@ impl Interpreter {
                 "Expected `,` in mediation a[b,c]",
             ));
         }
-        let c_result = self.scan_expression()?;
+        let c_result = self.scan_expression(EqualsMode::Relation)?;
         let c_binding = self.lhs_tracking.last_lhs_binding.clone();
         let c_dep = c_result.dep.or_else(|| {
             if let Some(LhsBinding::Variable { id, .. }) = c_binding {
@@ -608,7 +609,7 @@ impl Interpreter {
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
                 self.get_x_next(); // skip `[`
-                let subscript_result = self.scan_expression()?;
+                let subscript_result = self.scan_expression(EqualsMode::Relation)?;
                 if self.cur.command == Command::RightBracket {
                     // Subscript: var[expr]
                     let subscript = match &subscript_result.exp {
@@ -699,7 +700,7 @@ impl Interpreter {
                 first = false;
             } else if self.cur.command == Command::LeftBracket {
                 self.get_x_next(); // skip `[`
-                let subscript_result = self.scan_expression()?;
+                let subscript_result = self.scan_expression(EqualsMode::Relation)?;
                 let subscript = match subscript_result.exp {
                     #[expect(
                         clippy::cast_possible_truncation,
@@ -772,10 +773,11 @@ impl Interpreter {
     /// Parse and evaluate an expression, returning the result.
     ///
     /// Handles expression-level binary operators and path construction.
-    pub(crate) fn scan_expression(&mut self) -> InterpResult<ExprResultValue> {
-        let equals_is_equation = self.lhs_tracking.equals_means_equation;
-        self.lhs_tracking.equals_means_equation = false;
-        self.scan_infix_bp(Command::BP_EXPRESSION, equals_is_equation)
+    pub(crate) fn scan_expression(
+        &mut self,
+        equals_mode: EqualsMode,
+    ) -> InterpResult<ExprResultValue> {
+        self.scan_infix_bp(Command::BP_EXPRESSION, equals_mode == EqualsMode::Equation)
     }
 
     // =====================================================================

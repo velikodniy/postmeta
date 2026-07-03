@@ -52,6 +52,20 @@ use runtime::scope::ScopeManager;
 /// Interpreter-facing alias for the shared expression payload.
 pub(super) type ExprResultValue = crate::expr_value::ExprValue;
 
+/// How `=` is interpreted while scanning an expression.
+///
+/// Statement contexts scan their expression with [`EqualsMode::Equation`] so
+/// that a top-level `=` delimits an equation; everywhere else `=` is the
+/// relational operator. Mirrors `mp.web`'s `var_flag = assignment` mechanism,
+/// but as an explicit parameter instead of mutable interpreter state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EqualsMode {
+    /// A top-level `=` ends the expression (equation delimiter).
+    Equation,
+    /// `=` is the equality comparison operator.
+    Relation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
     Variable {
@@ -80,18 +94,12 @@ pub(super) enum LhsBinding {
 pub(super) struct LhsTracking {
     /// Binding for expression forms that can be equation left-hand sides.
     pub last_lhs_binding: Option<LhsBinding>,
-    /// When true, `=` in `scan_expression` is treated as an equation
-    /// delimiter (not consumed). Set before calling `scan_expression` from
-    /// statement context; cleared inside `scan_expression` on entry.
-    /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
-    pub equals_means_equation: bool,
 }
 
 impl LhsTracking {
     const fn new() -> Self {
         Self {
             last_lhs_binding: None,
-            equals_means_equation: false,
         }
     }
 }
