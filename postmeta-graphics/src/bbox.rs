@@ -156,7 +156,7 @@ impl BoundingBox {
     pub fn of_picture(pic: &Picture, true_corners: bool) -> Self {
         let mut bb = Self::EMPTY;
 
-        for obj in &pic.objects {
+        for obj in pic.objects() {
             match obj {
                 GraphicsObject::Fill(fill) => {
                     let pbb = Self::of_path(&fill.path);
@@ -179,13 +179,13 @@ impl BoundingBox {
                     let mut nested_bb = if true_corners {
                         Self::of_picture(nested, true_corners)
                     } else {
-                        nested.bounds_path.as_ref().map_or_else(
+                        nested.bounds_path().map_or_else(
                             || Self::of_picture(nested, true_corners),
                             |bounds| Self::of_path(bounds),
                         )
                     };
 
-                    if let Some(clip) = &nested.clip_path {
+                    if let Some(clip) = nested.clip_path() {
                         nested_bb = nested_bb.intersect(&Self::of_path(clip));
                     }
                     bb.union(&nested_bb);
@@ -354,7 +354,7 @@ mod tests {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text));
+        pic.push(GraphicsObject::Text(text));
         let bb = BoundingBox::of_picture(&pic, false);
 
         assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
@@ -374,7 +374,7 @@ mod tests {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text));
+        pic.push(GraphicsObject::Text(text));
         let bb = BoundingBox::of_picture(&pic, false);
 
         // Zero metrics → all four corners collapse to the origin.

@@ -93,9 +93,9 @@ impl<'a> SvgRenderer<'a> {
                     i += 1;
                 }
                 GraphicsObject::Picture(nested) => {
-                    let mut inner_group = self.render_objects(&nested.objects);
+                    let mut inner_group = self.render_objects(nested.objects());
 
-                    if let Some(clip_path) = &nested.clip_path {
+                    if let Some(clip_path) = nested.clip_path() {
                         let clip_id = self.next_clip_id();
                         let clip_data = path_to_d(clip_path, self.opts.precision);
                         let clip_def = ClipPath::new()

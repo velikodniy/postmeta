@@ -575,11 +575,11 @@ impl Interpreter {
 /// (including all nested content) become one picture each.
 fn split_picture_components(pic: &Picture) -> Vec<Picture> {
     let mut result = Vec::new();
-    let objects = &pic.objects;
+    let objects = pic.objects();
 
     for obj in objects {
         let mut comp = Picture::new();
-        comp.objects.push(obj.clone());
+        comp.push(obj.clone());
         result.push(comp);
     }
 

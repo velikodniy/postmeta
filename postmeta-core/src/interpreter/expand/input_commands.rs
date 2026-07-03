@@ -120,7 +120,7 @@ impl Interpreter {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text_obj));
+        pic.push(GraphicsObject::Text(text_obj));
 
         // Push a picture capsule — directly transformable.
         self.back_expr_value(ExprResultValue::plain(Value::Picture(pic)));

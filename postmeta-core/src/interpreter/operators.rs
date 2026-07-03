@@ -428,7 +428,7 @@ impl Interpreter {
             // Picture part extraction operators.
             UnaryOp::TextPart => {
                 let pic = value_to_picture(input)?;
-                let text = match pic.objects.first() {
+                let text = match pic.first() {
                     Some(GraphicsObject::Text(t)) => t.text.to_string(),
                     _ => String::new(),
                 };
@@ -436,7 +436,7 @@ impl Interpreter {
             }
             UnaryOp::FontPart => {
                 let pic = value_to_picture(input)?;
-                let font = match pic.objects.first() {
+                let font = match pic.first() {
                     Some(GraphicsObject::Text(t)) => t.font_name.to_string(),
                     _ => String::new(),
                 };
@@ -444,12 +444,12 @@ impl Interpreter {
             }
             UnaryOp::PathPart => {
                 let pic = value_to_picture(input)?;
-                let path = match pic.objects.first() {
+                let path = match pic.first() {
                     Some(GraphicsObject::Fill(f)) => f.path.clone(),
                     Some(GraphicsObject::Stroke(s)) => s.path.clone(),
-                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.as_ref().map_or_else(
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path().map_or_else(
                         || {
-                            nested.bounds_path.as_ref().map_or_else(
+                            nested.bounds_path().map_or_else(
                                 || {
                                     Arc::new(BezierPath::from_parts(
                                         vec![Point::ZERO],
@@ -471,7 +471,7 @@ impl Interpreter {
             }
             UnaryOp::PenPart => {
                 let pic = value_to_picture(input)?;
-                let pen = match pic.objects.first() {
+                let pen = match pic.first() {
                     Some(GraphicsObject::Fill(f)) => f.pen.clone().unwrap_or(Pen::null()),
                     Some(GraphicsObject::Stroke(s)) => s.pen.clone(),
                     _ => Pen::null(),
@@ -480,7 +480,7 @@ impl Interpreter {
             }
             UnaryOp::DashPart => {
                 let pic = value_to_picture(input)?;
-                let dash_pic = match pic.objects.first() {
+                let dash_pic = match pic.first() {
                     Some(GraphicsObject::Stroke(s)) => {
                         // TODO: convert DashPattern back to a picture representation.
                         // For now return empty picture (matches MetaPost's nullpicture).
@@ -494,31 +494,31 @@ impl Interpreter {
             // Picture type tests: check first object in the picture.
             UnaryOp::FilledOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::Fill(_)));
+                let result = matches!(pic.first(), Some(GraphicsObject::Fill(_)));
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::StrokedOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::Stroke(_)));
+                let result = matches!(pic.first(), Some(GraphicsObject::Stroke(_)));
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::TextualOp => {
                 let pic = value_to_picture(input)?;
-                let result = matches!(pic.objects.first(), Some(GraphicsObject::Text(_)));
+                let result = matches!(pic.first(), Some(GraphicsObject::Text(_)));
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::ClippedOp => {
                 let pic = value_to_picture(input)?;
-                let result = match pic.objects.first() {
-                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.is_some(),
+                let result = match pic.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path().is_some(),
                     _ => false,
                 };
                 Ok((Value::Boolean(result), Type::Boolean))
             }
             UnaryOp::BoundedOp => {
                 let pic = value_to_picture(input)?;
-                let result = match pic.objects.first() {
-                    Some(GraphicsObject::Picture(nested)) => nested.bounds_path.is_some(),
+                let result = match pic.first() {
+                    Some(GraphicsObject::Picture(nested)) => nested.bounds_path().is_some(),
                     _ => false,
                 };
                 Ok((Value::Boolean(result), Type::Boolean))
@@ -710,7 +710,7 @@ impl Interpreter {
                     transform: Transform::IDENTITY,
                 };
                 let mut pic = Picture::new();
-                pic.objects.push(GraphicsObject::Text(text_obj));
+                pic.push(GraphicsObject::Text(text_obj));
                 Ok((Value::Picture(pic), Type::Picture))
             }
             SecondaryBinaryOp::Over => Err(InterpreterError::new(
@@ -920,7 +920,7 @@ impl Interpreter {
             Value::Picture(pic) => {
                 // For pictures, extract the transform part of the first text object.
                 // Non-text objects return 0 (matching MetaPost behavior).
-                let v = match pic.objects.first() {
+                let v = match pic.first() {
                     Some(GraphicsObject::Text(t)) => match part {
                         0 => t.transform.tx,
                         1 => t.transform.ty,
@@ -960,7 +960,7 @@ impl Interpreter {
             }
             Value::Picture(pic) => {
                 // Extract color from the first graphical object that has color.
-                let color = match pic.objects.first() {
+                let color = match pic.first() {
                     Some(GraphicsObject::Fill(f)) => Some(&f.color),
                     Some(GraphicsObject::Stroke(s)) => Some(&s.color),
                     Some(GraphicsObject::Text(t)) => Some(&t.color),
@@ -990,7 +990,7 @@ impl Interpreter {
     fn extract_color_model(val: &Value) -> InterpResult<(Value, Type)> {
         let model = match val {
             Value::Color(_) => 5.0,
-            Value::Picture(pic) => match pic.objects.first() {
+            Value::Picture(pic) => match pic.first() {
                 Some(
                     GraphicsObject::Fill(_) | GraphicsObject::Stroke(_) | GraphicsObject::Text(_),
                 ) => 5.0,

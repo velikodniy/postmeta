@@ -761,7 +761,7 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
     let mut on_segments: Vec<(f64, f64)> = Vec::new();
     let mut total_length: f64 = 0.0;
 
-    for obj in &pic.objects {
+    for obj in pic.objects() {
         if let GraphicsObject::Stroke(stroke) = obj {
             let points = stroke.path.knot_points();
             if points.is_empty() {

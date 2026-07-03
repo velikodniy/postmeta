@@ -57,7 +57,7 @@ pub fn render_with_fonts(
 ) -> Document {
     let bb = BoundingBox::of_picture(picture, opts.true_corners);
     let mut renderer = renderer::SvgRenderer::new(opts, fonts);
-    let content = renderer.render_objects(&picture.objects);
+    let content = renderer.render_objects(picture.objects());
 
     document::build_document(
         &bb,
