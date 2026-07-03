@@ -31,7 +31,7 @@ impl BoundingBox {
 
     /// Check if this bounding box is valid (non-empty).
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         self.min_x <= self.max_x && self.min_y <= self.max_y
     }
 
@@ -88,13 +88,49 @@ impl BoundingBox {
     }
 
     /// Expand to include another bounding box.
-    pub fn union(&mut self, other: &Self) {
+    pub const fn union(&mut self, other: &Self) {
         if other.is_valid() {
             self.min_x = self.min_x.min(other.min_x);
             self.min_y = self.min_y.min(other.min_y);
             self.max_x = self.max_x.max(other.max_x);
             self.max_y = self.max_y.max(other.max_y);
         }
+    }
+
+    /// Bounding box from explicit min/max corners.
+    #[must_use]
+    pub const fn from_corners(min: Point, max: Point) -> Self {
+        Self {
+            min_x: min.x,
+            min_y: min.y,
+            max_x: max.x,
+            max_y: max.y,
+        }
+    }
+
+    /// Whether two boxes share any area, inclusive of edges: boxes that
+    /// merely touch along an edge or corner count as overlapping.
+    #[must_use]
+    pub const fn overlaps(&self, other: &Self) -> bool {
+        self.min_x <= other.max_x
+            && self.max_x >= other.min_x
+            && self.min_y <= other.max_y
+            && self.max_y >= other.min_y
+    }
+
+    /// Intersection of two boxes; [`Self::EMPTY`] when they don't overlap.
+    ///
+    /// Boxes that touch along an edge intersect in a degenerate (zero-area)
+    /// but valid box, consistent with [`Self::overlaps`].
+    #[must_use]
+    pub const fn intersect(&self, other: &Self) -> Self {
+        let r = Self {
+            min_x: self.min_x.max(other.min_x),
+            min_y: self.min_y.max(other.min_y),
+            max_x: self.max_x.min(other.max_x),
+            max_y: self.max_y.min(other.max_y),
+        };
+        if r.is_valid() { r } else { Self::EMPTY }
     }
 
     /// Compute the bounding box of a [`BezierPath`] (control-point hull).
@@ -150,17 +186,7 @@ impl BoundingBox {
                     };
 
                     if let Some(clip) = &nested.clip_path {
-                        let clip_bb = Self::of_path(clip);
-                        // Ideally we'd intersect the bounding boxes:
-                        nested_bb.min_x = nested_bb.min_x.max(clip_bb.min_x);
-                        nested_bb.min_y = nested_bb.min_y.max(clip_bb.min_y);
-                        nested_bb.max_x = nested_bb.max_x.min(clip_bb.max_x);
-                        nested_bb.max_y = nested_bb.max_y.min(clip_bb.max_y);
-
-                        // If completely outside clip path, bounds become empty
-                        if nested_bb.min_x > nested_bb.max_x || nested_bb.min_y > nested_bb.max_y {
-                            nested_bb = Self::EMPTY;
-                        }
+                        nested_bb = nested_bb.intersect(&Self::of_path(clip));
                     }
                     bb.union(&nested_bb);
                 }
@@ -434,5 +460,69 @@ mod tests {
         assert!(bb.min_y <= 0.0 + EPSILON, "min_y: {}", bb.min_y);
         assert!(bb.max_x >= 8.0 - EPSILON, "max_x: {}", bb.max_x);
         assert!(bb.max_y >= 10.0 - EPSILON, "max_y: {}", bb.max_y);
+    }
+
+    #[test]
+    fn test_intersect_partial_overlap() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+        let b = BoundingBox::from_corners(Point::new(5.0, -5.0), Point::new(15.0, 5.0));
+        let r = a.intersect(&b);
+        assert_eq!(r.min_x, 5.0);
+        assert_eq!(r.min_y, 0.0);
+        assert_eq!(r.max_x, 10.0);
+        assert_eq!(r.max_y, 5.0);
+    }
+
+    #[test]
+    fn test_intersect_disjoint_is_empty() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let b = BoundingBox::from_corners(Point::new(2.0, 2.0), Point::new(3.0, 3.0));
+        assert!(!a.intersect(&b).is_valid());
+        // One axis overlapping, the other disjoint must also be empty.
+        let c = BoundingBox::from_corners(Point::new(0.5, 2.0), Point::new(3.0, 3.0));
+        assert!(!a.intersect(&c).is_valid());
+    }
+
+    #[test]
+    fn test_intersect_touching_edge_is_degenerate_valid() {
+        // Pins the inclusive boundary semantics shared with `overlaps`.
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let b = BoundingBox::from_corners(Point::new(1.0, 0.0), Point::new(2.0, 1.0));
+        let r = a.intersect(&b);
+        assert!(r.is_valid());
+        assert_eq!(r.min_x, 1.0);
+        assert_eq!(r.max_x, 1.0);
+        assert_eq!(r.width(), 0.0);
+    }
+
+    #[test]
+    fn test_overlaps_is_inclusive_of_shared_edges() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let edge = BoundingBox::from_corners(Point::new(1.0, 0.0), Point::new(2.0, 1.0));
+        let corner = BoundingBox::from_corners(Point::new(1.0, 1.0), Point::new(2.0, 2.0));
+        let apart = BoundingBox::from_corners(Point::new(1.1, 0.0), Point::new(2.0, 1.0));
+        assert!(a.overlaps(&edge));
+        assert!(a.overlaps(&corner));
+        assert!(!a.overlaps(&apart));
+    }
+
+    #[test]
+    fn test_picture_bbox_clip_restricts_bounds() {
+        // Content is the 10x10 square scaled to 20x20; clip back to 10x10.
+        let big = test_helpers::square().transformed(&Transform::scaled(2.0));
+        let mut pic = Picture::new();
+        pic.add_fill(crate::types::FillObject {
+            path: Arc::new(big),
+            color: Color::BLACK,
+            pen: None,
+            line_join: crate::types::LineJoin::Round,
+            miter_limit: 10.0,
+        });
+        pic.clip(Arc::new(test_helpers::square()));
+
+        let bb = BoundingBox::of_picture(&pic, false);
+        assert!(bb.is_valid());
+        assert!(bb.max_x <= 10.0 + EPSILON, "max_x: {}", bb.max_x);
+        assert!(bb.max_y <= 10.0 + EPSILON, "max_y: {}", bb.max_y);
     }
 }

@@ -6,6 +6,7 @@
 //! The algorithm recursively bisects both curves and checks bounding-box
 //! overlap, stopping when the sub-curves are small enough.
 
+use crate::bbox::BoundingBox;
 use crate::bezier::CubicSegment;
 use crate::path::BezierPath;
 use crate::types::{INTERSECT_TOL, Point, Scalar, index_to_scalar};
@@ -86,11 +87,13 @@ pub fn all_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Int
 // Bounding box overlap
 // ---------------------------------------------------------------------------
 
-/// Axis-aligned bounding box overlap test.
+/// Axis-aligned bounding box overlap test on `(min, max)` corner pairs.
 ///
 /// Returns `true` when the two AABBs share any area (inclusive of edges).
-fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
-    a.0.x <= b.1.x && a.1.x >= b.0.x && a.0.y <= b.1.y && a.1.y >= b.0.y
+/// Delegates to [`BoundingBox::overlaps`] so the overlap semantics have a
+/// single source of truth.
+const fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
+    BoundingBox::from_corners(a.0, a.1).overlaps(&BoundingBox::from_corners(b.0, b.1))
 }
 
 // ---------------------------------------------------------------------------
