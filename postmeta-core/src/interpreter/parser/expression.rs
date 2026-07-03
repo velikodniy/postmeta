@@ -468,6 +468,7 @@ impl Interpreter {
 
         // a[b,c] = b + a*(c-b) = (1-a)*b + a*c
         let one_minus_a = 1.0 - a;
+        let lerp = |b: f64, c: f64| a.mul_add(c - b, b);
         let result = match (b, c) {
             (Value::Numeric(bn), Value::Numeric(cn)) => {
                 let b_dep = b_dep.unwrap_or_else(|| const_dep(bn));
@@ -530,7 +531,7 @@ impl Interpreter {
                     Some((dep_x, dep_y))
                 };
                 ExprResultValue {
-                    exp: Value::Pair(one_minus_a * bx + a * cx, one_minus_a * by + a * cy),
+                    exp: Value::Pair(lerp(bx, cx), lerp(by, cy)),
                     ty: Type::PairType,
                     dep: None,
                     pair_dep,
@@ -538,19 +539,19 @@ impl Interpreter {
             }
             (Value::Color(bc), Value::Color(cc)) => {
                 ExprResultValue::plain(Value::Color(postmeta_graphics::types::Color::new(
-                    one_minus_a * bc.r + a * cc.r,
-                    one_minus_a * bc.g + a * cc.g,
-                    one_minus_a * bc.b + a * cc.b,
+                    lerp(bc.r, cc.r),
+                    lerp(bc.g, cc.g),
+                    lerp(bc.b, cc.b),
                 )))
             }
             (Value::Transform(bt), Value::Transform(ct)) => {
                 ExprResultValue::plain(Value::Transform(postmeta_graphics::types::Transform {
-                    tx: one_minus_a * bt.tx + a * ct.tx,
-                    ty: one_minus_a * bt.ty + a * ct.ty,
-                    txx: one_minus_a * bt.txx + a * ct.txx,
-                    txy: one_minus_a * bt.txy + a * ct.txy,
-                    tyx: one_minus_a * bt.tyx + a * ct.tyx,
-                    tyy: one_minus_a * bt.tyy + a * ct.tyy,
+                    tx: lerp(bt.tx, ct.tx),
+                    ty: lerp(bt.ty, ct.ty),
+                    txx: lerp(bt.txx, ct.txx),
+                    txy: lerp(bt.txy, ct.txy),
+                    tyx: lerp(bt.tyx, ct.tyx),
+                    tyy: lerp(bt.tyy, ct.tyy),
                 }))
             }
             (bv, cv) => {

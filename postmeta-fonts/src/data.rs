@@ -127,12 +127,12 @@ impl FontData {
 
             // Kerning with previous glyph
             if let Some(prev) = prev_gid {
-                width += f64::from(self.kern(prev, gid.0)) * scale;
+                width = f64::from(self.kern(prev, gid.0)).mul_add(scale, width);
             }
 
             // Advance width
             if let Some(adv) = face.glyph_hor_advance(gid) {
-                width += f64::from(adv) * scale;
+                width = f64::from(adv).mul_add(scale, width);
             }
 
             // Per-glyph vertical extents from bounding box

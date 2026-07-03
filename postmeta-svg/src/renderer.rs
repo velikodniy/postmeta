@@ -172,7 +172,7 @@ impl<'a> SvgRenderer<'a> {
             }
 
             if let Some(adv) = font.advance_width(gid) {
-                cursor_x += f64::from(adv) * scale;
+                cursor_x = f64::from(adv).mul_add(scale, cursor_x);
             }
             prev_glyph = Some(gid);
         }
