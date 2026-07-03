@@ -850,7 +850,7 @@ impl Interpreter {
                 self.get_x_next();
                 let right = self.scan_rhs(cmd)?;
                 self.lhs_tracking.last_lhs_binding = None;
-                let result = self.div_deps(&left_val, left_dep, left_pair_dep, &right)?;
+                let result = self.div_deps(&left_val, left_dep.as_ref(), left_pair_dep, &right)?;
                 Ok(InfixAction::Continue(result))
             }
 

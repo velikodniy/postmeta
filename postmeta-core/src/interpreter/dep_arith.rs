@@ -13,6 +13,24 @@ use crate::variables::VarValue;
 use super::helpers::{value_to_pair, value_to_scalar, value_to_transform};
 use super::{ExprResultValue, Interpreter, LhsBinding};
 
+/// Whether a dependency list is present and genuinely linear — i.e. it
+/// still references unknown variables rather than reducing to a constant.
+fn is_linear(dep: Option<&DepList>) -> bool {
+    dep.is_some_and(|d| constant_value(d).is_none())
+}
+
+/// Pair variant of [`is_linear`]: either component references unknowns.
+fn pair_is_linear(pair: Option<&(DepList, DepList)>) -> bool {
+    pair.is_some_and(|(dx, dy)| constant_value(dx).is_none() || constant_value(dy).is_none())
+}
+
+/// A scaled copy of `dep`.
+fn scaled(dep: &DepList, factor: f64) -> DepList {
+    let mut d = dep.clone();
+    dep_scale(&mut d, factor);
+    d
+}
+
 impl Interpreter {
     /// Compute dependency info for multiplication (`*`).
     #[allow(clippy::too_many_lines)]
@@ -32,22 +50,12 @@ impl Interpreter {
             Value::Numeric(_) => {
                 let dep = left_const.map_or_else(
                     || {
-                        let result = right_const.and_then(|factor| {
-                            left_dep.as_ref().map(|d| {
-                                let mut d = d.clone();
-                                dep_scale(&mut d, factor);
-                                d
-                            })
-                        });
+                        let result = right_const
+                            .and_then(|factor| left_dep.as_ref().map(|d| scaled(d, factor)));
                         // Both operands are non-constant dependents: nonlinear
                         if result.is_none()
-                            && left_dep
-                                .as_ref()
-                                .is_some_and(|d| constant_value(d).is_none())
-                            && right
-                                .dep
-                                .as_ref()
-                                .is_some_and(|d| constant_value(d).is_none())
+                            && is_linear(left_dep.as_ref())
+                            && is_linear(right.dep.as_ref())
                         {
                             self.report_error(
                                 ErrorKind::IncompatibleTypes,
@@ -56,12 +64,7 @@ impl Interpreter {
                         }
                         result
                     },
-                    |factor| {
-                        right.dep.clone().map(|mut d| {
-                            dep_scale(&mut d, factor);
-                            d
-                        })
-                    },
+                    |factor| right.dep.as_ref().map(|d| scaled(d, factor)),
                 );
                 ExprResultValue {
                     exp: val,
@@ -73,12 +76,8 @@ impl Interpreter {
             Value::Pair(_, _) => {
                 let pair_deps = match (left_val, &right.exp) {
                     (Value::Numeric(_), Value::Pair(rx, ry)) => {
-                        let left_linear = left_dep
-                            .as_ref()
-                            .is_some_and(|d| constant_value(d).is_none());
-                        let right_linear = right.pair_dep.as_ref().is_some_and(|(dx, dy)| {
-                            constant_value(dx).is_none() || constant_value(dy).is_none()
-                        });
+                        let left_linear = is_linear(left_dep.as_ref());
+                        let right_linear = pair_is_linear(right.pair_dep.as_ref());
                         if left_linear && right_linear {
                             self.report_error(
                                 ErrorKind::IncompatibleTypes,
@@ -87,31 +86,20 @@ impl Interpreter {
                             None
                         } else if left_linear {
                             let dep = left_dep.unwrap_or_else(|| const_dep(0.0));
-                            let mut dx = dep.clone();
-                            let mut dy = dep;
-                            dep_scale(&mut dx, *rx);
-                            dep_scale(&mut dy, *ry);
-                            Some((dx, dy))
+                            Some((scaled(&dep, *rx), scaled(&dep, *ry)))
                         } else {
                             let scalar = left_const
                                 .unwrap_or_else(|| value_to_scalar(left_val).unwrap_or(0.0));
-                            let (mut dx, mut dy) = right
+                            let (dx, dy) = right
                                 .pair_dep
                                 .clone()
                                 .unwrap_or_else(|| (const_dep(*rx), const_dep(*ry)));
-                            dep_scale(&mut dx, scalar);
-                            dep_scale(&mut dy, scalar);
-                            Some((dx, dy))
+                            Some((scaled(&dx, scalar), scaled(&dy, scalar)))
                         }
                     }
                     (Value::Pair(lx, ly), Value::Numeric(_)) => {
-                        let left_linear = left_pair_dep.as_ref().is_some_and(|(dx, dy)| {
-                            constant_value(dx).is_none() || constant_value(dy).is_none()
-                        });
-                        let right_linear = right
-                            .dep
-                            .as_ref()
-                            .is_some_and(|d| constant_value(d).is_none());
+                        let left_linear = pair_is_linear(left_pair_dep.as_ref());
+                        let right_linear = is_linear(right.dep.as_ref());
                         if left_linear && right_linear {
                             self.report_error(
                                 ErrorKind::IncompatibleTypes,
@@ -120,19 +108,13 @@ impl Interpreter {
                             None
                         } else if right_linear {
                             let dep = right.dep.clone().unwrap_or_else(|| const_dep(0.0));
-                            let mut dx = dep.clone();
-                            let mut dy = dep;
-                            dep_scale(&mut dx, *lx);
-                            dep_scale(&mut dy, *ly);
-                            Some((dx, dy))
+                            Some((scaled(&dep, *lx), scaled(&dep, *ly)))
                         } else {
                             let scalar = right_const
                                 .unwrap_or_else(|| value_to_scalar(&right.exp).unwrap_or(0.0));
-                            let (mut dx, mut dy) =
+                            let (dx, dy) =
                                 left_pair_dep.unwrap_or_else(|| (const_dep(*lx), const_dep(*ly)));
-                            dep_scale(&mut dx, scalar);
-                            dep_scale(&mut dy, scalar);
-                            Some((dx, dy))
+                            Some((scaled(&dx, scalar), scaled(&dy, scalar)))
                         }
                     }
                     _ => None,
@@ -152,7 +134,7 @@ impl Interpreter {
     pub(super) fn div_deps(
         &mut self,
         left_val: &Value,
-        left_dep: Option<DepList>,
+        left_dep: Option<&DepList>,
         left_pair_dep: Option<(DepList, DepList)>,
         right: &ExprResultValue,
     ) -> InterpResult<ExprResultValue> {
@@ -170,10 +152,7 @@ impl Interpreter {
             });
         }
 
-        let right_is_linear = right
-            .dep
-            .as_ref()
-            .is_some_and(|d| constant_value(d).is_none());
+        let right_is_linear = is_linear(right.dep.as_ref());
         if right_is_linear {
             self.report_error(
                 ErrorKind::IncompatibleTypes,
@@ -195,10 +174,7 @@ impl Interpreter {
                         if c.abs() < f64::EPSILON {
                             None
                         } else {
-                            left_dep.map(|mut d| {
-                                dep_scale(&mut d, 1.0 / c);
-                                d
-                            })
+                            left_dep.map(|d| scaled(d, 1.0 / c))
                         }
                     })
                 };
@@ -213,11 +189,8 @@ impl Interpreter {
                 let pair_dep = if right_is_linear {
                     None
                 } else {
-                    let (mut dx, mut dy) =
-                        left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
-                    dep_scale(&mut dx, 1.0 / b);
-                    dep_scale(&mut dy, 1.0 / b);
-                    Some((dx, dy))
+                    let (dx, dy) = left_pair_dep.unwrap_or_else(|| (const_dep(*x), const_dep(*y)));
+                    Some((scaled(&dx, 1.0 / b), scaled(&dy, 1.0 / b)))
                 };
                 ExprResultValue {
                     exp: Value::Pair(x / b, y / b),
