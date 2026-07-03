@@ -805,4 +805,250 @@ mod tests {
         assert!(!Command::Comma.ends_statement());
         assert!(!Command::Equals.ends_statement());
     }
+
+    /// Expected classification for every [`Command`] variant.
+    ///
+    /// The match is EXHAUSTIVE on purpose: adding a `Command` variant will
+    /// not compile until its classification is declared here, and the
+    /// assertions below fail if the declared classification disagrees with
+    /// the discriminant-range predicates. This is the guard against a new
+    /// variant silently landing inside an operator range.
+    #[derive(Debug, PartialEq, Clone, Copy)]
+    enum Level {
+        Secondary,
+        Tertiary,
+        Expression,
+        None,
+    }
+
+    // (infix level, is_expandable, ends_statement, can_start_implicit_mul)
+    #[expect(
+        clippy::match_same_arms,
+        reason = "arms are grouped by semantic category, not by value"
+    )]
+    const fn expected(cmd: Command) -> (Level, bool, bool, bool) {
+        use Command as C;
+        match cmd {
+            // Expandable commands: consumed by macro expansion.
+            C::StartTex
+            | C::EtexMarker
+            | C::VerbatimTex
+            | C::IfTest
+            | C::FiOrElse
+            | C::Input
+            | C::Iteration
+            | C::RepeatLoop
+            | C::ExitTest
+            | C::Relax
+            | C::ScanTokens
+            | C::ExpandAfter
+            | C::DefinedMacro => (Level::None, true, false, false),
+            // Statement keywords and drawing commands.
+            C::Save
+            | C::Interim
+            | C::Let
+            | C::NewInternal
+            | C::MacroDef
+            | C::ShipOut
+            | C::AddTo
+            | C::Bounds
+            | C::Outer
+            | C::Show
+            | C::ModeCommand
+            | C::RandomSeed
+            | C::MessageCommand
+            | C::EveryJob
+            | C::Delimiters
+            | C::Special
+            | C::Write => (Level::None, false, false, false),
+            // Primary starters: a numeric token before these means
+            // implicit multiplication.
+            C::TypeName
+            | C::LeftDelimiter
+            | C::BeginGroup
+            | C::Nullary
+            | C::Unary
+            | C::StrOp
+            | C::Cycle
+            | C::PrimaryBinary
+            | C::CapsuleToken
+            | C::StringToken
+            | C::InternalQuantity
+            | C::TagToken => (Level::None, false, false, true),
+            C::NumericToken => (Level::None, false, false, false),
+            // Tertiary-level infix operators.
+            C::PlusOrMinus | C::TertiarySecondaryMacro | C::TertiaryBinary => {
+                (Level::Tertiary, false, false, false)
+            }
+            // Expression-level infix operators.
+            C::LeftBrace
+            | C::PathJoin
+            | C::Ampersand
+            | C::ExpressionTertiaryMacro
+            | C::ExpressionBinary
+            | C::Equals => (Level::Expression, false, false, false),
+            // Secondary-level infix operators.
+            C::And | C::SecondaryPrimaryMacro | C::Slash | C::SecondaryBinary => {
+                (Level::Secondary, false, false, false)
+            }
+            // Path-join modifiers, delimiters, punctuation.
+            C::ParamType
+            | C::Controls
+            | C::Tension
+            | C::AtLeast
+            | C::CurlCommand
+            | C::MacroSpecial
+            | C::RightDelimiter
+            | C::LeftBracket
+            | C::RightBracket
+            | C::RightBrace
+            | C::WithOption
+            | C::ThingToAdd
+            | C::OfToken
+            | C::ToToken
+            | C::StepToken
+            | C::UntilToken
+            | C::WithinToken
+            | C::Assignment
+            | C::DoubleColon
+            | C::Colon
+            | C::Comma => (Level::None, false, false, false),
+            // Statement terminators.
+            C::Semicolon | C::EndGroup | C::Stop => (Level::None, false, true, false),
+        }
+    }
+
+    /// One entry per variant; keep in sync with the `expected` match (the
+    /// match's exhaustiveness is the compile-time completeness check).
+    const ALL_COMMANDS: &[Command] = &[
+        Command::StartTex,
+        Command::EtexMarker,
+        Command::VerbatimTex,
+        Command::IfTest,
+        Command::FiOrElse,
+        Command::Input,
+        Command::Iteration,
+        Command::RepeatLoop,
+        Command::ExitTest,
+        Command::Relax,
+        Command::ScanTokens,
+        Command::ExpandAfter,
+        Command::DefinedMacro,
+        Command::Save,
+        Command::Interim,
+        Command::Let,
+        Command::NewInternal,
+        Command::MacroDef,
+        Command::ShipOut,
+        Command::AddTo,
+        Command::Bounds,
+        Command::Outer,
+        Command::Show,
+        Command::ModeCommand,
+        Command::RandomSeed,
+        Command::MessageCommand,
+        Command::EveryJob,
+        Command::Delimiters,
+        Command::Special,
+        Command::Write,
+        Command::TypeName,
+        Command::LeftDelimiter,
+        Command::BeginGroup,
+        Command::Nullary,
+        Command::Unary,
+        Command::StrOp,
+        Command::Cycle,
+        Command::PrimaryBinary,
+        Command::CapsuleToken,
+        Command::StringToken,
+        Command::InternalQuantity,
+        Command::TagToken,
+        Command::NumericToken,
+        Command::PlusOrMinus,
+        Command::TertiarySecondaryMacro,
+        Command::TertiaryBinary,
+        Command::LeftBrace,
+        Command::PathJoin,
+        Command::Ampersand,
+        Command::ExpressionTertiaryMacro,
+        Command::ExpressionBinary,
+        Command::Equals,
+        Command::And,
+        Command::SecondaryPrimaryMacro,
+        Command::Slash,
+        Command::SecondaryBinary,
+        Command::ParamType,
+        Command::Controls,
+        Command::Tension,
+        Command::AtLeast,
+        Command::CurlCommand,
+        Command::MacroSpecial,
+        Command::RightDelimiter,
+        Command::LeftBracket,
+        Command::RightBracket,
+        Command::RightBrace,
+        Command::WithOption,
+        Command::ThingToAdd,
+        Command::OfToken,
+        Command::ToToken,
+        Command::StepToken,
+        Command::UntilToken,
+        Command::WithinToken,
+        Command::Assignment,
+        Command::DoubleColon,
+        Command::Colon,
+        Command::Comma,
+        Command::Semicolon,
+        Command::EndGroup,
+        Command::Stop,
+    ];
+
+    #[test]
+    fn every_command_is_classified_consistently() {
+        assert_eq!(ALL_COMMANDS.len(), 80, "keep ALL_COMMANDS in sync");
+        for &cmd in ALL_COMMANDS {
+            let (level, expandable, ends, implicit_mul) = expected(cmd);
+            assert_eq!(
+                cmd.is_secondary_op(),
+                level == Level::Secondary,
+                "secondary mismatch for {cmd:?}"
+            );
+            assert_eq!(
+                cmd.is_tertiary_op(),
+                level == Level::Tertiary,
+                "tertiary mismatch for {cmd:?}"
+            );
+            assert_eq!(
+                cmd.is_expression_op(),
+                level == Level::Expression,
+                "expression mismatch for {cmd:?}"
+            );
+            assert_eq!(
+                cmd.is_expandable(),
+                expandable,
+                "expandable mismatch for {cmd:?}"
+            );
+            assert_eq!(
+                cmd.ends_statement(),
+                ends,
+                "ends_statement mismatch for {cmd:?}"
+            );
+            assert_eq!(
+                cmd.can_start_implicit_mul(),
+                implicit_mul,
+                "implicit-mul mismatch for {cmd:?}"
+            );
+            let bp = match level {
+                Level::Secondary => Some(Command::BP_SECONDARY),
+                Level::Tertiary => Some(Command::BP_TERTIARY),
+                Level::Expression => Some(Command::BP_EXPRESSION),
+                Level::None => None,
+            };
+            assert_eq!(
+                cmd.infix_binding_power(),
+                bp,
+                "binding power mismatch for {cmd:?}"
+            );
+        }
+    }
 }
