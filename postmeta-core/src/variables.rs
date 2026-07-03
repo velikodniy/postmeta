@@ -110,7 +110,7 @@ pub struct Variables {
     names_by_root: HashMap<String, HashSet<String>>,
     /// `SymbolId` → `VarId` fast lookup for root-only variables.
     ///
-    /// Indexed by `SymbolId::raw()`. Entries are `VarId(u32::MAX)` (sentinel)
+    /// Indexed by `SymbolId::raw()`. Entries are `VarId::new(u32::MAX)` (sentinel)
     /// when not cached. Only individual entries are invalidated (on save/restore
     /// and type declarations), so the cache stays warm across scopes for
     /// variables that are not re-bound.
@@ -159,7 +159,7 @@ impl Variables {
     /// Allocate a new variable slot and return its id.
     #[allow(clippy::cast_possible_truncation)]
     pub fn alloc(&mut self) -> VarId {
-        let id = VarId(self.values.len() as u32);
+        let id = VarId::new(self.values.len() as u32);
         self.values.push(VarValue::Undefined);
         id
     }
@@ -176,7 +176,7 @@ impl Variables {
     }
 
     /// Sentinel value for empty/invalid sym-cache slots.
-    pub const SYM_CACHE_EMPTY: VarId = VarId(u32::MAX);
+    pub const SYM_CACHE_EMPTY: VarId = VarId::new(u32::MAX);
 
     /// Fast O(1) variable lookup by `SymbolId` for root-only variables.
     ///
@@ -242,13 +242,13 @@ impl Variables {
         // Remove name→id mapping so next reference creates a fresh variable.
         // names_by_root is left untouched.
         let (name, id) = self.name_to_id.remove_entry(root)?;
-        let value = std::mem::replace(&mut self.values[id.0 as usize], VarValue::Undefined);
+        let value = std::mem::replace(&mut self.values[id.index()], VarValue::Undefined);
         Some((name, id, value))
     }
 
     /// Restore a root-only variable: put back both the value and the name→id mapping.
     pub fn restore_root_value(&mut self, root: String, id: VarId, value: VarValue) {
-        self.values[id.0 as usize] = value;
+        self.values[id.index()] = value;
         self.name_to_id.insert(root, id);
     }
 
@@ -390,7 +390,7 @@ impl Variables {
     /// Get a variable's value.
     #[must_use]
     pub fn get(&self, id: VarId) -> &VarValue {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx < self.values.len() {
             &self.values[idx]
         } else {
@@ -400,7 +400,7 @@ impl Variables {
 
     /// Set a variable's value, maintaining the reverse dependency index.
     pub fn set(&mut self, id: VarId, value: VarValue) {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx >= self.values.len() {
             return;
         }
@@ -437,7 +437,7 @@ impl Variables {
     /// The dependency index is maintained: any dependent references from the old
     /// value are removed.
     pub fn take(&mut self, id: VarId) -> VarValue {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx >= self.values.len() {
             return VarValue::Undefined;
         }
@@ -559,7 +559,7 @@ impl Variables {
                 continue;
             }
             if let VarValue::NumericVar(NumericState::Dependent(existing)) =
-                &self.values[id.0 as usize]
+                &self.values[id.index()]
             {
                 let new_dep = dep_substitute(existing, pivot, dep);
                 if let Some(v) = constant_value(&new_dep) {
@@ -630,7 +630,7 @@ impl Variables {
         self.values
             .iter()
             .enumerate()
-            .map(|(i, v)| (VarId(i as u32), v))
+            .map(|(i, v)| (VarId::new(i as u32), v))
     }
 }
 
@@ -1079,9 +1079,9 @@ mod tests {
         use crate::equation::{DepTerm, const_dep};
 
         let mut vars = Variables::new();
-        let x = vars.alloc(); // VarId(0)
-        let y = vars.alloc(); // VarId(1)
-        let z = vars.alloc(); // VarId(2)
+        let x = vars.alloc(); // VarId::new(0)
+        let y = vars.alloc(); // VarId::new(1)
+        let z = vars.alloc(); // VarId::new(2)
 
         vars.make_independent(x);
         vars.make_independent(y);

@@ -32,7 +32,21 @@ use postmeta_graphics::types::Scalar;
 /// This is an opaque handle into the variable storage. The equation solver
 /// uses these to track which variables are independent, dependent, or known.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct VarId(pub u32);
+pub struct VarId(u32);
+
+impl VarId {
+    /// Handle from a raw index (allocation order in variable storage).
+    #[must_use]
+    pub const fn new(index: u32) -> Self {
+        Self(index)
+    }
+
+    /// The raw storage index behind this handle.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Dependency terms
@@ -403,7 +417,7 @@ mod tests {
 
     #[test]
     fn single_dep_not_constant() {
-        let d = single_dep(VarId(1));
+        let d = single_dep(VarId::new(1));
         assert!(!is_constant(&d));
         assert!(constant_value(&d).is_none());
     }
@@ -413,7 +427,7 @@ mod tests {
         let mut d = vec![
             DepTerm {
                 coeff: 3.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 5.0,
@@ -431,7 +445,7 @@ mod tests {
         let a = vec![
             DepTerm {
                 coeff: 2.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 3.0,
@@ -442,7 +456,7 @@ mod tests {
         let b = vec![
             DepTerm {
                 coeff: 4.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 1.0,
@@ -452,7 +466,7 @@ mod tests {
         let result = dep_add(&a, &b);
         // Should be 6*v1 + 4
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].var_id, Some(VarId(1)));
+        assert_eq!(result[0].var_id, Some(VarId::new(1)));
         assert!((result[0].coeff - 6.0).abs() < f64::EPSILON);
         assert!((result[1].coeff - 4.0).abs() < f64::EPSILON);
     }
@@ -463,7 +477,7 @@ mod tests {
         let a = vec![
             DepTerm {
                 coeff: 2.0,
-                var_id: Some(VarId(2)),
+                var_id: Some(VarId::new(2)),
             },
             DepTerm {
                 coeff: 1.0,
@@ -474,7 +488,7 @@ mod tests {
         let b = vec![
             DepTerm {
                 coeff: 3.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 2.0,
@@ -484,9 +498,9 @@ mod tests {
         let result = dep_add(&a, &b);
         // Should be 2*v2 + 3*v1 + 3
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].var_id, Some(VarId(2)));
+        assert_eq!(result[0].var_id, Some(VarId::new(2)));
         assert!((result[0].coeff - 2.0).abs() < f64::EPSILON);
-        assert_eq!(result[1].var_id, Some(VarId(1)));
+        assert_eq!(result[1].var_id, Some(VarId::new(1)));
         assert!((result[1].coeff - 3.0).abs() < f64::EPSILON);
         assert!((result[2].coeff - 3.0).abs() < f64::EPSILON);
     }
@@ -497,7 +511,7 @@ mod tests {
         let a = vec![
             DepTerm {
                 coeff: 5.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 1.0,
@@ -508,7 +522,7 @@ mod tests {
         let b = vec![
             DepTerm {
                 coeff: -5.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 2.0,
@@ -527,11 +541,11 @@ mod tests {
         let dep = vec![
             DepTerm {
                 coeff: 3.0,
-                var_id: Some(VarId(2)),
+                var_id: Some(VarId::new(2)),
             },
             DepTerm {
                 coeff: 2.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: 5.0,
@@ -542,14 +556,14 @@ mod tests {
         let replacement = vec![
             DepTerm {
                 coeff: 4.0,
-                var_id: Some(VarId(3)),
+                var_id: Some(VarId::new(3)),
             },
             DepTerm {
                 coeff: 7.0,
                 var_id: None,
             },
         ];
-        let result = dep_substitute(&dep, VarId(1), &replacement);
+        let result = dep_substitute(&dep, VarId::new(1), &replacement);
         // Should be 3*v2 + 8*v3 + 19
         // (5 + 2*7 = 19; 2*4 = 8; 3*v2 unchanged)
         assert_eq!(result.len(), 3);
@@ -557,12 +571,12 @@ mod tests {
         // Find each term
         let v2_coeff = result
             .iter()
-            .find(|t| t.var_id == Some(VarId(2)))
+            .find(|t| t.var_id == Some(VarId::new(2)))
             .unwrap()
             .coeff;
         let v3_coeff = result
             .iter()
-            .find(|t| t.var_id == Some(VarId(3)))
+            .find(|t| t.var_id == Some(VarId::new(3)))
             .unwrap()
             .coeff;
         let constant = result.iter().find(|t| t.var_id.is_none()).unwrap().coeff;
@@ -575,15 +589,15 @@ mod tests {
     #[test]
     fn solve_x_plus_y_eq_5() {
         // Equation: x + y - 5 = 0
-        // where x = VarId(1), y = VarId(2)
+        // where x = VarId::new(1), y = VarId::new(2)
         let dep = vec![
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(2)),
+                var_id: Some(VarId::new(2)),
             },
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: -5.0,
@@ -594,7 +608,7 @@ mod tests {
             SolveResult::Solved { var_id, dep } => {
                 // One variable should be expressed in terms of the other
                 // e.g. v2 = -v1 + 5 (or v1 = -v2 + 5)
-                assert!(var_id == VarId(1) || var_id == VarId(2));
+                assert!(var_id == VarId::new(1) || var_id == VarId::new(2));
                 assert!(!is_constant(&dep));
             }
             _ => panic!("expected Solved"),
@@ -607,7 +621,7 @@ mod tests {
         let dep = vec![
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: -3.0,
@@ -616,7 +630,7 @@ mod tests {
         ];
         match solve_equation(&dep) {
             SolveResult::Solved { var_id, dep } => {
-                assert_eq!(var_id, VarId(1));
+                assert_eq!(var_id, VarId::new(1));
                 assert!(is_constant(&dep));
                 assert!((constant_value(&dep).unwrap() - 3.0).abs() < f64::EPSILON);
             }
@@ -650,11 +664,11 @@ mod tests {
         let eq1 = vec![
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(2)),
+                var_id: Some(VarId::new(2)),
             },
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: -5.0,
@@ -672,11 +686,11 @@ mod tests {
         let eq2 = vec![
             DepTerm {
                 coeff: -1.0,
-                var_id: Some(VarId(2)),
+                var_id: Some(VarId::new(2)),
             },
             DepTerm {
                 coeff: 1.0,
-                var_id: Some(VarId(1)),
+                var_id: Some(VarId::new(1)),
             },
             DepTerm {
                 coeff: -1.0,
@@ -707,7 +721,7 @@ mod tests {
         let val1 = constant_value(&dep1_final).unwrap();
         let val2 = constant_value(&dep2).unwrap();
 
-        let (x, y) = if pivot1 == VarId(1) {
+        let (x, y) = if pivot1 == VarId::new(1) {
             (val1, val2)
         } else {
             (val2, val1)
