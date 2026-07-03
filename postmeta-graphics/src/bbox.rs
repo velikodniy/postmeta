@@ -140,10 +140,13 @@ impl BoundingBox {
                     expand_for_text(text, &mut bb);
                 }
                 GraphicsObject::Picture(nested) => {
-                    let mut nested_bb = if !true_corners && nested.bounds_path.is_some() {
-                        Self::of_path(nested.bounds_path.as_ref().unwrap())
-                    } else {
+                    let mut nested_bb = if true_corners {
                         Self::of_picture(nested, true_corners)
+                    } else {
+                        nested.bounds_path.as_ref().map_or_else(
+                            || Self::of_picture(nested, true_corners),
+                            |bounds| Self::of_path(bounds),
+                        )
                     };
 
                     if let Some(clip) = &nested.clip_path {

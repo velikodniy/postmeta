@@ -68,7 +68,7 @@ impl Picture {
         debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
-        let nested = Picture {
+        let nested = Self {
             objects: existing,
             clip_path: Some(clip_path),
             bounds_path: None,
@@ -83,7 +83,7 @@ impl Picture {
         debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
-        let nested = Picture {
+        let nested = Self {
             objects: existing,
             clip_path: None,
             bounds_path: Some(bounds_path),

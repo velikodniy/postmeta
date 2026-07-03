@@ -212,7 +212,7 @@ impl Interpreter {
                         }
                         DoublePathTarget::Path(path) => {
                             target.add_stroke(StrokeObject {
-                                path: path.clone(),
+                                path,
                                 pen: ds.pen,
                                 color: ds.color,
                                 dash: ds.dash,

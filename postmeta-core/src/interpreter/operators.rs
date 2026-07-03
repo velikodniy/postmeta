@@ -447,15 +447,21 @@ impl Interpreter {
                 let path = match pic.objects.first() {
                     Some(GraphicsObject::Fill(f)) => f.path.clone(),
                     Some(GraphicsObject::Stroke(s)) => s.path.clone(),
-                    Some(GraphicsObject::Picture(nested)) => {
-                        if let Some(p) = &nested.clip_path {
-                            p.clone()
-                        } else if let Some(p) = &nested.bounds_path {
-                            p.clone()
-                        } else {
-                            Arc::new(BezierPath::from_parts(vec![Point::ZERO], vec![], false))
-                        }
-                    }
+                    Some(GraphicsObject::Picture(nested)) => nested.clip_path.as_ref().map_or_else(
+                        || {
+                            nested.bounds_path.as_ref().map_or_else(
+                                || {
+                                    Arc::new(BezierPath::from_parts(
+                                        vec![Point::ZERO],
+                                        vec![],
+                                        false,
+                                    ))
+                                },
+                                Clone::clone,
+                            )
+                        },
+                        Clone::clone,
+                    ),
                     _ => {
                         // Default: single-knot path at origin
                         Arc::new(BezierPath::from_parts(vec![Point::ZERO], vec![], false))

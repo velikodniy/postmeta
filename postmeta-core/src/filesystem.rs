@@ -28,6 +28,9 @@ pub trait FileSystem {
     }
 
     /// Write a string to a file, opening or appending to it.
+    ///
+    /// # Errors
+    /// Returns an error if the underlying filesystem fails to write the data.
     fn write_line(&mut self, _name: &str, _text: &str) -> Result<(), std::io::Error> {
         Ok(())
     }
