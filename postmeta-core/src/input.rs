@@ -99,6 +99,12 @@ enum InputLevel {
         /// Used by `exitif` to find and pop the current loop's input level.
         is_loop_body: bool,
     },
+    /// A single token pushed back by `back_input`.
+    ///
+    /// Kept as its own level (as in `mp.web`, where `back_input` pushes a
+    /// one-token list) so repeated push-backs stack LIFO and no token can
+    /// be silently dropped.
+    BackedUp(Box<ResolvedToken>),
 }
 
 // ---------------------------------------------------------------------------
@@ -121,13 +127,6 @@ enum LevelAction {
 pub struct InputSystem {
     /// Stack of input levels (top = currently reading).
     levels: Vec<InputLevel>,
-    /// A single token pushed back by `back_input`.
-    ///
-    /// When set, `next_raw_token` returns this token before reading from the
-    /// input stack. Corresponds to `mp.web`'s `back_list(cur_tok)` mechanism,
-    /// but simplified to a single slot since `MetaPost` never backs up more
-    /// than one token at a time (multiple push-backs use token lists).
-    backed_up: Option<ResolvedToken>,
     /// Scanner diagnostics collected while producing tokens.
     pending_scan_errors: Vec<ScanError>,
 }
@@ -138,7 +137,6 @@ impl InputSystem {
     pub const fn new() -> Self {
         Self {
             levels: Vec::new(),
-            backed_up: None,
             pending_scan_errors: Vec::new(),
         }
     }
@@ -191,10 +189,12 @@ impl InputSystem {
     /// Returns `true` if a loop body level was found and removed.
     pub fn pop_to_loop_body(&mut self) -> bool {
         // Also clear any backed-up token
-        self.backed_up = None;
         while let Some(level) = self.levels.last() {
             match level {
                 InputLevel::Source { .. } => return false,
+                InputLevel::BackedUp(_) => {
+                    self.levels.pop();
+                }
                 InputLevel::TokenList { is_loop_body, .. } => {
                     let is_body = *is_loop_body;
                     self.levels.pop();
@@ -212,23 +212,10 @@ impl InputSystem {
     /// The next call to `next_raw_token` will return this token instead of
     /// reading from the input stack. This is `mp.web`'s `back_input` — used
     /// when the parser has read one token too far and needs to "unscan" it.
-    ///
-    /// # Panics
-    ///
-    /// Debug-asserts that no token is already backed up. In `MetaPost`,
-    /// `back_input` is always preceded by consuming the previously backed-up
-    /// token, so double push-back indicates a logic error.
+    /// Repeated push-backs stack LIFO: the most recently backed-up token is
+    /// returned first.
     pub fn back_input(&mut self, token: ResolvedToken) {
-        // Preserve any already backed-up token instead of silently dropping it.
-        // The newest token should be returned first, so spill the previous one
-        // to a lower-priority token-list level.
-        if let Some(prev) = self.backed_up.take()
-            && let Some(stored) = resolved_to_stored_token(&prev)
-        {
-            let tokens: SharedTokenList = vec![stored].into();
-            self.push_token_list(tokens, Vec::new(), "backed-up spill");
-        }
-        self.backed_up = Some(token);
+        self.levels.push(InputLevel::BackedUp(Box::new(token)));
     }
 
     /// Push an already-evaluated expression back into the input stream.
@@ -261,11 +248,6 @@ impl InputSystem {
     /// it pops back to the previous level. If a token was pushed back
     /// via `back_input`, it is returned first.
     pub fn next_raw_token(&mut self, symbols: &mut SymbolTable) -> ResolvedToken {
-        // Return any token that was pushed back.
-        if let Some(tok) = self.backed_up.take() {
-            return tok;
-        }
-
         loop {
             if self.levels.is_empty() {
                 return ResolvedToken {
@@ -304,11 +286,19 @@ impl InputSystem {
 
     /// Try to get the next token from the current top level.
     fn try_next_from_current(&mut self, symbols: &mut SymbolTable) -> LevelAction {
+        if matches!(self.levels.last(), Some(InputLevel::BackedUp(_)))
+            && let Some(InputLevel::BackedUp(token)) = self.levels.pop()
+        {
+            return LevelAction::Token(*token);
+        }
+
         let Some(level) = self.levels.last_mut() else {
             return LevelAction::Pop;
         };
 
         match level {
+            // Handled (and popped) above.
+            InputLevel::BackedUp(_) => LevelAction::Continue,
             InputLevel::Source { scanner } => {
                 let token = scanner.next_token();
                 self.pending_scan_errors.extend(scanner.take_errors());
@@ -352,7 +342,7 @@ impl InputSystem {
     #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.levels.is_empty() && self.backed_up.is_none()
+        self.levels.is_empty()
     }
 }
 
@@ -657,7 +647,7 @@ mod tests {
         // Push back an expression first (goes on token list stack)
         input.back_expr(Value::Numeric(10.0), Type::Known, None, None);
 
-        // Then push back a token (goes in backed_up slot)
+        // Then push back a token (goes on top as a BackedUp level)
         let semicolon = ResolvedToken {
             command: Command::Semicolon,
             modifier: 0,
@@ -670,7 +660,7 @@ mod tests {
         };
         input.back_input(semicolon);
 
-        // backed_up is returned first
+        // The backed-up token is returned first
         let t1 = input.next_raw_token(&mut symbols);
         assert_eq!(t1.command, Command::Semicolon);
 
