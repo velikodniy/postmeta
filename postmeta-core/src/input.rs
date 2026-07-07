@@ -317,7 +317,7 @@ impl InputSystem {
                 if token.kind.is_eof() {
                     LevelAction::Pop
                 } else {
-                    LevelAction::Token(resolve_token(&token, symbols))
+                    LevelAction::Token(resolve_token(token, symbols))
                 }
             }
             InputLevel::TokenList {
@@ -369,40 +369,26 @@ impl Default for InputSystem {
 // ---------------------------------------------------------------------------
 
 /// Resolve a scanned token by looking up symbolic tokens in the symbol table.
-fn resolve_token(token: &Token, symbols: &mut SymbolTable) -> ResolvedToken {
-    match &token.kind {
+///
+/// Takes the token by value and moves it into the result — no clone — since
+/// the caller owns the freshly-scanned token and has no further use for it.
+fn resolve_token(token: Token, symbols: &mut SymbolTable) -> ResolvedToken {
+    let (command, modifier, sym) = match &token.kind {
         TokenKind::Symbolic(name) => {
             let id = symbols.lookup(name);
             let entry = symbols.get(id);
-            ResolvedToken {
-                command: entry.command,
-                modifier: entry.modifier,
-                sym: Some(id),
-                token: token.clone(),
-                capsule: None,
-            }
+            (entry.command, entry.modifier, Some(id))
         }
-        TokenKind::Numeric(_) => ResolvedToken {
-            command: Command::NumericToken,
-            modifier: 0,
-            sym: None,
-            token: token.clone(),
-            capsule: None,
-        },
-        TokenKind::StringLit(_) => ResolvedToken {
-            command: Command::StringToken,
-            modifier: 0,
-            sym: None,
-            token: token.clone(),
-            capsule: None,
-        },
-        TokenKind::Capsule | TokenKind::Eof => ResolvedToken {
-            command: Command::Stop,
-            modifier: 0,
-            sym: None,
-            token: token.clone(),
-            capsule: None,
-        },
+        TokenKind::Numeric(_) => (Command::NumericToken, 0, None),
+        TokenKind::StringLit(_) => (Command::StringToken, 0, None),
+        TokenKind::Capsule | TokenKind::Eof => (Command::Stop, 0, None),
+    };
+    ResolvedToken {
+        command,
+        modifier,
+        sym,
+        token,
+        capsule: None,
     }
 }
 
