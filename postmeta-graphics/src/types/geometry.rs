@@ -13,15 +13,6 @@ use crate::math;
 /// we use f64 for compatibility and WASM support.
 pub type Scalar = f64;
 
-/// Tolerance for floating-point comparisons.
-pub const EPSILON: Scalar = 1.0 / 65536.0;
-
-/// Near-zero guard for avoiding division by zero or singularity.
-///
-/// Used as a denominator check / vector-length check where we want to
-/// detect degenerate transforms, zero-length vectors, etc.
-pub const NEAR_ZERO: Scalar = 1e-30;
-
 /// Convert a segment index to a path time parameter.
 ///
 /// Path operations use `f64` time parameters where integer values correspond
@@ -270,6 +261,7 @@ impl ops::Mul<Vec2> for Scalar {
 )]
 mod tests {
     use super::*;
+    use crate::types::EPSILON;
 
     #[test]
     fn test_vec2_angle_to() {

@@ -18,6 +18,7 @@ use crate::variables::{SuffixSegment, VarValue};
 
 use super::Interpreter;
 use super::helpers::{value_to_path_owned, value_to_scalar};
+use crate::interpreter::EqualsMode;
 
 enum DoublePathTarget {
     Dot { x: f64, y: f64 },
@@ -165,7 +166,7 @@ impl Interpreter {
         // Parse expressions and options first, then apply to the target picture.
         match thing {
             Some(ThingToAddOp::Contour) => {
-                let path_val = self.scan_expression()?.exp;
+                let path_val = self.scan_expression(EqualsMode::Relation)?.exp;
                 let path = value_to_path_owned(path_val)?;
                 let (ds, pen_specified) = self.scan_with_options()?;
 
@@ -184,7 +185,7 @@ impl Interpreter {
                 );
             }
             Some(ThingToAddOp::DoublePath) => {
-                let path_val = self.scan_expression()?.exp;
+                let path_val = self.scan_expression(EqualsMode::Relation)?.exp;
                 let (ds, _) = self.scan_with_options()?;
 
                 let target_path = match path_val {
@@ -225,7 +226,7 @@ impl Interpreter {
                 );
             }
             Some(ThingToAddOp::Also) => {
-                let pic_val = self.scan_expression()?.exp;
+                let pic_val = self.scan_expression(EqualsMode::Relation)?.exp;
                 if let Value::Picture(p) = pic_val {
                     self.state.picture_manager.with_target_picture(
                         &mut self.state.variables,
@@ -266,7 +267,7 @@ impl Interpreter {
         while self.cur.command == Command::WithOption {
             let opt = WithOptionOp::from_modifier(self.cur.modifier);
             self.get_x_next();
-            let val = self.scan_expression()?.exp;
+            let val = self.scan_expression(EqualsMode::Relation)?.exp;
 
             match opt {
                 Some(WithOptionOp::WithPen) => {
@@ -314,7 +315,7 @@ impl Interpreter {
             self.report_error(ErrorKind::MissingToken, "Expected `to` in clip/setbounds");
         }
 
-        let val = self.scan_expression()?.exp;
+        let val = self.scan_expression(EqualsMode::Relation)?.exp;
         let clip_path = value_to_path_owned(val)?;
 
         self.state.picture_manager.with_target_picture(
@@ -366,7 +367,7 @@ impl Interpreter {
             .picture_manager
             .sync_currentpicture_variable(&mut self.state.variables);
         self.get_x_next();
-        let val = self.scan_expression()?.exp;
+        let val = self.scan_expression(EqualsMode::Relation)?.exp;
 
         let pic = match val {
             Value::Picture(p) => p,
@@ -472,7 +473,7 @@ impl Interpreter {
         }
 
         self.get_x_next();
-        let val = value_to_scalar(&self.scan_expression()?.exp)?;
+        let val = value_to_scalar(&self.scan_expression(EqualsMode::Relation)?.exp)?;
         self.state.internals.set(idx, val);
 
         self.eat_semicolon();
@@ -612,7 +613,7 @@ impl Interpreter {
         let _ = self.cur.modifier;
         self.get_x_next();
         // Print the value
-        let val = self.scan_expression()?.exp;
+        let val = self.scan_expression(EqualsMode::Relation)?.exp;
         self.report_info(format!(">> {val}"));
         self.eat_semicolon();
         Ok(())
@@ -622,7 +623,7 @@ impl Interpreter {
     pub(in crate::interpreter) fn do_message(&mut self) -> InterpResult<()> {
         let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
-        let val = self.scan_expression()?.exp;
+        let val = self.scan_expression(EqualsMode::Relation)?.exp;
         let msg = match &val {
             Value::String(s) => s.to_string(),
             other => format!("{other}"),
@@ -662,7 +663,7 @@ impl Interpreter {
         }
 
         self.get_x_next();
-        let seed_val = value_to_scalar(&self.scan_expression()?.exp)?;
+        let seed_val = value_to_scalar(&self.scan_expression(EqualsMode::Relation)?.exp)?;
         if seed_val.is_finite() {
             #[expect(
                 clippy::cast_sign_loss,
@@ -696,8 +697,7 @@ impl Interpreter {
             && self.cur.command != Command::Stop
             && self.cur.command != Command::EndGroup
         {
-            self.lhs_tracking.equals_means_equation = false;
-            if let Err(err) = self.scan_expression() {
+            if let Err(err) = self.scan_expression(EqualsMode::Relation) {
                 self.state.errors.push(err);
                 while self.cur.command != Command::Semicolon
                     && self.cur.command != Command::Stop
@@ -761,7 +761,7 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
     let mut on_segments: Vec<(f64, f64)> = Vec::new();
     let mut total_length: f64 = 0.0;
 
-    for obj in &pic.objects {
+    for obj in pic.objects() {
         if let GraphicsObject::Stroke(stroke) = obj {
             let points = stroke.path.knot_points();
             if points.is_empty() {

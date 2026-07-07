@@ -1,4 +1,42 @@
-use postmeta_graphics::types::{Color, DashPattern, LineCap, LineJoin, Pen, Scalar, Vec2};
+//! Formatting helpers shared by the SVG backend, including the single
+//! home of the Y-axis flip.
+//!
+//! # Coordinate system
+//!
+//! `MetaPost` coordinates are Y-up; SVG coordinates are Y-down. The backend
+//! converts by negating Y per coordinate — no global `scale(1,-1)` or
+//! viewBox trick — via [`flip_y`]: path data and viewBox origins negate Y
+//! directly, and text transforms are conjugated with `S = diag(1, -1)`
+//! (see [`svg_text_matrix`]).
+
+use postmeta_graphics::types::{
+    Color, DashPattern, LineCap, LineJoin, Pen, Scalar, Transform, Vec2,
+};
+
+/// Negate a Y coordinate or Y-coupled matrix term (`MetaPost` Y-up → SVG
+/// Y-down). Every Y flip in the backend goes through this helper.
+#[must_use]
+pub const fn flip_y(y: Scalar) -> Scalar {
+    -y
+}
+
+/// SVG `transform` attribute for a text object's `MetaPost` transform.
+///
+/// The Y-flip conjugates the matrix (`M_svg = S * M_mp * S` with
+/// `S = diag(1, -1)`): the off-diagonal terms and the Y translation are
+/// negated, the diagonal is unchanged.
+#[must_use]
+pub fn svg_text_matrix(t: &Transform, precision: usize) -> String {
+    format!(
+        "matrix({},{},{},{},{},{})",
+        fmt_scalar(t.txx, precision),
+        fmt_scalar(flip_y(t.tyx), precision),
+        fmt_scalar(flip_y(t.txy), precision),
+        fmt_scalar(t.tyy, precision),
+        fmt_scalar(t.tx, precision),
+        fmt_scalar(flip_y(t.ty), precision),
+    )
+}
 
 /// Convert a [`Color`] to an SVG color string.
 #[expect(

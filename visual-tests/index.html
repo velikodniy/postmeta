@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PostMeta Visual Tests</title>
+    <style>
+      :root {
+        --bg: #f3f4ef;
+        --card: #fffdf8;
+        --ink: #1c1d1a;
+        --muted: #6d7168;
+        --ok: #2c7a52;
+        --fail: #b43a3a;
+        --line: #d6d8cf;
+      }
+      body {
+        margin: 0;
+        font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+        color: var(--ink);
+        background: radial-gradient(circle at 10% 0, #fff, var(--bg));
+      }
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 2rem;
+      }
+      .meta {
+        color: var(--muted);
+        margin-bottom: 18px;
+      }
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 18px;
+      }
+      .toolbar input {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 8px 10px;
+        min-width: 240px;
+        background: #fff;
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+      }
+      .case {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--card);
+        overflow: hidden;
+      }
+      .case-head {
+        padding: 12px 14px;
+        border-bottom: 1px solid var(--line);
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        align-items: baseline;
+      }
+      .title {
+        font-size: 1.1rem;
+        font-weight: 600;
+      }
+      .badge {
+        font-size: 0.8rem;
+        padding: 2px 8px;
+        border-radius: 999px;
+        border: 1px solid;
+      }
+      .ok {
+        color: var(--ok);
+        border-color: color-mix(in srgb, var(--ok), #fff 40%);
+        background: color-mix(in srgb, var(--ok), #fff 92%);
+      }
+      .fail {
+        color: var(--fail);
+        border-color: color-mix(in srgb, var(--fail), #fff 40%);
+        background: color-mix(in srgb, var(--fail), #fff 92%);
+      }
+      .case-body {
+        padding: 12px 14px 14px;
+      }
+      .notes {
+        color: var(--muted);
+        margin-bottom: 10px;
+      }
+      .imgs {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 12px;
+      }
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #fff;
+      }
+      .panel h3 {
+        margin: 0;
+        font-size: 0.85rem;
+        color: var(--muted);
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+      }
+      .panel img {
+        display: block;
+        width: 100%;
+        min-height: 180px;
+        object-fit: contain;
+        background: #fff;
+      }
+      .source-file {
+        font-size: 0.8rem;
+        color: var(--muted);
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--line);
+        font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      }
+      .panel pre {
+        margin: 0;
+        min-height: 180px;
+        max-height: 340px;
+        overflow: auto;
+        padding: 10px;
+        background: #fff;
+      }
+      .panel pre code {
+        display: block;
+        white-space: pre;
+        font-size: 0.82rem;
+        line-height: 1.35;
+      }
+      .empty {
+        min-height: 180px;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      code {
+        font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+      }
+      @media (max-width: 1020px) {
+        .imgs {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      @media (max-width: 760px) {
+        .imgs {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>PostMeta Visual Tests</h1>
+      <div class="meta" id="meta">Load a report with <code>python3 visual-tests/run.py</code>.</div>
+      <div class="toolbar">
+        <input id="filter" placeholder="Filter by id/title/example number" />
+      </div>
+      <div class="grid" id="grid"></div>
+    </div>
+
+    <script>
+      const grid = document.getElementById("grid");
+      const meta = document.getElementById("meta");
+      const filterInput = document.getElementById("filter");
+
+      let cases = [];
+
+      const el = (tag, cls, text) => {
+        const node = document.createElement(tag);
+        if (cls) node.className = cls;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const imgPanel = (label, src) => {
+        const panel = el("div", "panel");
+        panel.append(el("h3", "", label));
+        if (src) {
+          const img = document.createElement("img");
+          img.src = src;
+          img.alt = label;
+          panel.append(img);
+        } else {
+          panel.append(el("div", "empty", "Not available"));
+        }
+        return panel;
+      };
+
+      const codePanel = (label, code, file) => {
+        const panel = el("div", "panel");
+        panel.append(el("h3", "", label));
+        if (file) panel.append(el("div", "source-file", file));
+        if (code) {
+          const pre = document.createElement("pre");
+          const node = document.createElement("code");
+          node.textContent = code;
+          pre.append(node);
+          panel.append(pre);
+        } else {
+          panel.append(el("div", "empty", "Not available"));
+        }
+        return panel;
+      };
+
+      const referenceUrl = (c) => {
+        if (!c.example) return null;
+        const base = "http://www.tlhiv.org/MetaPost/examples";
+        return `${base}/examples.${c.example}.gif`;
+      };
+
+      const render = () => {
+        const q = filterInput.value.trim().toLowerCase();
+        grid.innerHTML = "";
+        const list = !q
+          ? cases
+          : cases.filter((c) => {
+              const hay = `${c.id} ${c.title} ${c.example ?? ""}`.toLowerCase();
+              return hay.includes(q);
+            });
+
+        for (const c of list) {
+          const card = el("article", "case");
+          const head = el("div", "case-head");
+          head.append(el("div", "title", `${c.title} (${c.id})`));
+
+          const badge = el("span", `badge ${c.ok ? "ok" : "fail"}`, c.ok ? "OK" : "FAIL");
+          head.append(badge);
+          card.append(head);
+
+          const body = el("div", "case-body");
+          const bits = [];
+          if (c.example) bits.push(`example ${c.example}`);
+          if (c.notes) bits.push(c.notes);
+          if (c.source) bits.push(c.source);
+          body.append(el("div", "notes", bits.join(" • ")));
+
+          const imgs = el("div", "imgs");
+          const ref = referenceUrl(c);
+          imgs.append(imgPanel("Current", c.current_svg));
+          imgs.append(codePanel("Source", c.source_code, c.source_mp || c.file));
+          imgs.append(imgPanel("Reference", ref));
+          body.append(imgs);
+
+          card.append(body);
+          grid.append(card);
+        }
+      };
+
+      const load = async () => {
+        try {
+          const res = await fetch("generated/report.json", { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const report = await res.json();
+          cases = report.cases || [];
+          meta.textContent = `Generated ${report.generated_at} • cases ${cases.length} • failures ${report.failures}`;
+          render();
+        } catch (err) {
+          meta.textContent = `No report found. Run: python3 visual-tests/run.py (${err})`;
+        }
+      };
+
+      filterInput.addEventListener("input", render);
+      load();
+    </script>
+  </body>
+</html>

@@ -11,6 +11,17 @@ use crate::types::{GraphicsObject, Pen, Picture, Point, Scalar, TextObject, Vec2
 // BoundingBox type
 // ---------------------------------------------------------------------------
 
+/// How `setbounds` regions are treated when measuring a picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Corners {
+    /// A `setbounds` path overrides the bbox of the objects it wraps.
+    /// This is `MetaPost`’s default behavior (`truecorners = 0`).
+    HonorSetBounds,
+    /// Measure the actual contents, ignoring `setbounds` regions
+    /// (`truecorners = 1`).
+    True,
+}
+
 /// Axis-aligned bounding box.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BoundingBox {
@@ -31,7 +42,7 @@ impl BoundingBox {
 
     /// Check if this bounding box is valid (non-empty).
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         self.min_x <= self.max_x && self.min_y <= self.max_y
     }
 
@@ -88,13 +99,49 @@ impl BoundingBox {
     }
 
     /// Expand to include another bounding box.
-    pub fn union(&mut self, other: &Self) {
+    pub const fn union(&mut self, other: &Self) {
         if other.is_valid() {
             self.min_x = self.min_x.min(other.min_x);
             self.min_y = self.min_y.min(other.min_y);
             self.max_x = self.max_x.max(other.max_x);
             self.max_y = self.max_y.max(other.max_y);
         }
+    }
+
+    /// Bounding box from explicit min/max corners.
+    #[must_use]
+    pub const fn from_corners(min: Point, max: Point) -> Self {
+        Self {
+            min_x: min.x,
+            min_y: min.y,
+            max_x: max.x,
+            max_y: max.y,
+        }
+    }
+
+    /// Whether two boxes share any area, inclusive of edges: boxes that
+    /// merely touch along an edge or corner count as overlapping.
+    #[must_use]
+    pub const fn overlaps(&self, other: &Self) -> bool {
+        self.min_x <= other.max_x
+            && self.max_x >= other.min_x
+            && self.min_y <= other.max_y
+            && self.max_y >= other.min_y
+    }
+
+    /// Intersection of two boxes; [`Self::EMPTY`] when they don't overlap.
+    ///
+    /// Boxes that touch along an edge intersect in a degenerate (zero-area)
+    /// but valid box, consistent with [`Self::overlaps`].
+    #[must_use]
+    pub const fn intersect(&self, other: &Self) -> Self {
+        let r = Self {
+            min_x: self.min_x.max(other.min_x),
+            min_y: self.min_y.max(other.min_y),
+            max_x: self.max_x.min(other.max_x),
+            max_y: self.max_y.min(other.max_y),
+        };
+        if r.is_valid() { r } else { Self::EMPTY }
     }
 
     /// Compute the bounding box of a [`BezierPath`] (control-point hull).
@@ -113,14 +160,11 @@ impl BoundingBox {
     }
 
     /// Compute the bounding box of a picture.
-    ///
-    /// When `true_corners` is false, `SetBounds` regions override the
-    /// computed bbox. When true, they are ignored.
     #[must_use]
-    pub fn of_picture(pic: &Picture, true_corners: bool) -> Self {
+    pub fn of_picture(pic: &Picture, corners: Corners) -> Self {
         let mut bb = Self::EMPTY;
 
-        for obj in &pic.objects {
+        for obj in pic.objects() {
             match obj {
                 GraphicsObject::Fill(fill) => {
                     let pbb = Self::of_path(&fill.path);
@@ -140,27 +184,13 @@ impl BoundingBox {
                     expand_for_text(text, &mut bb);
                 }
                 GraphicsObject::Picture(nested) => {
-                    let mut nested_bb = if true_corners {
-                        Self::of_picture(nested, true_corners)
-                    } else {
-                        nested.bounds_path.as_ref().map_or_else(
-                            || Self::of_picture(nested, true_corners),
-                            |bounds| Self::of_path(bounds),
-                        )
+                    let mut nested_bb = match (corners, nested.bounds_path()) {
+                        (Corners::HonorSetBounds, Some(bounds)) => Self::of_path(bounds),
+                        _ => Self::of_picture(nested, corners),
                     };
 
-                    if let Some(clip) = &nested.clip_path {
-                        let clip_bb = Self::of_path(clip);
-                        // Ideally we'd intersect the bounding boxes:
-                        nested_bb.min_x = nested_bb.min_x.max(clip_bb.min_x);
-                        nested_bb.min_y = nested_bb.min_y.max(clip_bb.min_y);
-                        nested_bb.max_x = nested_bb.max_x.min(clip_bb.max_x);
-                        nested_bb.max_y = nested_bb.max_y.min(clip_bb.max_y);
-
-                        // If completely outside clip path, bounds become empty
-                        if nested_bb.min_x > nested_bb.max_x || nested_bb.min_y > nested_bb.max_y {
-                            nested_bb = Self::EMPTY;
-                        }
+                    if let Some(clip) = nested.clip_path() {
+                        nested_bb = nested_bb.intersect(&Self::of_path(clip));
                     }
                     bb.union(&nested_bb);
                 }
@@ -274,7 +304,7 @@ mod tests {
             miter_limit: 10.0,
         });
 
-        let bb = BoundingBox::of_picture(&pic, true);
+        let bb = BoundingBox::of_picture(&pic, Corners::True);
         assert!(bb.is_valid());
         assert!(bb.width() > 9.0);
         assert!(bb.height() > 9.0);
@@ -328,8 +358,8 @@ mod tests {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text));
-        let bb = BoundingBox::of_picture(&pic, false);
+        pic.push(GraphicsObject::Text(text));
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
 
         assert!((bb.min_x).abs() < EPSILON, "min_x: {}", bb.min_x);
         assert!((bb.max_x - 25.0).abs() < EPSILON, "max_x: {}", bb.max_x);
@@ -348,8 +378,8 @@ mod tests {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text));
-        let bb = BoundingBox::of_picture(&pic, false);
+        pic.push(GraphicsObject::Text(text));
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
 
         // Zero metrics → all four corners collapse to the origin.
         assert!(bb.min_x.abs() < EPSILON, "min_x: {}", bb.min_x);
@@ -434,5 +464,69 @@ mod tests {
         assert!(bb.min_y <= 0.0 + EPSILON, "min_y: {}", bb.min_y);
         assert!(bb.max_x >= 8.0 - EPSILON, "max_x: {}", bb.max_x);
         assert!(bb.max_y >= 10.0 - EPSILON, "max_y: {}", bb.max_y);
+    }
+
+    #[test]
+    fn test_intersect_partial_overlap() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(10.0, 10.0));
+        let b = BoundingBox::from_corners(Point::new(5.0, -5.0), Point::new(15.0, 5.0));
+        let r = a.intersect(&b);
+        assert_eq!(r.min_x, 5.0);
+        assert_eq!(r.min_y, 0.0);
+        assert_eq!(r.max_x, 10.0);
+        assert_eq!(r.max_y, 5.0);
+    }
+
+    #[test]
+    fn test_intersect_disjoint_is_empty() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let b = BoundingBox::from_corners(Point::new(2.0, 2.0), Point::new(3.0, 3.0));
+        assert!(!a.intersect(&b).is_valid());
+        // One axis overlapping, the other disjoint must also be empty.
+        let c = BoundingBox::from_corners(Point::new(0.5, 2.0), Point::new(3.0, 3.0));
+        assert!(!a.intersect(&c).is_valid());
+    }
+
+    #[test]
+    fn test_intersect_touching_edge_is_degenerate_valid() {
+        // Pins the inclusive boundary semantics shared with `overlaps`.
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let b = BoundingBox::from_corners(Point::new(1.0, 0.0), Point::new(2.0, 1.0));
+        let r = a.intersect(&b);
+        assert!(r.is_valid());
+        assert_eq!(r.min_x, 1.0);
+        assert_eq!(r.max_x, 1.0);
+        assert_eq!(r.width(), 0.0);
+    }
+
+    #[test]
+    fn test_overlaps_is_inclusive_of_shared_edges() {
+        let a = BoundingBox::from_corners(Point::new(0.0, 0.0), Point::new(1.0, 1.0));
+        let edge = BoundingBox::from_corners(Point::new(1.0, 0.0), Point::new(2.0, 1.0));
+        let corner = BoundingBox::from_corners(Point::new(1.0, 1.0), Point::new(2.0, 2.0));
+        let apart = BoundingBox::from_corners(Point::new(1.1, 0.0), Point::new(2.0, 1.0));
+        assert!(a.overlaps(&edge));
+        assert!(a.overlaps(&corner));
+        assert!(!a.overlaps(&apart));
+    }
+
+    #[test]
+    fn test_picture_bbox_clip_restricts_bounds() {
+        // Content is the 10x10 square scaled to 20x20; clip back to 10x10.
+        let big = test_helpers::square().transformed(&Transform::scaled(2.0));
+        let mut pic = Picture::new();
+        pic.add_fill(crate::types::FillObject {
+            path: Arc::new(big),
+            color: Color::BLACK,
+            pen: None,
+            line_join: crate::types::LineJoin::Round,
+            miter_limit: 10.0,
+        });
+        pic.clip(Arc::new(test_helpers::square()));
+
+        let bb = BoundingBox::of_picture(&pic, Corners::HonorSetBounds);
+        assert!(bb.is_valid());
+        assert!(bb.max_x <= 10.0 + EPSILON, "max_x: {}", bb.max_x);
+        assert!(bb.max_y <= 10.0 + EPSILON, "max_y: {}", bb.max_y);
     }
 }

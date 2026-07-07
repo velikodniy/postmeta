@@ -7,6 +7,7 @@ use crate::interpreter::ExprResultValue;
 use crate::types::Value;
 
 use super::{Interpreter, MacroInfo, ParamType};
+use crate::interpreter::EqualsMode;
 use crate::interpreter::helpers::value_to_stored_tokens;
 
 impl Interpreter {
@@ -525,7 +526,7 @@ impl Interpreter {
 
         // Get next token from expansion and evaluate the body
         self.get_x_next();
-        self.scan_expression()
+        self.scan_expression(EqualsMode::Relation)
     }
 
     /// Skip tokens until we reach `enddef` (for error recovery).
@@ -630,7 +631,7 @@ impl Interpreter {
                         }
                         match param_type {
                             ParamType::Expr => {
-                                if let Ok(result) = self.scan_expression() {
+                                if let Ok(result) = self.scan_expression(EqualsMode::Relation) {
                                     args.push(expr_result_to_capsule(result));
                                 } else {
                                     args.push(Vec::new());
@@ -690,7 +691,9 @@ impl Interpreter {
                         args.push(self.scan_undelimited_value_arg(Self::scan_tertiary));
                     }
                     ParamType::UndelimitedExpr => {
-                        args.push(self.scan_undelimited_value_arg(Self::scan_expression));
+                        args.push(self.scan_undelimited_value_arg(|interp| {
+                            interp.scan_expression(EqualsMode::Relation)
+                        }));
                     }
                     ParamType::UndelimitedSuffix => {
                         args.push(self.scan_suffix_arg());

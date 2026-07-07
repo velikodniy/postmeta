@@ -3,6 +3,7 @@ use crate::error::ErrorKind;
 use crate::types::Value;
 
 use super::{IfState, Interpreter};
+use crate::interpreter::EqualsMode;
 
 impl Interpreter {
     /// Handle `if <boolean>:` — evaluate the condition and enter a branch.
@@ -12,8 +13,7 @@ impl Interpreter {
     pub(in crate::interpreter) fn expand_if(&mut self) {
         // Evaluate the boolean expression after `if`
         self.get_x_next();
-        self.lhs_tracking.equals_means_equation = false;
-        let condition = match self.scan_expression() {
+        let condition = match self.scan_expression(EqualsMode::Relation) {
             Ok(result) => match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,

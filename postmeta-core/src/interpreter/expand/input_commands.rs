@@ -1,6 +1,12 @@
 use crate::command::Command;
 use crate::error::ErrorKind;
-use crate::input::{StoredToken, TokenList};
+use crate::input::TokenList;
+
+/// Maximum nesting depth of source input levels (`input` files and
+/// `scantokens` strings). Recursive inclusion (`a.mp` inputting `b.mp`
+/// inputting `a.mp`) hits this bound and reports an error instead of
+/// growing the input stack forever.
+const MAX_INPUT_DEPTH: usize = 64;
 use crate::interpreter::ExprResultValue;
 use crate::interpreter::operators::compute_text_metrics;
 use crate::types::Value;
@@ -36,7 +42,17 @@ impl Interpreter {
 
         match contents {
             Some(source) => {
-                self.state.input.push_source(&source);
+                if self.state.input.source_depth() >= MAX_INPUT_DEPTH {
+                    self.report_error(
+                        ErrorKind::Internal,
+                        format!(
+                            "input nesting exceeds {MAX_INPUT_DEPTH} levels \
+                             (recursive input of `{filename}`?)"
+                        ),
+                    );
+                } else {
+                    self.state.input.push_source(&source);
+                }
             }
             None => {
                 self.report_error(ErrorKind::Internal, format!("File not found: {filename}"));
@@ -120,7 +136,7 @@ impl Interpreter {
             transform: Transform::IDENTITY,
         };
         let mut pic = Picture::new();
-        pic.objects.push(GraphicsObject::Text(text_obj));
+        pic.push(GraphicsObject::Text(text_obj));
 
         // Push a picture capsule — directly transformable.
         self.back_expr_value(ExprResultValue::plain(Value::Picture(pic)));
@@ -171,7 +187,14 @@ impl Interpreter {
                 }
 
                 if !source.is_empty() {
-                    self.state.input.push_source(&source);
+                    if self.state.input.source_depth() >= MAX_INPUT_DEPTH {
+                        self.report_error(
+                            ErrorKind::Internal,
+                            format!("scantokens nesting exceeds {MAX_INPUT_DEPTH} levels"),
+                        );
+                    } else {
+                        self.state.input.push_source(&source);
+                    }
                 }
             } else {
                 self.report_error(ErrorKind::TypeError, "scantokens requires a string");
@@ -205,16 +228,6 @@ impl Interpreter {
         self.expand_current();
     }
 
-    /// Convert `self.cur` to a `StoredToken`, if possible.
-    fn resolved_to_stored(&self) -> Option<StoredToken> {
-        match &self.cur.token.kind {
-            crate::token::TokenKind::Symbolic(_) => self.cur.sym.map(StoredToken::Symbol),
-            crate::token::TokenKind::Numeric(v) => Some(StoredToken::Numeric(*v)),
-            crate::token::TokenKind::StringLit(s) => Some(StoredToken::StringLit(s.clone())),
-            crate::token::TokenKind::Capsule | crate::token::TokenKind::Eof => None,
-        }
-    }
-
     /// Push-only variant of `expand_scantokens` for use by `expandafter`.
     ///
     /// Same as `expand_scantokens` but does NOT call `get_next();
@@ -239,9 +252,10 @@ impl Interpreter {
     fn expand_expandafter_push_only(&mut self) {
         // Read token A without expanding.
         self.get_next();
-        let saved_a: TokenList = std::iter::once_with(|| self.resolved_to_stored())
-            .flatten()
-            .collect();
+        let saved_a: TokenList =
+            std::iter::once_with(|| crate::input::resolved_to_stored_token(&self.cur))
+                .flatten()
+                .collect();
 
         // Read token B without expanding.
         self.get_next();

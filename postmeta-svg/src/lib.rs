@@ -14,7 +14,7 @@ mod util;
 mod tests;
 
 use postmeta_fonts::FontProvider;
-use postmeta_graphics::bbox::BoundingBox;
+use postmeta_graphics::bbox::{BoundingBox, Corners};
 use postmeta_graphics::types::Picture;
 use svg::Document;
 
@@ -55,9 +55,14 @@ pub fn render_with_fonts(
     opts: &RenderOptions,
     fonts: Option<&dyn FontProvider>,
 ) -> Document {
-    let bb = BoundingBox::of_picture(picture, opts.true_corners);
+    let corners = if opts.true_corners {
+        Corners::True
+    } else {
+        Corners::HonorSetBounds
+    };
+    let bb = BoundingBox::of_picture(picture, corners);
     let mut renderer = renderer::SvgRenderer::new(opts, fonts);
-    let content = renderer.render_objects(&picture.objects);
+    let content = renderer.render_objects(picture.objects());
 
     document::build_document(
         &bb,

@@ -8,12 +8,19 @@ library, WASM module (e.g. Typst plugin), or CLI tool.
 ```
 postmeta-graphics   Core graphics primitives (zero dependencies)
        ^
+postmeta-fonts      Font metrics/outlines (ttf-parser wrapper)
+       ^
 postmeta-svg        SVG renderer (depends on `svg` crate)
        ^
 postmeta-core       MetaPost language parser and interpreter
        ^
-postmeta-cli        Command-line interface
+postmeta-cli        Command-line interface (args/fs/fonts/app modules)
+postmeta-wasm       WASM bindings (browser editor)
 ```
+
+CI (`.github/workflows/ci.yml`) runs fmt, clippy (`-D warnings`), the
+workspace test suite, and a wasm32 check. `visual-tests/` holds a 304-case
+visual regression harness (`python3 visual-tests/run.py`).
 
 ## postmeta-graphics
 
@@ -43,8 +50,14 @@ Fundamental data structures shared across the workspace.
   `Pen::circle(diameter)`, `Pen::DEFAULT` (0.5bp).
 - **`Transform`** — 6-component affine: (tx + txx·x + txy·y, ty + tyx·x + tyy·y).
   Supports `Mul` for composition, `inverse()`.
-- **`GraphicsObject`** — Fill | Stroke | Text | ClipStart/End | SetBoundsStart/End.
-- **`Picture`** — ordered collection of `GraphicsObject`.
+- **`GraphicsObject`** — Fill | Stroke | Text | Picture (nested).
+- **`Picture`** — ordered collection of `GraphicsObject` plus optional
+  `clip_path`/`bounds_path`, forming a tree: `clip`/`setbounds` wrap the
+  existing objects in a nested picture. Fields are crate-private; consumers
+  use `objects()`, `iter()`, `first()`, `clip_path()`, `bounds_path()`,
+  `push()`, `add_fill()`, `add_stroke()`, `merge()`.
+- **`SharedPath`** — `Arc<BezierPath>` alias; `clip`/`set_bounds` accept
+  `impl Into<SharedPath>` so callers never juggle `Arc` themselves.
 
 ### Transformable Trait
 
@@ -118,17 +131,23 @@ sub-pairs. Converges when segment extent < 10^-6 or depth > 40.
 Picture assembly matching MetaPost primitives:
 - **`addto_contour`**, **`addto_doublepath`**, **`addto_also`** — add fills,
   strokes, merge pictures.
-- **`clip`**, **`setbounds`** — wrap objects in ClipStart/End or
-  SetBoundsStart/End brackets.
-- **`BoundingBox`** — axis-aligned bbox with empty sentinel (∞/−∞).
+- **`clip`**, **`setbounds`** — wrap the current objects in a nested
+  picture carrying `clip_path`/`bounds_path`.
+- **`BoundingBox`** — axis-aligned bbox with empty sentinel (∞/−∞) and a
+  full set-algebra API: `union`, `intersect`, `overlaps` (single source of
+  truth for AABB semantics, also used by intersection pruning).
   Control-point hull for paths (conservative, matching MetaPost).
   Corner methods: `llcorner`, `lrcorner`, `ulcorner`, `urcorner`.
+  `of_picture(pic, Corners::HonorSetBounds | Corners::True)` maps to the
+  `truecorners` internal.
 
 ## postmeta-svg
 
 Converts `Picture` to SVG using the `svg` crate.
 
-- Y-axis flip via root `<g transform="scale(1,-1)">`.
+- Y-axis flip by per-coordinate negation (`util::flip_y`) in path data and
+  the viewBox — no global `scale(1,-1)`. Text transforms are conjugated
+  with `S = diag(1,-1)` via `util::svg_text_matrix`.
 - Fill → `<path>` with fill color.
 - Stroke → `<path>` with stroke-width, cap, join, dash attributes.
   Stroke width extracted from pen transform (geometric mean of basis vectors).
@@ -146,10 +165,30 @@ Implements only the ~210 engine primitives; macros like `draw`, `fill`,
 - **Scanner**: mp.web §64 character classes (21 classes). Same-class
   characters merge into tokens.
 - **Parser**: 4-level expression hierarchy
-  (primary → secondary → tertiary → expression).
+  (primary → secondary → tertiary → expression), Pratt-style infix loop.
+  Statement contexts pass `EqualsMode::Equation` so a top-level `=` is an
+  equation delimiter; everywhere else it is the comparison operator.
 - **Macro expansion**: at the token level, between scanner and parser.
-- **Equation solver**: linear dependency lists for numeric equations.
+  The input stack (`InputSystem`) layers sources, token lists, and
+  backed-up tokens as explicit levels; `input`/`scantokens` nesting is
+  bounded (64 levels) so recursive inclusion terminates with an error.
+- **Command table**: `command/mod.rs` holds the `Command` enum and the op
+  enums; `command/primitives.rs` holds the `PRIMITIVES` registration table.
+  See [adding-primitives.md](adding-primitives.md) for the checklist.
+- **Operators**: dispatchers in `interpreter/operators/mod.rs` stay
+  exhaustive matches; evaluation lives in domain submodules (arithmetic,
+  transforms, strings, paths, pictures, text).
+- **Equation solver**: pure dependency-list algebra in `equation.rs`;
+  stateful solving/assignment in `interpreter/equation.rs`. Compound types
+  (pair, color, transform) solve component-wise, driven by
+  `Type::components()`/`component_suffixes()` — adding a compound type
+  (e.g. `cmykcolor`) starts there. Expression-level dependency tracking in
+  `interpreter/dep_arith.rs` (pairs only, currently).
+- **Diagnostics**: errors carry source spans (current token, falling back
+  to statement start).
 - **File system**: `trait FileSystem` for WASM compatibility.
+- **Tests**: themed unit-test modules under `interpreter/tests/` with the
+  `TestInterp` harness.
 
 ## Key Decisions
 

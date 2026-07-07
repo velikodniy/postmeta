@@ -13,6 +13,7 @@
 //! - `scan_tertiary`: `+`, `-`, `++`, `+-+`
 //! - `scan_expression`: `=`, `<`, `>`, path construction
 
+mod dep_arith;
 mod equation;
 mod expand;
 pub(crate) mod helpers;
@@ -51,6 +52,20 @@ use runtime::scope::ScopeManager;
 /// Interpreter-facing alias for the shared expression payload.
 pub(super) type ExprResultValue = crate::expr_value::ExprValue;
 
+/// How `=` is interpreted while scanning an expression.
+///
+/// Statement contexts scan their expression with [`EqualsMode::Equation`] so
+/// that a top-level `=` delimits an equation; everywhere else `=` is the
+/// relational operator. Mirrors `mp.web`'s `var_flag = assignment` mechanism,
+/// but as an explicit parameter instead of mutable interpreter state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EqualsMode {
+    /// A top-level `=` ends the expression (equation delimiter).
+    Equation,
+    /// `=` is the equality comparison operator.
+    Relation,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum LhsBinding {
     Variable {
@@ -79,18 +94,12 @@ pub(super) enum LhsBinding {
 pub(super) struct LhsTracking {
     /// Binding for expression forms that can be equation left-hand sides.
     pub last_lhs_binding: Option<LhsBinding>,
-    /// When true, `=` in `scan_expression` is treated as an equation
-    /// delimiter (not consumed). Set before calling `scan_expression` from
-    /// statement context; cleared inside `scan_expression` on entry.
-    /// Mirrors `mp.web`'s `var_flag = assignment` mechanism.
-    pub equals_means_equation: bool,
 }
 
 impl LhsTracking {
     const fn new() -> Self {
         Self {
             last_lhs_binding: None,
-            equals_means_equation: false,
         }
     }
 }
@@ -148,6 +157,10 @@ pub struct Interpreter {
     lhs_tracking: LhsTracking,
     /// Conditional and loop control state (if-stack, loop exit flag, pending body).
     control_flow: ControlFlow,
+    /// Span of the first token of the statement being executed, for
+    /// diagnostics. Degenerate (zero-length) for tokens produced by macro
+    /// expansion.
+    statement_span: crate::token::Span,
 }
 
 impl Interpreter {
@@ -205,6 +218,7 @@ impl Interpreter {
             cur,
             lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
+            statement_span: crate::token::Span::at(0),
         }
     }
 
@@ -338,77 +352,27 @@ impl Interpreter {
         self.cur.sym.map(|id| self.state.symbols.name(id))
     }
 
-    fn alloc_pair_value(&mut self, name: &str) -> VarValue {
-        let x = self.state.variables.alloc();
-        let y = self.state.variables.alloc();
-        self.state
-            .variables
-            .set(x, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(y, VarValue::NumericVar(NumericState::Numeric));
-        self.state.variables.register_name(&format!("{name}.x"), x);
-        self.state.variables.register_name(&format!("{name}.y"), y);
-        VarValue::Pair { x, y }
-    }
-
-    fn alloc_color_value(&mut self, name: &str) -> VarValue {
-        let r = self.state.variables.alloc();
-        let g = self.state.variables.alloc();
-        let b = self.state.variables.alloc();
-        self.state
-            .variables
-            .set(r, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(g, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(b, VarValue::NumericVar(NumericState::Numeric));
-        self.state.variables.register_name(&format!("{name}.r"), r);
-        self.state.variables.register_name(&format!("{name}.g"), g);
-        self.state.variables.register_name(&format!("{name}.b"), b);
-        VarValue::Color { r, g, b }
-    }
-
-    fn alloc_transform_value(&mut self, name: &str) -> VarValue {
-        let tx = self.state.variables.alloc();
-        let ty = self.state.variables.alloc();
-        let txx = self.state.variables.alloc();
-        let txy = self.state.variables.alloc();
-        let tyx = self.state.variables.alloc();
-        let tyy = self.state.variables.alloc();
-        for id in [tx, ty, txx, txy, tyx, tyy] {
+    /// Allocate the component variables of a compound type and register
+    /// their suffixed names (`p.x`, `c.r`, `T.txx`, ...).
+    ///
+    /// Returns `None` if `ty` is not a compound type.
+    fn alloc_compound_value(&mut self, name: &str, ty: Type) -> Option<VarValue> {
+        let suffixes = ty.component_suffixes();
+        if suffixes.is_empty() {
+            return None;
+        }
+        let mut parts = Vec::with_capacity(suffixes.len());
+        for suffix in suffixes {
+            let id = self.state.variables.alloc();
             self.state
                 .variables
                 .set(id, VarValue::NumericVar(NumericState::Numeric));
+            self.state
+                .variables
+                .register_name(&format!("{name}.{suffix}"), id);
+            parts.push(id);
         }
-        self.state
-            .variables
-            .register_name(&format!("{name}.tx"), tx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.ty"), ty);
-        self.state
-            .variables
-            .register_name(&format!("{name}.txx"), txx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.txy"), txy);
-        self.state
-            .variables
-            .register_name(&format!("{name}.tyx"), tyx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.tyy"), tyy);
-        VarValue::Transform {
-            tx,
-            ty,
-            txx,
-            txy,
-            tyx,
-            tyy,
-        }
+        VarValue::compound(ty, &parts)
     }
 
     fn default_var_value_for_type(&mut self, ty: Type, name: &str) -> Option<VarValue> {
@@ -421,9 +385,7 @@ impl Interpreter {
             ))),
             Type::Pen => Some(VarValue::Known(Value::Pen(Pen::circle(0.0)))),
             Type::Picture => Some(VarValue::Known(Value::Picture(Picture::default()))),
-            Type::PairType => Some(self.alloc_pair_value(name)),
-            Type::ColorType => Some(self.alloc_color_value(name)),
-            Type::TransformType => Some(self.alloc_transform_value(name)),
+            ty if ty.is_compound() => self.alloc_compound_value(name, ty),
             _ => None,
         }
     }
@@ -684,7 +646,23 @@ impl Interpreter {
     /// Record a non-fatal error.
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
         let msg = message.into();
-        self.state.errors.push(InterpreterError::new(kind, msg));
+        let mut err = InterpreterError::new(kind, msg);
+        if let Some(span) = self.best_error_span() {
+            err = err.with_span(span);
+        }
+        self.state.errors.push(err);
+    }
+
+    /// The most specific non-degenerate source span for a diagnostic:
+    /// the current token's span, falling back to the statement's start.
+    /// `None` when both are degenerate (e.g. deep inside macro expansion).
+    fn best_error_span(&self) -> Option<crate::token::Span> {
+        let cur = self.cur.token.span;
+        if cur.end > cur.start {
+            return Some(cur);
+        }
+        let stmt = self.statement_span;
+        (stmt.end > stmt.start).then_some(stmt)
     }
 
     /// Record an informational diagnostic.
@@ -709,7 +687,14 @@ impl Interpreter {
         self.get_x_next();
 
         while self.cur.command != Command::Stop {
-            self.do_statement()?;
+            self.statement_span = self.cur.token.span;
+            if let Err(err) = self.do_statement() {
+                let err = match (err.span, self.best_error_span()) {
+                    (None, Some(span)) => err.with_span(span),
+                    _ => err,
+                };
+                return Err(err);
+            }
         }
 
         Ok(())

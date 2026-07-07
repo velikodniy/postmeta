@@ -1,17 +1,48 @@
-//! Equation and assignment logic.
+//! Equation and assignment logic — the stateful side of equation solving.
 //!
 //! Handles `lhs = rhs` equations (including unknown-variable assignment)
-//! and `:=` explicit assignments.
+//! and `:=` explicit assignments. Compound types (pair, color, transform)
+//! are split into one equation per component, driven by
+//! [`Type::components`](crate::types::Type::components).
+//!
+//! # Module split
+//!
+//! The pure dependency-list algebra lives in [`crate::equation`]; this
+//! module is its interpreter-facing client. `reduce_dep_with_knowns`
+//! stays here (not in the algebra module) because substitution reads the
+//! variable store to discover which variables became known or dependent.
 
 use crate::equation::{
-    DepList, SolveResult, const_dep, dep_add_scaled, dep_substitute, solve_equation,
+    DepList, SolveResult, const_dep, dep_add_scaled, dep_scale, dep_substitute, solve_equation,
 };
 use crate::error::{ErrorKind, InterpResult};
+use crate::types::Type;
 use crate::types::Value;
 use crate::variables::{NumericState, VarValue};
 
 use super::helpers::value_to_scalar;
 use super::{Interpreter, LhsBinding};
+
+/// Numeric components of a known compound value, in storage order
+/// (matching [`Type::component_suffixes`]).
+fn value_components(value: &Value) -> Option<Vec<f64>> {
+    match value {
+        Value::Pair(x, y) => Some(vec![*x, *y]),
+        Value::Color(c) => Some(vec![c.r, c.g, c.b]),
+        Value::Transform(t) => Some(vec![t.tx, t.ty, t.txx, t.txy, t.tyx, t.tyy]),
+        _ => None,
+    }
+}
+
+/// Human-readable kind for compound-equation error messages.
+const fn compound_kind(ty: Type) -> &'static str {
+    match ty {
+        Type::PairType => "pair",
+        Type::ColorType => "color",
+        Type::TransformType => "transform",
+        _ => "compound",
+    }
+}
 
 impl Interpreter {
     /// Substitute all known and dependent variables in `dep` until only
@@ -69,35 +100,91 @@ impl Interpreter {
         }
     }
 
+    /// Dependency lists for each numeric component of one equation side,
+    /// in storage order.
+    ///
+    /// Three sources, tried in order:
+    /// 1. expression-level pair dependencies (pairs only — the expression
+    ///    pipeline tracks components for pairs);
+    /// 2. a bare compound variable reference: each component variable's
+    ///    dependency (negated for `-v` forms);
+    /// 3. a known compound value: constant dependencies.
+    ///
+    /// Returns `None` when the side has no component representation (then
+    /// the caller falls back to scalar or assignment handling).
+    fn side_component_deps(
+        &mut self,
+        value: &Value,
+        binding: Option<&LhsBinding>,
+        pair_dep: Option<&(DepList, DepList)>,
+    ) -> Option<Vec<DepList>> {
+        if let Some((dx, dy)) = pair_dep {
+            return Some(vec![dx.clone(), dy.clone()]);
+        }
+
+        // The parser clears the binding for anything but a bare (possibly
+        // negated) variable reference, so a Variable binding here means the
+        // whole side IS that variable.
+        if let Some(LhsBinding::Variable { id, negated }) = binding {
+            let n = value.ty().components()?;
+            let ids = self.state.variables.get(*id).component_ids()?;
+            if ids.len() == n {
+                let mut deps: Vec<DepList> =
+                    ids.iter().map(|c| self.numeric_dep_for_var(*c)).collect();
+                if *negated {
+                    for dep in &mut deps {
+                        dep_scale(dep, -1.0);
+                    }
+                }
+                return Some(deps);
+            }
+        }
+
+        value_components(value).map(|cs| cs.into_iter().map(const_dep).collect())
+    }
+
     /// Execute an equation: `lhs = rhs`.
     ///
+    /// Compound types (pair, color, transform) are solved component-wise.
     /// If the LHS has a bindable form (`x`, `-x`, internal quantity), treat the
     /// equation like assignment to that LHS. Otherwise check numeric consistency.
-    /// Full dependency-list equation solving is deferred.
     pub(super) fn do_equation(
         &mut self,
         lhs: &Value,
         rhs: &Value,
         lhs_binding: Option<LhsBinding>,
+        rhs_binding: Option<&LhsBinding>,
         lhs_deps: (Option<DepList>, Option<(DepList, DepList)>),
         rhs_deps: (Option<DepList>, Option<(DepList, DepList)>),
     ) -> InterpResult<()> {
         let (lhs_dep, lhs_pair_dep) = lhs_deps;
         let (rhs_dep, rhs_pair_dep) = rhs_deps;
 
-        if let (Some((lx, ly)), Some((rx, ry))) = (lhs_pair_dep, rhs_pair_dep) {
-            let eqx = self.reduce_dep_with_knowns(dep_add_scaled(&lx, &rx, -1.0));
-            self.apply_solve_result(
-                solve_equation(&eqx),
-                "Inconsistent pair equation residual (x)",
-            );
-
-            let eqy = self.reduce_dep_with_knowns(dep_add_scaled(&ly, &ry, -1.0));
-            self.apply_solve_result(
-                solve_equation(&eqy),
-                "Inconsistent pair equation residual (y)",
-            );
-            return Ok(());
+        // Component-wise solving for compound types. One equation per
+        // component, solved in storage order (x-then-y for pairs).
+        if lhs.ty().is_compound() || rhs.ty().is_compound() {
+            let lhs_comps =
+                self.side_component_deps(lhs, lhs_binding.as_ref(), lhs_pair_dep.as_ref());
+            let rhs_comps = self.side_component_deps(rhs, rhs_binding, rhs_pair_dep.as_ref());
+            if let (Some(lhs_comps), Some(rhs_comps)) = (lhs_comps, rhs_comps)
+                && lhs_comps.len() == rhs_comps.len()
+            {
+                let ty = if lhs.ty().is_compound() {
+                    lhs.ty()
+                } else {
+                    rhs.ty()
+                };
+                let kind = compound_kind(ty);
+                let labels = ty.component_suffixes();
+                for ((ld, rd), label) in lhs_comps.iter().zip(&rhs_comps).zip(labels) {
+                    let eq = self.reduce_dep_with_knowns(dep_add_scaled(ld, rd, -1.0));
+                    self.apply_solve_result(
+                        solve_equation(&eq),
+                        &format!("Inconsistent {kind} equation residual ({label})"),
+                    );
+                }
+                return Ok(());
+            }
         }
 
         if let (Some(ld), Some(rd)) = (lhs_dep.as_ref(), rhs_dep.as_ref()) {
@@ -220,46 +307,28 @@ impl Interpreter {
         }
     }
 
-    /// Assign a value to a variable, handling compound types (Pair, Color).
+    /// Assign a value to a variable.
+    ///
+    /// When both the variable and the value are compound of the same width
+    /// (pair, color, transform), each component variable is set to its known
+    /// component value; otherwise the value is stored on the variable itself.
     pub(super) fn assign_to_variable(&mut self, var_id: crate::equation::VarId, value: &Value) {
-        match value {
-            Value::Numeric(v) => {
+        if let Value::Numeric(v) = value {
+            self.state
+                .variables
+                .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
+        } else if let (Some(ids), Some(vals)) = (
+            self.state.variables.get(var_id).component_ids(),
+            value_components(value),
+        ) && ids.len() == vals.len()
+        {
+            for (id, v) in ids.into_iter().zip(vals) {
                 self.state
                     .variables
-                    .set(var_id, VarValue::NumericVar(NumericState::Known(*v)));
+                    .set(id, VarValue::NumericVar(NumericState::Known(v)));
             }
-            Value::Pair(x, y) => {
-                let var_val = self.state.variables.get(var_id).clone();
-                if let VarValue::Pair { x: xid, y: yid } = var_val {
-                    self.state
-                        .variables
-                        .set(xid, VarValue::NumericVar(NumericState::Known(*x)));
-                    self.state
-                        .variables
-                        .set(yid, VarValue::NumericVar(NumericState::Known(*y)));
-                } else {
-                    self.state.variables.set_known(var_id, value.clone());
-                }
-            }
-            Value::Color(c) => {
-                let var_val = self.state.variables.get(var_id).clone();
-                if let VarValue::Color { r, g, b } = var_val {
-                    self.state
-                        .variables
-                        .set(r, VarValue::NumericVar(NumericState::Known(c.r)));
-                    self.state
-                        .variables
-                        .set(g, VarValue::NumericVar(NumericState::Known(c.g)));
-                    self.state
-                        .variables
-                        .set(b, VarValue::NumericVar(NumericState::Known(c.b)));
-                } else {
-                    self.state.variables.set_known(var_id, value.clone());
-                }
-            }
-            _ => {
-                self.state.variables.set_known(var_id, value.clone());
-            }
+        } else {
+            self.state.variables.set_known(var_id, value.clone());
         }
 
         self.state

@@ -4,7 +4,7 @@
 //! across the crate: de Casteljau evaluation, splitting, derivative
 //! computation, and bounding boxes.
 
-use crate::types::{Point, Scalar, Vec2};
+use crate::types::{ARC_MAX_DEPTH, ARC_TOL, Point, Scalar, Vec2};
 
 /// Four control points of a cubic Bezier segment.
 #[derive(Debug, Clone, Copy)]
@@ -137,12 +137,6 @@ impl CubicSegment {
         left.arc_length()
     }
 }
-
-/// Tolerance for arc-length convergence (in bp).
-const ARC_TOL: Scalar = 0.001;
-
-/// Maximum recursion depth for arc-length subdivision.
-const ARC_MAX_DEPTH: u32 = 20;
 
 /// Estimate arc length by comparing chord and control-polygon lengths.
 ///

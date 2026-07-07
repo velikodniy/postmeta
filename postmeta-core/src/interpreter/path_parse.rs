@@ -13,6 +13,7 @@ use crate::types::Value;
 
 use super::Interpreter;
 use super::helpers::{value_to_pair, value_to_scalar};
+use crate::interpreter::EqualsMode;
 
 // ---------------------------------------------------------------------------
 // Path join pending state
@@ -372,7 +373,7 @@ impl Interpreter {
         } else {
             // {<expression>} — direction as pair, or numeric angle in degrees
             // (converted to internal radians).
-            let dir = self.scan_expression()?.exp;
+            let dir = self.scan_expression(EqualsMode::Relation)?.exp;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();
             } else {

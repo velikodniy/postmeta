@@ -21,7 +21,7 @@ pub fn build_document(
     let (vb_x, vb_y, vb_w, vb_h) = if bb.is_valid() {
         (
             bb.min_x - m,
-            -bb.max_y - m,
+            crate::util::flip_y(bb.max_y) - m,
             2.0f64.mul_add(m, bb.max_x - bb.min_x),
             2.0f64.mul_add(m, bb.max_y - bb.min_y),
         )

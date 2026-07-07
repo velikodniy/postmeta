@@ -6,9 +6,10 @@
 //! The algorithm recursively bisects both curves and checks bounding-box
 //! overlap, stopping when the sub-curves are small enough.
 
+use crate::bbox::BoundingBox;
 use crate::bezier::CubicSegment;
 use crate::path::BezierPath;
-use crate::types::{Point, Scalar, index_to_scalar};
+use crate::types::{INTERSECT_TOL, Point, Scalar, index_to_scalar};
 
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -86,11 +87,13 @@ pub fn all_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Int
 // Bounding box overlap
 // ---------------------------------------------------------------------------
 
-/// Axis-aligned bounding box overlap test.
+/// Axis-aligned bounding box overlap test on `(min, max)` corner pairs.
 ///
 /// Returns `true` when the two AABBs share any area (inclusive of edges).
-fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
-    a.0.x <= b.1.x && a.1.x >= b.0.x && a.0.y <= b.1.y && a.1.y >= b.0.y
+/// Delegates to [`BoundingBox::overlaps`] so the overlap semantics have a
+/// single source of truth.
+const fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
+    BoundingBox::from_corners(a.0, a.1).overlaps(&BoundingBox::from_corners(b.0, b.1))
 }
 
 // ---------------------------------------------------------------------------
@@ -107,9 +110,6 @@ const MAX_DEPTH: u32 = 20;
 /// `MetaPost` uses `max_patience = 5000` backtracks. We count all overlap
 /// tests as work units with a comparable budget.
 const MAX_WORK: u32 = 5000;
-
-/// Tolerance for convergence.
-const INTERSECT_TOL: Scalar = 1e-6;
 
 /// A time parameter interval `[lo, hi]` within a single cubic segment.
 #[derive(Clone, Copy)]

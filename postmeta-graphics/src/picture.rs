@@ -9,7 +9,7 @@
 //! - `clip <pic> to <path>` — clip to a region
 //! - `setbounds <pic> to <path>` — set an artificial bounding box
 
-use crate::path::BezierPath;
+use crate::path::SharedPath;
 use crate::types::{FillObject, GraphicsObject, StrokeObject};
 
 // ---------------------------------------------------------------------------
@@ -17,11 +17,16 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 // ---------------------------------------------------------------------------
 
 /// An ordered collection of graphical objects.
+///
+/// The fields are crate-private: external consumers build pictures through
+/// [`Picture::push`]/[`Picture::add_fill`]/[`Picture::add_stroke`]/
+/// [`Picture::clip`]/[`Picture::set_bounds`] and read them through the
+/// accessor methods, so the storage layout can evolve without breaking them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
-    pub objects: Vec<GraphicsObject>,
-    pub clip_path: Option<std::sync::Arc<BezierPath>>,
-    pub bounds_path: Option<std::sync::Arc<BezierPath>>,
+    pub(crate) objects: Vec<GraphicsObject>,
+    pub(crate) clip_path: Option<SharedPath>,
+    pub(crate) bounds_path: Option<SharedPath>,
 }
 
 impl Picture {
@@ -36,6 +41,47 @@ impl Picture {
 
     pub fn push(&mut self, obj: GraphicsObject) {
         self.objects.push(obj);
+    }
+
+    /// The objects in this picture, in paint order.
+    #[must_use]
+    pub fn objects(&self) -> &[GraphicsObject] {
+        &self.objects
+    }
+
+    /// Iterate over the objects in paint order.
+    pub fn iter(&self) -> std::slice::Iter<'_, GraphicsObject> {
+        self.objects.iter()
+    }
+
+    /// The first object, if any.
+    #[must_use]
+    pub fn first(&self) -> Option<&GraphicsObject> {
+        self.objects.first()
+    }
+
+    /// Number of objects in the picture.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.objects.len()
+    }
+
+    /// Whether the picture contains no objects.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// The clip path applied to this picture's objects, if any.
+    #[must_use]
+    pub const fn clip_path(&self) -> Option<&SharedPath> {
+        self.clip_path.as_ref()
+    }
+
+    /// The artificial bounding path set by `setbounds`, if any.
+    #[must_use]
+    pub const fn bounds_path(&self) -> Option<&SharedPath> {
+        self.bounds_path.as_ref()
     }
 
     /// Append all objects from another picture.
@@ -64,7 +110,8 @@ impl Picture {
     /// Clip the picture to a cyclic path.
     ///
     /// Wraps all existing objects in a nested picture with a `clip_path`.
-    pub fn clip(&mut self, clip_path: std::sync::Arc<BezierPath>) {
+    pub fn clip(&mut self, clip_path: impl Into<SharedPath>) {
+        let clip_path = clip_path.into();
         debug_assert!(clip_path.is_cyclic(), "clip requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
@@ -79,7 +126,8 @@ impl Picture {
     /// Set an artificial bounding box on the picture.
     ///
     /// Wraps all existing objects in a nested picture with a `bounds_path`.
-    pub fn set_bounds(&mut self, bounds_path: std::sync::Arc<BezierPath>) {
+    pub fn set_bounds(&mut self, bounds_path: impl Into<SharedPath>) {
+        let bounds_path = bounds_path.into();
         debug_assert!(bounds_path.is_cyclic(), "setbounds requires a cyclic path");
 
         let existing = std::mem::take(&mut self.objects);
@@ -89,6 +137,15 @@ impl Picture {
             bounds_path: Some(bounds_path),
         };
         self.push(GraphicsObject::Picture(nested));
+    }
+}
+
+impl<'a> IntoIterator for &'a Picture {
+    type Item = &'a GraphicsObject;
+    type IntoIter = std::slice::Iter<'a, GraphicsObject>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
     }
 }
 

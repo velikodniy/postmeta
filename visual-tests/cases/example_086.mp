@@ -1,0 +1,21 @@
+input plain;
+beginfig(86)
+  u:=1cm;
+  pair A,B,C,D,E;
+  A := (0,u);
+  B := A rotated 72;
+  C := B rotated 72;
+  D := C rotated 72;
+  E := D rotated 72;
+  transform T;
+  A transformed T = 1/5[A,B];
+  B transformed T = 1/5[B,C];
+  C transformed T = 1/5[C,D];
+  path p;
+  p := A--B--C--D--E--cycle;
+  draw p;
+  p := p transformed T; draw p;
+  p := p transformed T; draw p;
+  p := p transformed T; draw p;
+endfig;
+end;

@@ -63,6 +63,44 @@ pub enum VarValue {
 }
 
 impl VarValue {
+    /// Build a compound variable value of type `ty` from component ids in
+    /// storage order. Returns `None` if `ty` is not compound or the slice
+    /// length does not match [`Type::components`].
+    #[must_use]
+    pub fn compound(ty: Type, parts: &[VarId]) -> Option<Self> {
+        match (ty, parts) {
+            (Type::PairType, &[x, y]) => Some(Self::Pair { x, y }),
+            (Type::ColorType, &[r, g, b]) => Some(Self::Color { r, g, b }),
+            (Type::TransformType, &[tx, ty_, txx, txy, tyx, tyy]) => Some(Self::Transform {
+                tx,
+                ty: ty_,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Component variable ids in storage order, for compound values.
+    #[must_use]
+    pub fn component_ids(&self) -> Option<Vec<VarId>> {
+        match self {
+            Self::Pair { x, y } => Some(vec![*x, *y]),
+            Self::Color { r, g, b } => Some(vec![*r, *g, *b]),
+            Self::Transform {
+                tx,
+                ty,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            } => Some(vec![*tx, *ty, *txx, *txy, *tyx, *tyy]),
+            _ => None,
+        }
+    }
+
     /// Get the `MetaPost` type of this variable.
     #[must_use]
     pub const fn ty(&self) -> Type {
@@ -110,7 +148,7 @@ pub struct Variables {
     names_by_root: HashMap<String, HashSet<String>>,
     /// `SymbolId` → `VarId` fast lookup for root-only variables.
     ///
-    /// Indexed by `SymbolId::raw()`. Entries are `VarId(u32::MAX)` (sentinel)
+    /// Indexed by `SymbolId::raw()`. Entries are `VarId::new(u32::MAX)` (sentinel)
     /// when not cached. Only individual entries are invalidated (on save/restore
     /// and type declarations), so the cache stays warm across scopes for
     /// variables that are not re-bound.
@@ -159,7 +197,7 @@ impl Variables {
     /// Allocate a new variable slot and return its id.
     #[allow(clippy::cast_possible_truncation)]
     pub fn alloc(&mut self) -> VarId {
-        let id = VarId(self.values.len() as u32);
+        let id = VarId::new(self.values.len() as u32);
         self.values.push(VarValue::Undefined);
         id
     }
@@ -176,7 +214,7 @@ impl Variables {
     }
 
     /// Sentinel value for empty/invalid sym-cache slots.
-    pub const SYM_CACHE_EMPTY: VarId = VarId(u32::MAX);
+    pub const SYM_CACHE_EMPTY: VarId = VarId::new(u32::MAX);
 
     /// Fast O(1) variable lookup by `SymbolId` for root-only variables.
     ///
@@ -242,13 +280,13 @@ impl Variables {
         // Remove name→id mapping so next reference creates a fresh variable.
         // names_by_root is left untouched.
         let (name, id) = self.name_to_id.remove_entry(root)?;
-        let value = std::mem::replace(&mut self.values[id.0 as usize], VarValue::Undefined);
+        let value = std::mem::replace(&mut self.values[id.index()], VarValue::Undefined);
         Some((name, id, value))
     }
 
     /// Restore a root-only variable: put back both the value and the name→id mapping.
     pub fn restore_root_value(&mut self, root: String, id: VarId, value: VarValue) {
-        self.values[id.0 as usize] = value;
+        self.values[id.index()] = value;
         self.name_to_id.insert(root, id);
     }
 
@@ -390,7 +428,7 @@ impl Variables {
     /// Get a variable's value.
     #[must_use]
     pub fn get(&self, id: VarId) -> &VarValue {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx < self.values.len() {
             &self.values[idx]
         } else {
@@ -400,7 +438,7 @@ impl Variables {
 
     /// Set a variable's value, maintaining the reverse dependency index.
     pub fn set(&mut self, id: VarId, value: VarValue) {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx >= self.values.len() {
             return;
         }
@@ -437,7 +475,7 @@ impl Variables {
     /// The dependency index is maintained: any dependent references from the old
     /// value are removed.
     pub fn take(&mut self, id: VarId) -> VarValue {
-        let idx = id.0 as usize;
+        let idx = id.index();
         if idx >= self.values.len() {
             return VarValue::Undefined;
         }
@@ -559,7 +597,7 @@ impl Variables {
                 continue;
             }
             if let VarValue::NumericVar(NumericState::Dependent(existing)) =
-                &self.values[id.0 as usize]
+                &self.values[id.index()]
             {
                 let new_dep = dep_substitute(existing, pivot, dep);
                 if let Some(v) = constant_value(&new_dep) {
@@ -575,47 +613,30 @@ impl Variables {
         }
     }
 
+    /// Allocate a compound variable of type `ty` with its component
+    /// sub-parts (allocated first, in storage order).
+    ///
+    /// Returns `None` if `ty` is not a compound type.
+    pub fn alloc_compound(&mut self, ty: Type) -> Option<(VarId, Vec<VarId>)> {
+        let n = ty.components()?;
+        let parts: Vec<VarId> = (0..n).map(|_| self.alloc()).collect();
+        let compound = self.alloc();
+        let value = VarValue::compound(ty, &parts)?;
+        self.set(compound, value);
+        Some((compound, parts))
+    }
+
     /// Allocate a pair variable with two sub-parts.
     pub fn alloc_pair(&mut self) -> (VarId, VarId, VarId) {
-        let x = self.alloc();
-        let y = self.alloc();
-        let pair = self.alloc();
-        self.set(pair, VarValue::Pair { x, y });
-        (pair, x, y)
-    }
-
-    /// Allocate a color variable with three sub-parts.
-    pub fn alloc_color(&mut self) -> (VarId, VarId, VarId, VarId) {
-        let r = self.alloc();
-        let g = self.alloc();
-        let b = self.alloc();
-        let color = self.alloc();
-        self.set(color, VarValue::Color { r, g, b });
-        (color, r, g, b)
-    }
-
-    /// Allocate a transform variable with six sub-parts.
-    #[allow(clippy::similar_names)]
-    pub fn alloc_transform(&mut self) -> (VarId, VarId, VarId, VarId, VarId, VarId, VarId) {
-        let tx = self.alloc();
-        let ty = self.alloc();
-        let txx = self.alloc();
-        let txy = self.alloc();
-        let tyx = self.alloc();
-        let tyy = self.alloc();
-        let transform = self.alloc();
-        self.set(
-            transform,
-            VarValue::Transform {
-                tx,
-                ty,
-                txx,
-                txy,
-                tyx,
-                tyy,
-            },
-        );
-        (transform, tx, ty, txx, txy, tyx, tyy)
+        match self.alloc_compound(Type::PairType) {
+            Some((pair, parts)) if parts.len() == 2 => (pair, parts[0], parts[1]),
+            // Unreachable: PairType is compound with two components.
+            _ => (
+                Self::SYM_CACHE_EMPTY,
+                Self::SYM_CACHE_EMPTY,
+                Self::SYM_CACHE_EMPTY,
+            ),
+        }
     }
 
     /// Total number of allocated variables.
@@ -630,7 +651,7 @@ impl Variables {
         self.values
             .iter()
             .enumerate()
-            .map(|(i, v)| (VarId(i as u32), v))
+            .map(|(i, v)| (VarId::new(i as u32), v))
     }
 }
 
@@ -1079,9 +1100,9 @@ mod tests {
         use crate::equation::{DepTerm, const_dep};
 
         let mut vars = Variables::new();
-        let x = vars.alloc(); // VarId(0)
-        let y = vars.alloc(); // VarId(1)
-        let z = vars.alloc(); // VarId(2)
+        let x = vars.alloc(); // VarId::new(0)
+        let y = vars.alloc(); // VarId::new(1)
+        let z = vars.alloc(); // VarId::new(2)
 
         vars.make_independent(x);
         vars.make_independent(y);

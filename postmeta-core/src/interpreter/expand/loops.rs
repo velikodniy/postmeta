@@ -10,6 +10,7 @@ use crate::types::Value;
 use postmeta_graphics::types::Picture;
 
 use super::{ForeverLoopFrame, Interpreter};
+use crate::interpreter::EqualsMode;
 
 impl Interpreter {
     /// Handle `for`/`forsuffixes`/`forever` — scan the loop body, then replay.
@@ -142,7 +143,7 @@ impl Interpreter {
         // Skip `within` and evaluate the picture expression.
         self.get_next();
         self.expand_current();
-        let pic = if let Ok(result) = self.scan_expression() {
+        let pic = if let Ok(result) = self.scan_expression(EqualsMode::Relation) {
             if let Value::Picture(p) = result.exp {
                 p
             } else {
@@ -304,20 +305,22 @@ impl Interpreter {
             if self.cur.command == Command::Colon || self.cur.command == Command::Stop {
                 break;
             }
-            if let Ok(first_result) = self.scan_expression() {
+            if let Ok(first_result) = self.scan_expression(EqualsMode::Relation) {
                 let first_val = first_result.exp;
 
                 // Check for `step <step> until <end>` after the first value
                 if self.cur.command == Command::StepToken {
                     if let Ok(start) = helpers::value_to_scalar(&first_val) {
                         self.get_x_next();
-                        if let Ok(step_result) = self.scan_expression() {
+                        if let Ok(step_result) = self.scan_expression(EqualsMode::Relation) {
                             let step_val = step_result.exp;
                             if let Ok(step) = helpers::value_to_scalar(&step_val) {
                                 // Expect `until`
                                 if self.cur.command == Command::UntilToken {
                                     self.get_x_next();
-                                    if let Ok(end_result) = self.scan_expression() {
+                                    if let Ok(end_result) =
+                                        self.scan_expression(EqualsMode::Relation)
+                                    {
                                         let end_val = end_result.exp;
                                         if let Ok(end) = helpers::value_to_scalar(&end_val) {
                                             // Generate the range
@@ -534,8 +537,7 @@ impl Interpreter {
     /// The caller (`expand_current` loop) calls `get_next()` afterwards.
     pub(super) fn expand_exitif(&mut self) {
         self.get_x_next(); // skip `exitif`
-        self.lhs_tracking.equals_means_equation = false;
-        let should_exit = match self.scan_expression() {
+        let should_exit = match self.scan_expression(EqualsMode::Relation) {
             Ok(result) => match result.exp {
                 Value::Boolean(b) => b,
                 Value::Numeric(v) => v != 0.0,
@@ -575,11 +577,11 @@ impl Interpreter {
 /// (including all nested content) become one picture each.
 fn split_picture_components(pic: &Picture) -> Vec<Picture> {
     let mut result = Vec::new();
-    let objects = &pic.objects;
+    let objects = pic.objects();
 
     for obj in objects {
         let mut comp = Picture::new();
-        comp.objects.push(obj.clone());
+        comp.push(obj.clone());
         result.push(comp);
     }
 

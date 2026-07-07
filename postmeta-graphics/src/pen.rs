@@ -55,8 +55,12 @@ impl Pen {
     /// outward normal aligns with `dir`. For a polygonal pen, it is the
     /// vertex with the maximum dot product. Used for computing stroked
     /// path envelopes.
+    ///
+    /// Returns `None` for degenerate pens: a singular elliptical transform
+    /// (e.g. the null pen), a direction annihilated by the transform, or a
+    /// polygonal pen with no vertices.
     #[must_use]
-    pub fn offset(&self, dir: Vec2) -> Point {
+    pub fn offset(&self, dir: Vec2) -> Option<Point> {
         match self {
             Self::Elliptical(t) => {
                 // For an elliptical pen: find the point on the transformed circle
@@ -68,34 +72,30 @@ impl Pen {
                 // shape.
                 let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
                 if det.abs() < NEAR_ZERO {
-                    return Point::ZERO;
+                    return None;
                 }
                 // Inverse transpose of the 2x2 part
                 let inv_t_x = t.tyy.mul_add(dir.x, -(t.tyx * dir.y)) / det;
                 let inv_t_y = (-t.txy).mul_add(dir.x, t.txx * dir.y) / det;
                 let len = inv_t_x.hypot(inv_t_y);
                 if len < NEAR_ZERO {
-                    return Point::ZERO;
+                    return None;
                 }
                 let unit_x = inv_t_x / len;
                 let unit_y = inv_t_y / len;
                 // Apply only the linear part (no translation)
-                Point::new(
+                Some(Point::new(
                     t.txx.mul_add(unit_x, t.txy * unit_y),
                     t.tyx.mul_add(unit_x, t.tyy * unit_y),
-                )
+                ))
             }
             Self::Polygonal(vertices) => {
                 // Find the vertex with the maximum dot product with dir
-                vertices
-                    .iter()
-                    .copied()
-                    .max_by(|a, b| {
-                        let da = dir.dot(Vec2::from(*a));
-                        let db = dir.dot(Vec2::from(*b));
-                        da.total_cmp(&db)
-                    })
-                    .unwrap_or(Point::ZERO)
+                vertices.iter().copied().max_by(|a, b| {
+                    let da = dir.dot(Vec2::from(*a));
+                    let db = dir.dot(Vec2::from(*b));
+                    da.total_cmp(&db)
+                })
             }
         }
     }
@@ -238,6 +238,18 @@ mod tests {
     }
 
     #[test]
+    fn degenerate_pens_have_no_support_point() {
+        // Null pen: singular transform.
+        assert!(Pen::null().offset(Vec2::new(1.0, 0.0)).is_none());
+        // Polygonal pen with no vertices.
+        assert!(
+            Pen::Polygonal(Vec::new())
+                .offset(Vec2::new(1.0, 0.0))
+                .is_none()
+        );
+    }
+
+    #[test]
     fn pen_circle() {
         let p = Pen::circle(2.0);
         match p {
@@ -370,7 +382,7 @@ mod tests {
     #[test]
     fn pen_offset_circle_right() {
         let pen = Pen::circle(2.0); // radius 1
-        let offset = pen.offset(Vec2::new(1.0, 0.0));
+        let offset = pen.offset(Vec2::new(1.0, 0.0)).expect("support point");
         assert!((offset.x - 1.0).abs() < 0.01, "offset.x = {}", offset.x);
         assert!(offset.y.abs() < 0.01, "offset.y = {}", offset.y);
     }
@@ -378,7 +390,7 @@ mod tests {
     #[test]
     fn pen_offset_circle_up() {
         let pen = Pen::circle(2.0); // radius 1
-        let offset = pen.offset(Vec2::new(0.0, 1.0));
+        let offset = pen.offset(Vec2::new(0.0, 1.0)).expect("support point");
         assert!(offset.x.abs() < 0.01, "offset.x = {}", offset.x);
         assert!((offset.y - 1.0).abs() < 0.01, "offset.y = {}", offset.y);
     }
@@ -390,7 +402,7 @@ mod tests {
             Point::new(1.0, 0.0),
             Point::new(0.0, 1.0),
         ]);
-        let offset = pen.offset(Vec2::new(1.0, 0.0));
+        let offset = pen.offset(Vec2::new(1.0, 0.0)).expect("support point");
         assert!((offset.x - 1.0).abs() < EPSILON);
     }
 
@@ -398,7 +410,7 @@ mod tests {
     fn pen_offset_diagonal() {
         let pen = Pen::circle(2.0); // radius 1
         let dir = Vec2::new(1.0, 1.0);
-        let offset = pen.offset(dir);
+        let offset = pen.offset(dir).expect("support point");
         // Should be at ~(1/sqrt(2), 1/sqrt(2))
         let expected = 1.0 / 2.0_f64.sqrt();
         assert!(
