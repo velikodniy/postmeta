@@ -280,3 +280,22 @@ fn special_statement_is_accepted_as_noop() {
 
     interp.assert_no_errors();
 }
+
+#[test]
+fn reported_errors_carry_source_spans() {
+    let mut interp = TestInterp::new();
+    interp.run("show 1 / 0;");
+    let errors = interp.errors();
+    assert!(!errors.is_empty(), "expected a division-by-zero error");
+    let err = errors[0];
+    let span = err.span.expect("error should carry a span");
+    assert!(
+        span.end > span.start,
+        "span should be non-degenerate: {span:?}"
+    );
+    // The span must point inside the source text.
+    assert!(
+        span.end <= "show 1 / 0;".len(),
+        "span out of range: {span:?}"
+    );
+}

@@ -157,6 +157,10 @@ pub struct Interpreter {
     lhs_tracking: LhsTracking,
     /// Conditional and loop control state (if-stack, loop exit flag, pending body).
     control_flow: ControlFlow,
+    /// Span of the first token of the statement being executed, for
+    /// diagnostics. Degenerate (zero-length) for tokens produced by macro
+    /// expansion.
+    statement_span: crate::token::Span,
 }
 
 impl Interpreter {
@@ -214,6 +218,7 @@ impl Interpreter {
             cur,
             lhs_tracking: LhsTracking::new(),
             control_flow: ControlFlow::new(),
+            statement_span: crate::token::Span::at(0),
         }
     }
 
@@ -641,7 +646,23 @@ impl Interpreter {
     /// Record a non-fatal error.
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
         let msg = message.into();
-        self.state.errors.push(InterpreterError::new(kind, msg));
+        let mut err = InterpreterError::new(kind, msg);
+        if let Some(span) = self.best_error_span() {
+            err = err.with_span(span);
+        }
+        self.state.errors.push(err);
+    }
+
+    /// The most specific non-degenerate source span for a diagnostic:
+    /// the current token's span, falling back to the statement's start.
+    /// `None` when both are degenerate (e.g. deep inside macro expansion).
+    fn best_error_span(&self) -> Option<crate::token::Span> {
+        let cur = self.cur.token.span;
+        if cur.end > cur.start {
+            return Some(cur);
+        }
+        let stmt = self.statement_span;
+        (stmt.end > stmt.start).then_some(stmt)
     }
 
     /// Record an informational diagnostic.
@@ -666,7 +687,14 @@ impl Interpreter {
         self.get_x_next();
 
         while self.cur.command != Command::Stop {
-            self.do_statement()?;
+            self.statement_span = self.cur.token.span;
+            if let Err(err) = self.do_statement() {
+                let err = match (err.span, self.best_error_span()) {
+                    (None, Some(span)) => err.with_span(span),
+                    _ => err,
+                };
+                return Err(err);
+            }
         }
 
         Ok(())
