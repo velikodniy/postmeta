@@ -62,3 +62,32 @@ fn eval_input_with_filesystem() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn recursive_input_terminates_with_error() {
+    use crate::filesystem::FileSystem;
+
+    struct CycleFs;
+    impl FileSystem for CycleFs {
+        fn read_file(&self, name: &str) -> Option<String> {
+            match name {
+                "a" | "a.mp" => Some("input b;".to_owned()),
+                "b" | "b.mp" => Some("input a;".to_owned()),
+                _ => None,
+            }
+        }
+    }
+
+    let mut interp = TestInterp::new();
+    interp.interp.set_filesystem(Box::new(CycleFs));
+    interp.run("input a;");
+    assert!(
+        interp
+            .interp
+            .state
+            .errors
+            .iter()
+            .any(|e| e.message.contains("nesting exceeds")),
+        "expected input-depth error"
+    );
+}

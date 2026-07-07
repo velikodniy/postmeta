@@ -147,6 +147,18 @@ impl InputSystem {
     }
 
     /// Push a source text as a new input level.
+    /// Number of source (scanner) levels currently on the input stack.
+    ///
+    /// Used to bound `input`/`scantokens` nesting so that recursive file
+    /// inclusion terminates with an error instead of unbounded growth.
+    #[must_use]
+    pub fn source_depth(&self) -> usize {
+        self.levels
+            .iter()
+            .filter(|l| matches!(l, InputLevel::Source { .. }))
+            .count()
+    }
+
     pub fn push_source(&mut self, source: &str) {
         let scanner = Scanner::new(source);
         self.levels.push(InputLevel::Source { scanner });

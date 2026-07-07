@@ -1,6 +1,12 @@
 use crate::command::Command;
 use crate::error::ErrorKind;
 use crate::input::TokenList;
+
+/// Maximum nesting depth of source input levels (`input` files and
+/// `scantokens` strings). Recursive inclusion (`a.mp` inputting `b.mp`
+/// inputting `a.mp`) hits this bound and reports an error instead of
+/// growing the input stack forever.
+const MAX_INPUT_DEPTH: usize = 64;
 use crate::interpreter::ExprResultValue;
 use crate::interpreter::operators::compute_text_metrics;
 use crate::types::Value;
@@ -36,7 +42,17 @@ impl Interpreter {
 
         match contents {
             Some(source) => {
-                self.state.input.push_source(&source);
+                if self.state.input.source_depth() >= MAX_INPUT_DEPTH {
+                    self.report_error(
+                        ErrorKind::Internal,
+                        format!(
+                            "input nesting exceeds {MAX_INPUT_DEPTH} levels \
+                             (recursive input of `{filename}`?)"
+                        ),
+                    );
+                } else {
+                    self.state.input.push_source(&source);
+                }
             }
             None => {
                 self.report_error(ErrorKind::Internal, format!("File not found: {filename}"));
@@ -171,7 +187,14 @@ impl Interpreter {
                 }
 
                 if !source.is_empty() {
-                    self.state.input.push_source(&source);
+                    if self.state.input.source_depth() >= MAX_INPUT_DEPTH {
+                        self.report_error(
+                            ErrorKind::Internal,
+                            format!("scantokens nesting exceeds {MAX_INPUT_DEPTH} levels"),
+                        );
+                    } else {
+                        self.state.input.push_source(&source);
+                    }
                 }
             } else {
                 self.report_error(ErrorKind::TypeError, "scantokens requires a string");
