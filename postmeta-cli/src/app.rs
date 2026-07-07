@@ -159,3 +159,49 @@ fn write_svg(output_dir: &str, filename: &str, content: &str) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use clap::Parser;
+
+    use super::run;
+    use crate::args::Cli;
+
+    #[test]
+    fn run_renders_trivial_source_to_svg() {
+        let ts = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let dir =
+            std::env::temp_dir().join(format!("postmeta_app_run_{}_{ts}", std::process::id()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+
+        let source_path = dir.join("smoke.mp");
+        fs::write(
+            &source_path,
+            "delimiters (); addto currentpicture doublepath (0,0)..(10,10);",
+        )
+        .expect("write source file");
+
+        let cli = Cli::parse_from([
+            "postmeta",
+            source_path.to_str().expect("utf-8 path"),
+            "--output",
+            dir.to_str().expect("utf-8 path"),
+        ]);
+
+        let code = run(&cli);
+        assert_eq!(code, 0, "expected successful exit code");
+
+        let svg_path = dir.join("smoke.svg");
+        let svg = fs::read_to_string(&svg_path).expect("read svg output");
+        assert!(svg.contains("<svg"), "expected svg root element");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
