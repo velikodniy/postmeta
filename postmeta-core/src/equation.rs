@@ -4,6 +4,15 @@
 //! and the system solves for `x = 3, y = 2`. This module implements the
 //! dependency-list-based equation solver from `mp.web` §24.
 //!
+//! # Module split
+//!
+//! This module is PURE dependency-list algebra: nothing here touches
+//! interpreter state — every function takes and returns [`DepList`]s.
+//! The stateful side (reducing deps against the variable store, splitting
+//! compound equations into components, applying solutions, reporting
+//! inconsistencies) lives in `interpreter::equation`, which is this
+//! module's only production client.
+//!
 //! # Value lifecycle
 //!
 //! Numeric variables progress through states:

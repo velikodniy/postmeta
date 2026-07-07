@@ -1,7 +1,16 @@
-//! Equation and assignment logic.
+//! Equation and assignment logic — the stateful side of equation solving.
 //!
 //! Handles `lhs = rhs` equations (including unknown-variable assignment)
-//! and `:=` explicit assignments.
+//! and `:=` explicit assignments. Compound types (pair, color, transform)
+//! are split into one equation per component, driven by
+//! [`Type::components`](crate::types::Type::components).
+//!
+//! # Module split
+//!
+//! The pure dependency-list algebra lives in [`crate::equation`]; this
+//! module is its interpreter-facing client. `reduce_dep_with_knowns`
+//! stays here (not in the algebra module) because substitution reads the
+//! variable store to discover which variables became known or dependent.
 
 use crate::equation::{
     DepList, SolveResult, const_dep, dep_add_scaled, dep_scale, dep_substitute, solve_equation,
