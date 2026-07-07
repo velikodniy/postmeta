@@ -63,6 +63,44 @@ pub enum VarValue {
 }
 
 impl VarValue {
+    /// Build a compound variable value of type `ty` from component ids in
+    /// storage order. Returns `None` if `ty` is not compound or the slice
+    /// length does not match [`Type::components`].
+    #[must_use]
+    pub fn compound(ty: Type, parts: &[VarId]) -> Option<Self> {
+        match (ty, parts) {
+            (Type::PairType, &[x, y]) => Some(Self::Pair { x, y }),
+            (Type::ColorType, &[r, g, b]) => Some(Self::Color { r, g, b }),
+            (Type::TransformType, &[tx, ty_, txx, txy, tyx, tyy]) => Some(Self::Transform {
+                tx,
+                ty: ty_,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            }),
+            _ => None,
+        }
+    }
+
+    /// Component variable ids in storage order, for compound values.
+    #[must_use]
+    pub fn component_ids(&self) -> Option<Vec<VarId>> {
+        match self {
+            Self::Pair { x, y } => Some(vec![*x, *y]),
+            Self::Color { r, g, b } => Some(vec![*r, *g, *b]),
+            Self::Transform {
+                tx,
+                ty,
+                txx,
+                txy,
+                tyx,
+                tyy,
+            } => Some(vec![*tx, *ty, *txx, *txy, *tyx, *tyy]),
+            _ => None,
+        }
+    }
+
     /// Get the `MetaPost` type of this variable.
     #[must_use]
     pub const fn ty(&self) -> Type {
@@ -575,47 +613,30 @@ impl Variables {
         }
     }
 
+    /// Allocate a compound variable of type `ty` with its component
+    /// sub-parts (allocated first, in storage order).
+    ///
+    /// Returns `None` if `ty` is not a compound type.
+    pub fn alloc_compound(&mut self, ty: Type) -> Option<(VarId, Vec<VarId>)> {
+        let n = ty.components()?;
+        let parts: Vec<VarId> = (0..n).map(|_| self.alloc()).collect();
+        let compound = self.alloc();
+        let value = VarValue::compound(ty, &parts)?;
+        self.set(compound, value);
+        Some((compound, parts))
+    }
+
     /// Allocate a pair variable with two sub-parts.
     pub fn alloc_pair(&mut self) -> (VarId, VarId, VarId) {
-        let x = self.alloc();
-        let y = self.alloc();
-        let pair = self.alloc();
-        self.set(pair, VarValue::Pair { x, y });
-        (pair, x, y)
-    }
-
-    /// Allocate a color variable with three sub-parts.
-    pub fn alloc_color(&mut self) -> (VarId, VarId, VarId, VarId) {
-        let r = self.alloc();
-        let g = self.alloc();
-        let b = self.alloc();
-        let color = self.alloc();
-        self.set(color, VarValue::Color { r, g, b });
-        (color, r, g, b)
-    }
-
-    /// Allocate a transform variable with six sub-parts.
-    #[allow(clippy::similar_names)]
-    pub fn alloc_transform(&mut self) -> (VarId, VarId, VarId, VarId, VarId, VarId, VarId) {
-        let tx = self.alloc();
-        let ty = self.alloc();
-        let txx = self.alloc();
-        let txy = self.alloc();
-        let tyx = self.alloc();
-        let tyy = self.alloc();
-        let transform = self.alloc();
-        self.set(
-            transform,
-            VarValue::Transform {
-                tx,
-                ty,
-                txx,
-                txy,
-                tyx,
-                tyy,
-            },
-        );
-        (transform, tx, ty, txx, txy, tyx, tyy)
+        match self.alloc_compound(Type::PairType) {
+            Some((pair, parts)) if parts.len() == 2 => (pair, parts[0], parts[1]),
+            // Unreachable: PairType is compound with two components.
+            _ => (
+                Self::SYM_CACHE_EMPTY,
+                Self::SYM_CACHE_EMPTY,
+                Self::SYM_CACHE_EMPTY,
+            ),
+        }
     }
 
     /// Total number of allocated variables.

@@ -347,77 +347,27 @@ impl Interpreter {
         self.cur.sym.map(|id| self.state.symbols.name(id))
     }
 
-    fn alloc_pair_value(&mut self, name: &str) -> VarValue {
-        let x = self.state.variables.alloc();
-        let y = self.state.variables.alloc();
-        self.state
-            .variables
-            .set(x, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(y, VarValue::NumericVar(NumericState::Numeric));
-        self.state.variables.register_name(&format!("{name}.x"), x);
-        self.state.variables.register_name(&format!("{name}.y"), y);
-        VarValue::Pair { x, y }
-    }
-
-    fn alloc_color_value(&mut self, name: &str) -> VarValue {
-        let r = self.state.variables.alloc();
-        let g = self.state.variables.alloc();
-        let b = self.state.variables.alloc();
-        self.state
-            .variables
-            .set(r, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(g, VarValue::NumericVar(NumericState::Numeric));
-        self.state
-            .variables
-            .set(b, VarValue::NumericVar(NumericState::Numeric));
-        self.state.variables.register_name(&format!("{name}.r"), r);
-        self.state.variables.register_name(&format!("{name}.g"), g);
-        self.state.variables.register_name(&format!("{name}.b"), b);
-        VarValue::Color { r, g, b }
-    }
-
-    fn alloc_transform_value(&mut self, name: &str) -> VarValue {
-        let tx = self.state.variables.alloc();
-        let ty = self.state.variables.alloc();
-        let txx = self.state.variables.alloc();
-        let txy = self.state.variables.alloc();
-        let tyx = self.state.variables.alloc();
-        let tyy = self.state.variables.alloc();
-        for id in [tx, ty, txx, txy, tyx, tyy] {
+    /// Allocate the component variables of a compound type and register
+    /// their suffixed names (`p.x`, `c.r`, `T.txx`, ...).
+    ///
+    /// Returns `None` if `ty` is not a compound type.
+    fn alloc_compound_value(&mut self, name: &str, ty: Type) -> Option<VarValue> {
+        let suffixes = ty.component_suffixes();
+        if suffixes.is_empty() {
+            return None;
+        }
+        let mut parts = Vec::with_capacity(suffixes.len());
+        for suffix in suffixes {
+            let id = self.state.variables.alloc();
             self.state
                 .variables
                 .set(id, VarValue::NumericVar(NumericState::Numeric));
+            self.state
+                .variables
+                .register_name(&format!("{name}.{suffix}"), id);
+            parts.push(id);
         }
-        self.state
-            .variables
-            .register_name(&format!("{name}.tx"), tx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.ty"), ty);
-        self.state
-            .variables
-            .register_name(&format!("{name}.txx"), txx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.txy"), txy);
-        self.state
-            .variables
-            .register_name(&format!("{name}.tyx"), tyx);
-        self.state
-            .variables
-            .register_name(&format!("{name}.tyy"), tyy);
-        VarValue::Transform {
-            tx,
-            ty,
-            txx,
-            txy,
-            tyx,
-            tyy,
-        }
+        VarValue::compound(ty, &parts)
     }
 
     fn default_var_value_for_type(&mut self, ty: Type, name: &str) -> Option<VarValue> {
@@ -430,9 +380,7 @@ impl Interpreter {
             ))),
             Type::Pen => Some(VarValue::Known(Value::Pen(Pen::circle(0.0)))),
             Type::Picture => Some(VarValue::Known(Value::Picture(Picture::default()))),
-            Type::PairType => Some(self.alloc_pair_value(name)),
-            Type::ColorType => Some(self.alloc_color_value(name)),
-            Type::TransformType => Some(self.alloc_transform_value(name)),
+            ty if ty.is_compound() => self.alloc_compound_value(name, ty),
             _ => None,
         }
     }
