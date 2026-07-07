@@ -237,9 +237,9 @@ impl Interpreter {
 }
 
 /// Evaluate a corner operator (`llcorner`, `lrcorner`, `ulcorner`, `urcorner`).
-pub(super) fn corner(op: UnaryOp, input: &Value) -> InterpResult<(Value, Type)> {
+pub(super) fn corner(op: UnaryOp, input: &Value, corners: Corners) -> InterpResult<(Value, Type)> {
     let bb = match input {
-        Value::Picture(pic) => BoundingBox::of_picture(pic, Corners::HonorSetBounds),
+        Value::Picture(pic) => BoundingBox::of_picture(pic, corners),
         Value::Path(p) => BoundingBox::of_path(p),
         Value::Pen(p) => {
             let mut bb = BoundingBox::EMPTY;

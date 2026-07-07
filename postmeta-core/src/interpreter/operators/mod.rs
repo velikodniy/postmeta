@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use postmeta_fonts::FontProvider;
+use postmeta_graphics::bbox::Corners;
 use postmeta_graphics::math;
 use postmeta_graphics::types::{Pen, Picture, Transform};
 
@@ -124,7 +125,19 @@ impl Interpreter {
         // Access both fields through `self.state` so the borrow checker can
         // see they are disjoint (Deref would borrow all of `self`).
         let fonts = self.state.font_provider.as_deref();
-        let (val, ty) = Self::eval_unary(op, input, &mut self.state.random_seed, fonts)?;
+        // mp.web: `truecorners > 0` makes corner operators ignore
+        // setbounds regions and measure the actual contents.
+        let corners = if self
+            .state
+            .internals
+            .get(crate::internals::InternalId::TrueCorners as u16)
+            > 0.0
+        {
+            Corners::True
+        } else {
+            Corners::HonorSetBounds
+        };
+        let (val, ty) = Self::eval_unary(op, input, &mut self.state.random_seed, fonts, corners)?;
         // Synthesize const_dep for known numeric results so that dependency
         // tracking is preserved through subsequent arithmetic (e.g.,
         // `alpha = angle(A) - angle(B)` where both angle calls return known
@@ -152,6 +165,7 @@ impl Interpreter {
         input: &Value,
         random_seed: &mut u64,
         fonts: Option<&dyn FontProvider>,
+        corners: Corners,
     ) -> InterpResult<(Value, Type)> {
         match op {
             UnaryOp::Not => {
@@ -193,7 +207,7 @@ impl Interpreter {
                 Ok((Value::Numeric(0.0), Type::Known))
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
-                pictures::corner(op, input)
+                pictures::corner(op, input, corners)
             }
             // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
             UnaryOp::CharExists => {
@@ -341,9 +355,14 @@ mod tests {
     #[test]
     fn unary_char_from_numeric_code() {
         let mut seed = 0_u64;
-        let (val, ty) =
-            Interpreter::eval_unary(UnaryOp::Char, &Value::Numeric(34.0), &mut seed, None)
-                .expect("char should evaluate");
+        let (val, ty) = Interpreter::eval_unary(
+            UnaryOp::Char,
+            &Value::Numeric(34.0),
+            &mut seed,
+            None,
+            Corners::HonorSetBounds,
+        )
+        .expect("char should evaluate");
         assert_eq!(ty, Type::String);
         assert_eq!(val, Value::String(Arc::from("\"")));
     }
