@@ -86,6 +86,37 @@ impl Type {
         matches!(self, Self::PairType | Self::ColorType | Self::TransformType)
     }
 
+    /// Number of numeric components of a compound type.
+    ///
+    /// Pairs have 2, colors 3, transforms 6; every other type is atomic and
+    /// returns `None`. Compound allocation, equation splitting, and
+    /// assignment are all driven by this count, so a future compound type
+    /// (e.g. `cmykcolor`) only needs an entry here and in
+    /// [`Self::component_suffixes`].
+    #[must_use]
+    pub const fn components(self) -> Option<usize> {
+        match self {
+            Self::PairType => Some(2),
+            Self::ColorType => Some(3),
+            Self::TransformType => Some(6),
+            _ => None,
+        }
+    }
+
+    /// Variable-name suffixes of the components, in storage order.
+    ///
+    /// These are the `.x`/`.y`-style suffixes used to register component
+    /// variables (e.g. `p.x`, `c.r`, `T.txx`). Empty for atomic types.
+    #[must_use]
+    pub const fn component_suffixes(self) -> &'static [&'static str] {
+        match self {
+            Self::PairType => &["x", "y"],
+            Self::ColorType => &["r", "g", "b"],
+            Self::TransformType => &["tx", "ty", "txx", "txy", "tyx", "tyy"],
+            _ => &[],
+        }
+    }
+
     /// Whether this is an unknown (ring) type.
     #[must_use]
     pub const fn is_unknown(self) -> bool {
@@ -390,6 +421,34 @@ mod tests {
         assert!(Type::Known.is_numeric());
         assert!(Type::Dependent.is_numeric());
         assert!(Type::Independent.is_numeric());
+    }
+
+    #[test]
+    fn component_counts_match_suffix_lists() {
+        for ty in [
+            Type::Undefined,
+            Type::Boolean,
+            Type::String,
+            Type::Path,
+            Type::Picture,
+            Type::PairType,
+            Type::ColorType,
+            Type::TransformType,
+            Type::Numeric,
+            Type::Known,
+        ] {
+            let n = ty.components();
+            assert_eq!(
+                n.unwrap_or(0),
+                ty.component_suffixes().len(),
+                "count/suffixes mismatch for {ty:?}"
+            );
+            assert_eq!(
+                n.is_some(),
+                ty.is_compound(),
+                "compound mismatch for {ty:?}"
+            );
+        }
     }
 
     #[test]
