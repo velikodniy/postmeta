@@ -1,5 +1,12 @@
 {
   "nodeModulesDir": "auto",
+  "deploy": {
+    "org": "vlcdn",
+    "app": "postmeta",
+    "exclude": [
+      "!dist"
+    ]
+  },
   "tasks": {
     "wasm": "deno run -A scripts/build_wasm.ts",
     "build": "deno run -A scripts/build.ts",
