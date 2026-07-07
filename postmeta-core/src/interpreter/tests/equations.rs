@@ -546,3 +546,91 @@ fn for_loop_numeric_equation() {
     assert!(infos[1].contains("7"), "second iteration: {}", infos[1]);
     assert!(infos[2].contains("11"), "third iteration: {}", infos[2]);
 }
+
+// ---------------------------------------------------------------------------
+// Compound-type pins (pair/color/transform behavior guarded before the
+// component-generic equation refactor)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn color_assignment_sets_components() {
+    let mut interp = TestInterp::new();
+    interp.run("color c; c := (0.1, 0.2, 0.3); show c;");
+    interp.assert_no_errors();
+    assert!(
+        interp.first_show().contains("(0.1,0.2,0.3)"),
+        "got: {}",
+        interp.first_show()
+    );
+}
+
+#[test]
+fn color_equation_with_known_rhs_assigns_components() {
+    let mut interp = TestInterp::new();
+    interp.run("color c; c = (0.5, 0.25, 1); show c;");
+    interp.assert_no_errors();
+    assert!(
+        interp.first_show().contains("(0.5,0.25,1)"),
+        "got: {}",
+        interp.first_show()
+    );
+}
+
+#[test]
+fn transform_componentwise_equations_solve() {
+    let mut interp = TestInterp::new();
+    interp.run(
+        "transform T; xpart T = 1; ypart T = 2; xxpart T = 1; \
+         xypart T = 0; yxpart T = 0; yypart T = 1; \
+         show xpart T; show yypart T;",
+    );
+    interp.assert_no_errors();
+    let shows = interp.shows();
+    assert!(shows[0].contains('1'), "xpart: {}", shows[0]);
+    assert!(shows[1].contains('1'), "yypart: {}", shows[1]);
+}
+
+#[test]
+fn transform_equation_with_known_rhs_solves() {
+    let mut interp = TestInterp::with_plain_mp();
+    interp
+        .run("input plain; transform T; T = identity shifted (1, 2); show xpart T; show yxpart T;");
+    interp.assert_no_errors();
+    // First show is plain.mp's preload banner; take the last two.
+    let shows = interp.shows();
+    let [xpart, yxpart] = shows[shows.len() - 2..] else {
+        panic!("expected two shows, got {shows:?}");
+    };
+    assert!(xpart.contains('1'), "xpart: {xpart}");
+    assert!(yxpart.contains('0'), "yxpart: {yxpart}");
+}
+
+#[test]
+fn pair_inconsistent_equation_reports_residual_per_component() {
+    let mut interp = TestInterp::new();
+    interp.run("pair p; p = (1,2); p = (3,4); show p;");
+    let errors = interp.errors();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("Inconsistent") && e.message.contains("(x)")),
+        "missing x-component inconsistency: {errors:?}"
+    );
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.message.contains("Inconsistent") && e.message.contains("(y)")),
+        "missing y-component inconsistency: {errors:?}"
+    );
+    // First value wins; the second equation is rejected.
+    assert!(interp.first_show().contains("(1,2)"));
+}
+
+#[test]
+fn equation_chain_equates_all_lhs_to_final_rhs() {
+    let mut interp = TestInterp::new();
+    interp.run("numeric a, b; a = b = 3; show a; show b;");
+    interp.assert_no_errors();
+    assert!(interp.shows()[0].contains('3'));
+    assert!(interp.shows()[1].contains('3'));
+}
