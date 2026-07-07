@@ -29,4 +29,4 @@ jobs:
         working-directory: web/dist
         env:
           DENO_DEPLOY_TOKEN: ${{ secrets.DENO_DEPLOY_TOKEN }}
-        run: deno deploy --org vlcdn --app postmeta --prod --no-wait .
+        run: deno deploy --org vlcdn --app postmeta --prod .
