@@ -99,6 +99,7 @@ impl Interpreter {
                         cur_result = self.scan_expression(EqualsMode::Equation)?;
                     }
 
+                    let rhs_binding = self.lhs_tracking.last_lhs_binding.clone();
                     let rhs_clone = cur_result.exp;
                     let rhs_dep = cur_result.dep;
                     let rhs_pair_dep = cur_result.pair_dep;
@@ -107,6 +108,7 @@ impl Interpreter {
                             lhs,
                             &rhs_clone,
                             lhs_binding.clone(),
+                            rhs_binding.as_ref(),
                             (lhs_dep.clone(), lhs_pair_dep.clone()),
                             (rhs_dep.clone(), rhs_pair_dep.clone()),
                         )?;

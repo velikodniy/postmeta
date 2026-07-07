@@ -634,3 +634,48 @@ fn equation_chain_equates_all_lhs_to_final_rhs() {
     assert!(interp.shows()[0].contains('3'));
     assert!(interp.shows()[1].contains('3'));
 }
+
+#[test]
+fn color_ring_equation_links_components() {
+    // Regression: `a = b` with both colors unknown used to yield (0,0,0)
+    // silently; component-wise solving links the component variables.
+    let mut interp = TestInterp::new();
+    interp.run("color a, b; a = b; b = (0.1, 0.2, 0.3); show a;");
+    interp.assert_no_errors();
+    assert!(
+        interp.first_show().contains("(0.1,0.2,0.3)"),
+        "got: {}",
+        interp.first_show()
+    );
+}
+
+#[test]
+fn transform_ring_equation_links_components() {
+    // Regression: `S = T` with both transforms unknown used to yield an
+    // all-zero transform silently.
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain; transform S, T; S = T; T = identity scaled 2; \
+         show xxpart S; show yypart S;",
+    );
+    interp.assert_no_errors();
+    let shows = interp.shows();
+    let [xx, yy] = shows[shows.len() - 2..] else {
+        panic!("expected two shows, got {shows:?}");
+    };
+    assert!(xx.contains('2'), "xxpart: {xx}");
+    assert!(yy.contains('2'), "yypart: {yy}");
+}
+
+#[test]
+fn negated_compound_variable_equation() {
+    // `-a = b` must negate a's component dependencies.
+    let mut interp = TestInterp::new();
+    interp.run("color a, b; -a = b; b = (0.1, 0.2, 0.3); show a;");
+    interp.assert_no_errors();
+    assert!(
+        interp.first_show().contains("(-0.1,-0.2,-0.3)"),
+        "got: {}",
+        interp.first_show()
+    );
+}
