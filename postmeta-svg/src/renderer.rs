@@ -129,16 +129,7 @@ impl<'a> SvgRenderer<'a> {
         let font = self.fonts?.font(&text.font_name)?;
         let prec = self.opts.precision;
 
-        let t = &text.transform;
-        let matrix = format!(
-            "matrix({},{},{},{},{},{})",
-            fmt_scalar(t.txx, prec),
-            fmt_scalar(-t.tyx, prec),
-            fmt_scalar(-t.txy, prec),
-            fmt_scalar(t.tyy, prec),
-            fmt_scalar(t.tx, prec),
-            fmt_scalar(-t.ty, prec),
-        );
+        let matrix = crate::util::svg_text_matrix(&text.transform, prec);
 
         let mut g = Group::new()
             .set("transform", matrix)

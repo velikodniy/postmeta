@@ -62,16 +62,7 @@ pub fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::
 /// Y coordinates are negated to convert from `MetaPost` (Y-up) to SVG
 /// (Y-down). The transform matrix is adjusted accordingly.
 pub fn render_text_raw(text: &TextObject, opts: &RenderOptions) -> SvgText {
-    let t = &text.transform;
-    let matrix = format!(
-        "matrix({},{},{},{},{},{})",
-        fmt_scalar(t.txx, opts.precision),
-        fmt_scalar(-t.tyx, opts.precision),
-        fmt_scalar(-t.txy, opts.precision),
-        fmt_scalar(t.tyy, opts.precision),
-        fmt_scalar(t.tx, opts.precision),
-        fmt_scalar(-t.ty, opts.precision),
-    );
+    let matrix = crate::util::svg_text_matrix(&text.transform, opts.precision);
 
     SvgText::new(text.text.as_ref())
         .set("transform", matrix)
