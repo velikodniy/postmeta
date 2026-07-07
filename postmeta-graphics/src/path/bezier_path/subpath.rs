@@ -397,4 +397,27 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn subpath_cyclic_negative_time_wraps() {
+        // subpath(-0.5, 0.5) on a cyclic path must produce the same points
+        // as the equivalent wrapped range: point_at(t) for t in [-0.5, 0.5]
+        // equals point_at(t + n) for the cyclic path.
+        let path = crate::test_helpers::square();
+        let sub = path.subpath(-0.5, 0.5);
+        // The range crosses one knot boundary: two partial segments.
+        assert_eq!(sub.num_segments(), 2);
+        let start = sub.point_at(0.0);
+        let expected_start = path.point_at(-0.5);
+        assert!(
+            (start.x - expected_start.x).abs() < 1e-9 && (start.y - expected_start.y).abs() < 1e-9,
+            "start {start:?} != {expected_start:?}"
+        );
+        let end = sub.point_at(2.0);
+        let expected_end = path.point_at(0.5);
+        assert!(
+            (end.x - expected_end.x).abs() < 1e-9 && (end.y - expected_end.y).abs() < 1e-9,
+            "end {end:?} != {expected_end:?}"
+        );
+    }
 }

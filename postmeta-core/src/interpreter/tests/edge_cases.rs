@@ -299,3 +299,67 @@ fn reported_errors_carry_source_spans() {
         "span out of range: {span:?}"
     );
 }
+
+#[test]
+fn division_by_zero_reports_error_and_continues() {
+    let mut interp = TestInterp::new();
+    interp.run("show 1/0; show 2 + 2;");
+    assert!(
+        interp
+            .errors()
+            .iter()
+            .any(|e| e.message.contains("Division by zero")),
+        "expected division-by-zero diagnostic"
+    );
+    // Execution continues past the error.
+    assert!(interp.shows().last().is_some_and(|m| m.contains('4')));
+}
+
+#[test]
+fn substring_is_character_based_not_byte_based() {
+    let mut interp = TestInterp::new();
+    interp.run("show substring (3,4) of \"caf\u{e9}\";");
+    assert!(
+        interp.first_show().contains('\u{e9}'),
+        "expected the accented char: {}",
+        interp.first_show()
+    );
+}
+
+#[test]
+fn singular_transform_collapses_pair_without_panic() {
+    let mut interp = TestInterp::new();
+    interp.run("show (1,2) xscaled 0;");
+    interp.assert_no_errors();
+    assert!(
+        interp.first_show().contains("(0,2)"),
+        "got: {}",
+        interp.first_show()
+    );
+}
+
+#[test]
+fn truecorners_makes_corner_ops_ignore_setbounds() {
+    let mut interp = TestInterp::with_plain_mp();
+    interp.run(
+        "input plain; picture p; p := nullpicture; \
+         addto p contour fullcircle scaled 10; \
+         setbounds p to unitsquare; \
+         show llcorner p; \
+         interim truecorners := 1; \
+         show llcorner p;",
+    );
+    interp.assert_no_errors();
+    let shows = interp.shows();
+    let [with_bounds, true_corners] = shows[shows.len() - 2..] else {
+        panic!("expected two shows: {shows:?}");
+    };
+    assert!(
+        with_bounds.contains("(0,0)"),
+        "setbounds respected by default: {with_bounds}"
+    );
+    assert!(
+        true_corners.contains("(-5,-5)"),
+        "truecorners=1 measures contents: {true_corners}"
+    );
+}
