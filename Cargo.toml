@@ -5,6 +5,7 @@ members = [
     "postmeta-svg",
     "postmeta-core",
     "postmeta-cli",
+    "postmeta-wasm",
 ]
 resolver = "2"
 
@@ -28,3 +29,6 @@ expect_used = "warn"
 [profile.release]
 lto = true
 codegen-units = 1
+
+[profile.release.package.postmeta-wasm]
+opt-level = "z"

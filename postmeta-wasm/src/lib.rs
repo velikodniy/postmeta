@@ -33,22 +33,27 @@ pub struct CompileOutput {
 #[wasm_bindgen]
 impl CompileOutput {
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn svg(&self) -> String {
         self.svg.clone()
     }
 
     #[wasm_bindgen(getter)]
+    #[must_use]
     pub fn diagnostics(&self) -> String {
         self.diagnostics.clone()
     }
 
     #[wasm_bindgen(getter, js_name = hasError)]
+    #[must_use]
+    #[allow(clippy::missing_const_for_fn)] // wasm_bindgen rejects `const fn`
     pub fn has_error(&self) -> bool {
         self.has_error
     }
 }
 
 #[wasm_bindgen]
+#[must_use]
 pub fn render_metapost(source: &str) -> CompileOutput {
     compile_program(source)
 }
@@ -109,23 +114,22 @@ fn format_diagnostic(err: &InterpreterError) -> String {
         Severity::Fatal => "fatal",
     };
 
-    if let Some(span) = err.span {
-        format!("{label} [{}..{}] {}", span.start, span.end, err.message)
-    } else {
-        format!("{label} {}", err.message)
-    }
+    err.span.map_or_else(
+        || format!("{label} {}", err.message),
+        |span| format!("{label} [{}..{}] {}", span.start, span.end, err.message),
+    )
 }
 
 fn render_svg_preview(interpreter: &Interpreter, fonts: Option<&dyn FontProvider>) -> String {
-    let picture = interpreter.output().last().or({
-        if interpreter.current_picture().objects.is_empty() {
+    let picture = interpreter.output().last().or_else(|| {
+        if interpreter.current_picture().is_empty() {
             None
         } else {
             Some(interpreter.current_picture())
         }
     });
 
-    if let Some(picture) = picture {
+    picture.map_or_else(String::new, |picture| {
         let opts = RenderOptions {
             margin: 1.0,
             precision: 4,
@@ -133,9 +137,7 @@ fn render_svg_preview(interpreter: &Interpreter, fonts: Option<&dyn FontProvider
             ..RenderOptions::default()
         };
         render_with_fonts(picture, &opts, fonts).to_string()
-    } else {
-        String::new()
-    }
+    })
 }
 
 #[cfg(test)]
