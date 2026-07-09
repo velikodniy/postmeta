@@ -1,4 +1,4 @@
-//! Path construction, path operators, and pens made from paths.
+//! Path construction, path operators, and pens made from paths
 
 use crate::interpreter::Interpreter;
 
@@ -6,7 +6,6 @@ use super::helpers::TestInterp;
 
 #[test]
 fn directiontime_east_on_right_path() {
-    // Path going right: direction (1,0) should be found at time ~0
     let mut interp = TestInterp::new();
     interp.run("path p; p := (0,0)..(10,0); show directiontime (1,0) of p;");
     let msg = interp.first_show();
@@ -15,7 +14,6 @@ fn directiontime_east_on_right_path() {
 
 #[test]
 fn directiontime_not_found() {
-    // Path going right: direction (-1,0) should return -1
     let mut interp = TestInterp::new();
     interp.run("path p; p := (0,0)..(10,0); show directiontime (-1,0) of p;");
     let msg = interp.first_show();
@@ -24,7 +22,6 @@ fn directiontime_not_found() {
 
 #[test]
 fn turningnumber_counterclockwise() {
-    // A counterclockwise triangle should have turningnumber = 1
     // Use `..` (primitive path join), not `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run("path p; p := (0,0)..(10,0)..(5,10)..cycle; show turningnumber p;");
@@ -55,7 +52,7 @@ fn turningnumber_open_path_returns_zero() {
 #[test]
 fn curl_direction_in_def() {
     let mut interp = TestInterp::new();
-    // This should define -- as a macro without error
+    // `--` is not a primitive; a `def --` here defines it as a macro
     interp.run(
         "def -- = {curl 1}..{curl 1} enddef; \
              path p; p = (0,0)--(1,0); show p;",
@@ -66,10 +63,8 @@ fn curl_direction_in_def() {
 
 #[test]
 fn cutbefore_after_path_construction() {
-    // `tertiarydef a cutbefore b` from plain.mp must work after
-    // inline path construction: `(0,0)--(1cm,0) cutbefore fullcircle`
-    // Previously, path construction returned Break from the Pratt loop,
-    // so `cutbefore` was never reached.
+    // Regression: path construction used to return Break from the Pratt loop,
+    // so a trailing `cutbefore` (a plain.mp tertiarydef) was never reached.
     let mut interp = TestInterp::with_plain_mp();
     interp.run(concat!(
         "input plain;\n",

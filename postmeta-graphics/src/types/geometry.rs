@@ -1,4 +1,4 @@
-//! Geometric primitives: scalars, points, and vectors.
+//! Geometric primitives: scalars, points, and vectors
 
 use std::fmt;
 use std::ops;
@@ -9,15 +9,13 @@ use crate::math;
 // Scalar
 // ---------------------------------------------------------------------------
 
-/// Convenience alias. `MetaPost` historically used 16.16 fixed-point;
-/// we use f64 for compatibility and WASM support.
+/// `MetaPost` historically used 16.16 fixed-point; we use `f64` for compatibility and WASM support
 pub type Scalar = f64;
 
-/// Convert a segment index to a path time parameter.
+/// Convert a segment index to a path time parameter
 ///
-/// Path operations use `f64` time parameters where integer values correspond
-/// to knot indices. Segment counts in any practical path are far below 2^52,
-/// so no precision is lost.
+/// Integer time values correspond to knot indices.
+/// Segment counts in any practical path are far below `2^52`, so no precision is lost.
 #[expect(
     clippy::cast_precision_loss,
     reason = "path segment counts are far below 2^52"
@@ -27,9 +25,10 @@ pub const fn index_to_scalar(i: usize) -> Scalar {
     i as Scalar
 }
 
-/// Convert a non-negative path time parameter to a segment index.
+/// Convert a non-negative path time parameter to a segment index
 ///
-/// The caller must ensure `t >= 0.0`. Values are floored before conversion.
+/// The caller must ensure `t >= 0.0`.
+/// Values are floored before conversion.
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -44,7 +43,7 @@ pub fn scalar_to_index(t: Scalar) -> usize {
 // Point
 // ---------------------------------------------------------------------------
 
-/// A 2D point.
+/// A 2D point
 ///
 /// Points represent locations; for displacements use [`Vec2`].
 #[derive(Clone, Copy, Default, PartialEq)]
@@ -54,16 +53,14 @@ pub struct Point {
 }
 
 impl Point {
-    /// The origin (0, 0).
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
-    /// Create a new point.
     #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
-    /// Linearly interpolate between `self` and `other`.
+    /// Linearly interpolate between `self` and `other`
     ///
     /// `t = 0` returns `self`, `t = 1` returns `other`.
     #[must_use]
@@ -81,7 +78,7 @@ impl fmt::Debug for Point {
     }
 }
 
-/// `Point + Vec2 = Point` (translate a point by a displacement).
+/// `Point + Vec2 = Point` (translate a point by a displacement)
 impl ops::Add<Vec2> for Point {
     type Output = Self;
 
@@ -93,7 +90,7 @@ impl ops::Add<Vec2> for Point {
     }
 }
 
-/// `Point - Vec2 = Point` (translate a point by the negated displacement).
+/// `Point - Vec2 = Point` (translate a point by the negated displacement)
 impl ops::Sub<Vec2> for Point {
     type Output = Self;
 
@@ -105,7 +102,7 @@ impl ops::Sub<Vec2> for Point {
     }
 }
 
-/// `Point - Point = Vec2` (displacement between two points).
+/// `Point - Point = Vec2` (displacement between two points)
 impl ops::Sub for Point {
     type Output = Vec2;
 
@@ -121,9 +118,7 @@ impl ops::Sub for Point {
 // Vec2
 // ---------------------------------------------------------------------------
 
-/// A 2D vector (displacement).
-///
-/// `Vec2` represents a direction and magnitude, not a location.
+/// A 2D vector: a direction and magnitude, not a location
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Vec2 {
     pub x: f64,
@@ -131,44 +126,39 @@ pub struct Vec2 {
 }
 
 impl Vec2 {
-    /// The zero vector.
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
-    /// Create a new vector.
     #[must_use]
     pub const fn new(x: f64, y: f64) -> Self {
         Self { x, y }
     }
 
-    /// Euclidean length (magnitude).
+    /// Euclidean length (magnitude)
     #[must_use]
     pub fn length(self) -> f64 {
         self.x.hypot(self.y)
     }
 
-    /// Angle in radians, measured counter-clockwise from the positive x-axis.
+    /// Angle in radians, measured counter-clockwise from the positive x-axis
     #[must_use]
     pub fn direction(self) -> Scalar {
         let angle = self.y.atan2(self.x);
-        // Normalize to (-pi, pi]
         math::normalize_angle(angle)
     }
 
-    /// Dot product: `self.x * other.x + self.y * other.y`.
+    /// Dot product
     #[must_use]
     pub fn dot(self, other: Self) -> f64 {
         self.x.mul_add(other.x, self.y * other.y)
     }
 
-    /// 2D cross product (z-component): `self.x * other.y - self.y * other.x`.
-    ///
-    /// Positive when `other` is counter-clockwise from `self`.
+    /// 2D cross product (z-component); positive when `other` is counter-clockwise from `self`
     #[must_use]
     pub fn cross(self, other: Self) -> f64 {
         self.x.mul_add(other.y, -(self.y * other.x))
     }
 
-    // Angle from `self` to `other`, in the range (-pi, pi].
+    // Angle from `self` to `other`, in the range (-pi, pi]
     #[must_use]
     pub fn angle_to(self, other: Self) -> Scalar {
         let diff = other.direction() - self.direction();
@@ -176,21 +166,20 @@ impl Vec2 {
     }
 }
 
-/// Convert a point to a [`Vec2`] (displacement from the origin).
+/// Convert a point to a [`Vec2`] (displacement from the origin)
 impl From<Point> for Vec2 {
     fn from(p: Point) -> Self {
         Self { x: p.x, y: p.y }
     }
 }
 
-/// Convert a [`Vec2`] to a point (treating it as a displacement from the origin).
+/// Convert a [`Vec2`] to a point (a displacement from the origin)
 impl From<Vec2> for Point {
     fn from(v: Vec2) -> Self {
         Self { x: v.x, y: v.y }
     }
 }
 
-/// `Vec2 + Vec2`.
 impl ops::Add for Vec2 {
     type Output = Self;
 
@@ -202,7 +191,6 @@ impl ops::Add for Vec2 {
     }
 }
 
-/// `Vec2 - Vec2`.
 impl ops::Sub for Vec2 {
     type Output = Self;
 
@@ -214,7 +202,6 @@ impl ops::Sub for Vec2 {
     }
 }
 
-/// `-Vec2` (negate).
 impl ops::Neg for Vec2 {
     type Output = Self;
 
@@ -226,7 +213,6 @@ impl ops::Neg for Vec2 {
     }
 }
 
-/// `Vec2 * Scalar` (scale).
 impl ops::Mul<Scalar> for Vec2 {
     type Output = Self;
 
@@ -238,7 +224,6 @@ impl ops::Mul<Scalar> for Vec2 {
     }
 }
 
-/// `Scalar * Vec2` (scale).
 impl ops::Mul<Vec2> for Scalar {
     type Output = Vec2;
 

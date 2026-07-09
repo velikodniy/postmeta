@@ -1,12 +1,10 @@
-//! Cubic Bezier segment operations.
+//! Cubic Bezier segment operations
 //!
-//! This module provides the shared `CubicSegment` type and operations used
-//! across the crate: de Casteljau evaluation, splitting, derivative
-//! computation, and bounding boxes.
+//! Provides the shared `CubicSegment` type and operations used across the crate: de Casteljau evaluation, splitting, derivatives, and bounding boxes.
 
 use crate::types::{ARC_MAX_DEPTH, ARC_TOL, Point, Scalar, Vec2};
 
-/// Four control points of a cubic Bezier segment.
+/// Four control points of a cubic Bezier segment
 #[derive(Debug, Clone, Copy)]
 pub struct CubicSegment {
     pub p0: Point,
@@ -16,13 +14,12 @@ pub struct CubicSegment {
 }
 
 impl CubicSegment {
-    /// Create a new cubic segment from four control points.
     #[must_use]
     pub const fn new(p0: Point, p1: Point, p2: Point, p3: Point) -> Self {
         Self { p0, p1, p2, p3 }
     }
 
-    /// Evaluate the point at parameter `t` in [0, 1].
+    /// Evaluate the point at parameter `t` in [0, 1]
     #[expect(
         clippy::many_single_char_names,
         reason = "standard Bezier math variable names (a, b, c, d, s, t)"
@@ -46,7 +43,7 @@ impl CubicSegment {
         )
     }
 
-    /// Evaluate the derivative (tangent vector) at parameter `t` in [0, 1].
+    /// Evaluate the derivative (tangent vector) at parameter `t` in [0, 1]
     #[expect(
         clippy::many_single_char_names,
         reason = "standard Bezier math variable names (a, b, c, s, t)"
@@ -69,7 +66,7 @@ impl CubicSegment {
         )
     }
 
-    /// Split at parameter `t` using de Casteljau's algorithm.
+    /// Split at parameter `t` using de Casteljau's algorithm
     ///
     /// Returns `(left_half, right_half)`.
     #[must_use]
@@ -97,7 +94,7 @@ impl CubicSegment {
         )
     }
 
-    /// Axis-aligned bounding box of the control-point hull: `(min, max)`.
+    /// Axis-aligned bounding box of the control-point hull: `(min, max)`
     #[must_use]
     pub const fn bbox(&self) -> (Point, Point) {
         let min_x = self.p0.x.min(self.p1.x).min(self.p2.x).min(self.p3.x);
@@ -107,24 +104,20 @@ impl CubicSegment {
         (Point::new(min_x, min_y), Point::new(max_x, max_y))
     }
 
-    /// Maximum extent (diagonal of bounding box).
+    /// Maximum extent (diagonal of bounding box)
     #[must_use]
     pub fn extent(&self) -> Scalar {
         let (min, max) = self.bbox();
         (max - min).length()
     }
 
-    /// Approximate arc length using recursive subdivision.
-    ///
-    /// Compares the chord length (p0→p3) with the control-polygon length
-    /// (p0→p1 + p1→p2 + p2→p3).  When they agree within tolerance, returns
-    /// their average.  Otherwise splits at t=0.5 and recurses.
+    /// Approximate arc length using recursive subdivision
     #[must_use]
     pub fn arc_length(&self) -> Scalar {
         arc_length_recursive(self, 0)
     }
 
-    /// Arc length of the sub-segment from parameter 0 to `t`.
+    /// Arc length of the sub-segment from parameter 0 to `t`
     #[must_use]
     pub fn arc_length_to(&self, t: Scalar) -> Scalar {
         if t <= 0.0 {
@@ -138,12 +131,10 @@ impl CubicSegment {
     }
 }
 
-/// Estimate arc length by comparing chord and control-polygon lengths.
+/// Estimate arc length by comparing chord and control-polygon lengths
 ///
-/// If the straight-line distance (chord) and the sum of control-leg
-/// distances (polygon) agree within tolerance, their average is a good
-/// approximation. Otherwise the curve is split at t=0.5 and each half
-/// is measured recursively.
+/// When the chord (p0→p3) and control polygon (p0→p1 + p1→p2 + p2→p3) agree within tolerance, their average is a good approximation.
+/// Otherwise the curve is split at t=0.5 and each half is measured recursively.
 fn arc_length_recursive(seg: &CubicSegment, depth: u32) -> Scalar {
     let chord = (seg.p3 - seg.p0).length();
     let poly = (seg.p1 - seg.p0).length() + (seg.p2 - seg.p1).length() + (seg.p3 - seg.p2).length();
@@ -204,11 +195,8 @@ mod tests {
             Point::new(4.0, 0.0),
         );
         let (left, right) = seg.split(0.5);
-        // Left starts at original start
         assert!((left.p0.x).abs() < EPSILON);
-        // Right ends at original end
         assert!((right.p3.x - 4.0).abs() < EPSILON);
-        // They meet at the midpoint
         assert!((left.p3.x - right.p0.x).abs() < EPSILON);
         assert!((left.p3.y - right.p0.y).abs() < EPSILON);
     }

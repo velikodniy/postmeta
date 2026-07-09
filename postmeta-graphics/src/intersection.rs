@@ -1,10 +1,7 @@
-//! Curve-curve intersection using bisection.
+//! Curve-curve intersection using bisection
 //!
-//! Implements `MetaPost`'s `intersectiontimes` operator: given two paths,
-//! find the (time1, time2) pair where they intersect.
-//!
-//! The algorithm recursively bisects both curves and checks bounding-box
-//! overlap, stopping when the sub-curves are small enough.
+//! Implements `MetaPost`'s `intersectiontimes` operator: given two paths, find the (time1, time2) pair where they intersect.
+//! The algorithm recursively bisects both curves and checks bounding-box overlap, stopping when the sub-curves are small enough.
 
 use crate::bbox::BoundingBox;
 use crate::bezier::CubicSegment;
@@ -14,13 +11,13 @@ use crate::types::{INTERSECT_TOL, Point, Scalar, index_to_scalar};
 /// Result of an intersection search.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Intersection {
-    /// Time parameter on the first path.
+    /// Time parameter on the first path
     pub t1: Scalar,
-    /// Time parameter on the second path.
+    /// Time parameter on the second path
     pub t2: Scalar,
 }
 
-/// Find the first intersection between two [`BezierPath`]s.
+/// Find the first intersection between two [`BezierPath`]s
 ///
 /// Returns `None` if the paths don't intersect.
 /// The returned times are in the range [0, `path.num_segments()`].
@@ -53,7 +50,7 @@ pub fn intersection_times(path1: &BezierPath, path2: &BezierPath) -> Option<Inte
     None
 }
 
-/// Find all intersections between two [`BezierPath`]s.
+/// Find all intersections between two [`BezierPath`]s
 #[must_use]
 pub fn all_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Intersection> {
     let n1 = path1.num_segments();
@@ -87,11 +84,9 @@ pub fn all_intersection_times(path1: &BezierPath, path2: &BezierPath) -> Vec<Int
 // Bounding box overlap
 // ---------------------------------------------------------------------------
 
-/// Axis-aligned bounding box overlap test on `(min, max)` corner pairs.
+/// Axis-aligned bounding box overlap test on `(min, max)` corner pairs
 ///
-/// Returns `true` when the two AABBs share any area (inclusive of edges).
-/// Delegates to [`BoundingBox::overlaps`] so the overlap semantics have a
-/// single source of truth.
+/// Delegates to [`BoundingBox::overlaps`] so the overlap semantics have a single source of truth.
 const fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
     BoundingBox::from_corners(a.0, a.1).overlaps(&BoundingBox::from_corners(b.0, b.1))
 }
@@ -100,18 +95,17 @@ const fn bbox_overlap(a: &(Point, Point), b: &(Point, Point)) -> bool {
 // Bisection intersection algorithm
 // ---------------------------------------------------------------------------
 
-/// Maximum recursion depth for bisection.
+/// Maximum recursion depth for bisection
 ///
-/// `MetaPost`'s `mp.web` uses ~17 levels. We use 20 for margin with `f64` precision.
+/// `mp.web` uses ~17 levels; 20 gives margin with `f64` precision.
 const MAX_DEPTH: u32 = 20;
 
-/// Maximum number of bbox overlap tests before giving up.
+/// Maximum number of bbox overlap tests before giving up
 ///
-/// `MetaPost` uses `max_patience = 5000` backtracks. We count all overlap
-/// tests as work units with a comparable budget.
+/// `MetaPost` uses `max_patience = 5000` backtracks; overlap tests are counted as work units with a comparable budget.
 const MAX_WORK: u32 = 5000;
 
-/// A time parameter interval `[lo, hi]` within a single cubic segment.
+/// A time parameter interval `[lo, hi]` within a single cubic segment
 #[derive(Clone, Copy)]
 struct Interval {
     lo: Scalar,
@@ -140,12 +134,10 @@ impl Interval {
     }
 }
 
-/// Find one intersection between two cubic segments by recursive bisection.
+/// Find one intersection between two cubic segments by recursive bisection
 ///
-/// Both curves are split at their midpoints and the four sub-pairs are
-/// tested. Sub-pairs whose bounding boxes don't overlap are pruned.
-/// When a sub-curve's extent falls below the tolerance, the midpoint
-/// of the parameter interval is reported as the intersection.
+/// Both curves are split at their midpoints and the four sub-pairs are tested; sub-pairs whose bounding boxes don't overlap are pruned.
+/// When a sub-curve's extent falls below the tolerance, the midpoint of the parameter interval is reported as the intersection.
 fn intersect_cubics(
     seg1: &CubicSegment,
     seg2: &CubicSegment,
@@ -166,7 +158,6 @@ fn intersect_cubics(
         return None;
     }
 
-    // Check convergence
     if seg1.extent() < INTERSECT_TOL && seg2.extent() < INTERSECT_TOL {
         return Some((iv1.mid(), iv2.mid()));
     }
@@ -175,7 +166,6 @@ fn intersect_cubics(
         return Some((iv1.mid(), iv2.mid()));
     }
 
-    // Bisect both curves
     let (s1_left, s1_right) = seg1.split(0.5);
     let (s2_left, s2_right) = seg2.split(0.5);
     let d = depth + 1;
@@ -187,7 +177,7 @@ fn intersect_cubics(
         .or_else(|| intersect_cubics(&s1_right, &s2_right, iv1.right(), iv2.right(), d, work))
 }
 
-/// Accumulator for `find_all` recursive intersection search.
+/// Accumulator for `find_all` recursive intersection search
 struct FindAllContext {
     seg1_offset: Scalar,
     seg2_offset: Scalar,
@@ -220,7 +210,6 @@ impl FindAllContext {
             let t1 = self.seg1_offset + iv1.mid();
             let t2 = self.seg2_offset + iv2.mid();
 
-            // Avoid duplicate results
             let dominated = self.results.iter().any(|r| {
                 (r.t1 - t1).abs() < INTERSECT_TOL * 10.0 && (r.t2 - t2).abs() < INTERSECT_TOL * 10.0
             });
@@ -252,7 +241,7 @@ mod tests {
     use crate::path::bezier_path::SegmentControls;
     use crate::types::Scalar;
 
-    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y).
+    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y)
     fn hline(x0: Scalar, x1: Scalar, y: Scalar) -> BezierPath {
         let dx = (x1 - x0) / 3.0;
         BezierPath::from_parts(
@@ -265,7 +254,7 @@ mod tests {
         )
     }
 
-    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1).
+    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1)
     fn vline(x: Scalar, y0: Scalar, y1: Scalar) -> BezierPath {
         let dy = (y1 - y0) / 3.0;
         BezierPath::from_parts(

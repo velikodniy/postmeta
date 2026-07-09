@@ -1,8 +1,6 @@
 //! Dependency-list propagation for arithmetic on unknown quantities.
 //!
-//! These helpers compute the `DepList` bookkeeping for multiplication,
-//! division, addition/subtraction, and affine transforms so that partially
-//! known expressions can participate in linear equation solving.
+//! Computes the `DepList` bookkeeping for multiplication, division, addition/subtraction, and affine transforms so partially known expressions can join linear equation solving.
 
 use crate::command::SecondaryBinaryOp;
 use crate::equation::{DepList, const_dep, constant_value, dep_add_scaled, dep_scale};
@@ -13,18 +11,16 @@ use crate::variables::VarValue;
 use super::helpers::{value_to_pair, value_to_scalar, value_to_transform};
 use super::{ExprResultValue, Interpreter, LhsBinding};
 
-/// Whether a dependency list is present and genuinely linear — i.e. it
-/// still references unknown variables rather than reducing to a constant.
+/// Whether a dependency list is present and still references unknowns rather than reducing to a constant
 fn is_linear(dep: Option<&DepList>) -> bool {
     dep.is_some_and(|d| constant_value(d).is_none())
 }
 
-/// Pair variant of [`is_linear`]: either component references unknowns.
+/// Pair variant of [`is_linear`]: either component references unknowns
 fn pair_is_linear(pair: Option<&(DepList, DepList)>) -> bool {
     pair.is_some_and(|(dx, dy)| constant_value(dx).is_none() || constant_value(dy).is_none())
 }
 
-/// A scaled copy of `dep`.
 fn scaled(dep: &DepList, factor: f64) -> DepList {
     let mut d = dep.clone();
     dep_scale(&mut d, factor);
@@ -32,7 +28,7 @@ fn scaled(dep: &DepList, factor: f64) -> DepList {
 }
 
 impl Interpreter {
-    /// Compute dependency info for multiplication (`*`).
+    /// Compute dependency info for multiplication (`*`)
     #[allow(clippy::too_many_lines)]
     pub(super) fn mul_deps(
         &mut self,
@@ -130,7 +126,7 @@ impl Interpreter {
         }
     }
 
-    /// Compute dependency info for division (`/`).
+    /// Compute dependency info for division (`/`)
     pub(super) fn div_deps(
         &mut self,
         left_val: &Value,
@@ -212,7 +208,7 @@ impl Interpreter {
         })
     }
 
-    /// Compute dependency info for addition/subtraction (`+`, `-`).
+    /// Compute dependency info for addition/subtraction (`+`, `-`)
     pub(super) fn add_sub_deps(
         val: Value,
         ty: Type,
@@ -278,7 +274,7 @@ impl Interpreter {
         }
     }
 
-    /// Compute pair dependency info for non-`*` secondary ops (transforms).
+    /// Compute pair dependency info for non-`*` secondary ops (transforms)
     #[allow(clippy::too_many_arguments)]
     pub(super) fn transform_deps(
         &mut self,
@@ -355,7 +351,7 @@ impl Interpreter {
         }
     }
 
-    /// Convert a secondary binary op + RHS value into a concrete transform.
+    /// Convert a secondary binary op + RHS value into a concrete transform
     fn secondary_op_to_transform(
         op: SecondaryBinaryOp,
         right: &Value,

@@ -1,6 +1,6 @@
 # Visual Tests
 
-A lightweight visual regression harness for PostMeta.
+Visual regression tests for PostMeta.
 
 ## Layout
 

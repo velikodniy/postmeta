@@ -1,4 +1,4 @@
-//! Affine transform operations for `MetaPost` types.
+//! Affine transform operations for `MetaPost` types
 //!
 //! `MetaPost` provides these transform primitives:
 //! - `shifted (dx, dy)` — translate
@@ -10,8 +10,7 @@
 //! - `zscaled (a, b)` — complex multiplication (rotate + scale)
 //! - `transformed T` — apply an arbitrary 6-component transform
 //!
-//! The [`Transformable`] trait provides a uniform interface for applying
-//! transforms to all graphics types.
+//! The [`Transformable`] trait provides a uniform interface for applying transforms to all graphics types.
 
 use crate::math::convex_hull;
 use crate::path::{BezierPath, SegmentControls};
@@ -25,7 +24,7 @@ use crate::types::{
 // Transform
 // ---------------------------------------------------------------------------
 
-/// A transform with named components.
+/// A transform with named components
 ///
 /// Maps point (x, y) to (tx + txx*x + txy*y, ty + tyx*x + tyy*y)
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -48,7 +47,7 @@ impl Transform {
         tyy: 1.0,
     };
 
-    /// The zero transform (all components zero). Used for the null pen.
+    /// The zero transform (all components zero); used for the null pen
     pub const ZERO: Self = Self {
         tx: 0.0,
         ty: 0.0,
@@ -58,7 +57,7 @@ impl Transform {
         tyy: 0.0,
     };
 
-    /// Create a translation transform.
+    /// Create a translation transform
     #[must_use]
     pub const fn shifted(dx: Scalar, dy: Scalar) -> Self {
         Self {
@@ -68,7 +67,7 @@ impl Transform {
         }
     }
 
-    /// Create a rotation transform (angle in degrees).
+    /// Create a rotation transform (angle in degrees)
     #[must_use]
     pub fn rotated(degrees: Scalar) -> Self {
         let (s, c) = degrees.to_radians().sin_cos();
@@ -82,7 +81,7 @@ impl Transform {
         }
     }
 
-    /// Create a uniform scaling transform.
+    /// Create a uniform scaling transform
     #[must_use]
     pub const fn scaled(factor: Scalar) -> Self {
         Self {
@@ -95,7 +94,7 @@ impl Transform {
         }
     }
 
-    /// Create an x-only scaling transform.
+    /// Create an x-only scaling transform
     #[must_use]
     pub const fn xscaled(factor: Scalar) -> Self {
         Self {
@@ -104,7 +103,7 @@ impl Transform {
         }
     }
 
-    /// Create a y-only scaling transform.
+    /// Create a y-only scaling transform
     #[must_use]
     pub const fn yscaled(factor: Scalar) -> Self {
         Self {
@@ -113,7 +112,7 @@ impl Transform {
         }
     }
 
-    /// Create a horizontal shear (slant) transform.
+    /// Create a horizontal shear (slant) transform
     #[must_use]
     pub const fn slanted(factor: Scalar) -> Self {
         Self {
@@ -122,7 +121,7 @@ impl Transform {
         }
     }
 
-    /// Create a complex-multiplication transform: `zscaled (a, b)`.
+    /// Create a complex-multiplication transform: `zscaled (a, b)`
     ///
     /// This simultaneously rotates and scales: the point (1, 0) maps to (a, b).
     #[must_use]
@@ -137,7 +136,7 @@ impl Transform {
         }
     }
 
-    /// Compose two transforms: `self` applied first, then `other`.
+    /// Compose two transforms: `self` applied first, then `other`
     ///
     /// Equivalent to matrix multiplication `other * self`.
     #[must_use]
@@ -156,16 +155,16 @@ impl Transform {
         }
     }
 
-    /// Determinant of the linear part of this transform.
+    /// Determinant of the linear part of this transform
     #[must_use]
     pub fn det(&self) -> Scalar {
         self.txx.mul_add(self.tyy, -(self.txy * self.tyx))
     }
 }
 
-/// A type that can be transformed by an affine [`Transform`].
+/// A type that can be transformed by an affine [`Transform`]
 pub trait Transformable {
-    /// Apply a transform, returning the transformed value.
+    /// Apply a transform, returning the transformed value
     #[must_use]
     fn transformed(&self, t: &Transform) -> Self;
 }
@@ -184,8 +183,7 @@ impl Transformable for Point {
 }
 
 impl Transformable for Vec2 {
-    /// Transform a vector (direction). Translation is ignored — only the
-    /// linear part of the affine is applied.
+    /// Transform a vector (direction); translation is ignored, only the linear part of the affine is applied
     fn transformed(&self, t: &Transform) -> Self {
         Self::new(
             t.txx.mul_add(self.x, t.txy * self.y),
@@ -199,13 +197,11 @@ impl Transformable for KnotDirection {
         match *self {
             Self::Explicit(p) => Self::Explicit(p.transformed(t)),
             Self::Given(angle) => {
-                // Transform the direction vector, recompute the angle
                 let v = Vec2::new(angle.cos(), angle.sin());
                 let tv = v.transformed(t);
                 let len = tv.length();
                 if len < NEAR_ZERO {
-                    // Degenerate transform collapsed the direction
-                    Self::Curl(1.0)
+                    Self::Curl(1.0) // degenerate transform collapsed the direction
                 } else {
                     Self::Given(tv.y.atan2(tv.x))
                 }
@@ -252,13 +248,13 @@ impl Transformable for Pen {
     fn transformed(&self, t: &Transform) -> Self {
         match self {
             Self::Elliptical(pen_t) => {
-                // Compose: pen transform applied first, then the outer transform.
+                // Pen transform applied first, then the outer transform
                 Self::Elliptical(pen_t.then(t))
             }
             Self::Polygonal(vertices) => {
                 let new_verts: Vec<Point> = vertices.iter().map(|v| v.transformed(t)).collect();
-                // Re-run convex hull to maintain CCW invariant (a reflection
-                // reverses winding order, for example).
+                // Re-run convex hull to maintain the CCW invariant (a
+                // reflection reverses winding order, for example)
                 Self::Polygonal(convex_hull(&new_verts))
             }
         }
@@ -280,12 +276,11 @@ impl Transformable for GraphicsObject {
                 pen: stroke.pen.transformed(t),
                 color: stroke.color,
                 dash: stroke.dash.clone().map(|mut d| {
-                    // Scale dash lengths by the "average linear scale factor" of
-                    // the transform. For a uniform scale s the determinant is s²,
-                    // so sqrt(|det|) = |s|, which is the correct 1-D length
-                    // scale.
+                    // Scale dash lengths by the transform's "average linear
+                    // scale factor": for a uniform scale s the determinant is
+                    // s², so sqrt(|det|) = |s|, the correct 1-D length scale.
                     // For non-uniform transforms this is an approximation
-                    // (the exact scale depends on direction) but it matches
+                    // (the exact scale depends on direction) but matches
                     // MetaPost's approach and is adequate for dash patterns.
                     let scale = t.det().abs().sqrt();
                     for v in &mut d.dashes {
@@ -346,7 +341,7 @@ mod tests {
             tyx: 5.0,
             tyy: 6.0,
         };
-        // Composing with identity should be a no-op
+        // Composing with identity is a no-op
         let r = t.then(&Transform::IDENTITY);
         assert_eq!(t, r);
         let r = Transform::IDENTITY.then(&t);
@@ -420,15 +415,13 @@ mod tests {
     fn test_slanted() {
         let t = Transform::slanted(1.0);
         let p = Point::new(0.0, 1.0).transformed(&t);
-        // x' = 0 + 1*1 = 1, y' = 1
-        assert!((p.x - 1.0).abs() < EPSILON);
+        assert!((p.x - 1.0).abs() < EPSILON); // x' = 0 + 1*1 = 1
         assert!((p.y - 1.0).abs() < EPSILON);
     }
 
     #[test]
     fn test_zscaled() {
-        // zscaled (0, 1) is a 90-degree rotation
-        let t = Transform::zscaled(0.0, 1.0);
+        let t = Transform::zscaled(0.0, 1.0); // (0, 1) is a 90-degree rotation
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!(p.x.abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -436,8 +429,7 @@ mod tests {
 
     #[test]
     fn test_zscaled_scale_and_rotate() {
-        // zscaled (1, 1) = scale by sqrt(2) and rotate 45 degrees
-        let t = Transform::zscaled(1.0, 1.0);
+        let t = Transform::zscaled(1.0, 1.0); // (1, 1) = scale by sqrt(2) and rotate 45 degrees
         let p = Point::new(1.0, 0.0).transformed(&t);
         assert!((p.x - 1.0).abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -447,8 +439,7 @@ mod tests {
     fn test_compose_shift_then_rotate() {
         let s = Transform::shifted(1.0, 0.0);
         let r = Transform::rotated(90.0);
-        let c = s.then(&r);
-        // (0,0) → shifted → (1,0) → rotated 90 → (0,1)
+        let c = s.then(&r); // (0,0) → shifted → (1,0) → rotated 90 → (0,1)
         let p = Point::ZERO.transformed(&c);
         assert!(p.x.abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -458,8 +449,7 @@ mod tests {
     fn test_compose_rotate_then_shift() {
         let r = Transform::rotated(90.0);
         let s = Transform::shifted(1.0, 0.0);
-        let c = r.then(&s);
-        // (1,0) → rotated 90 → (0,1) → shifted → (1,1)
+        let c = r.then(&s); // (1,0) → rotated 90 → (0,1) → shifted → (1,1)
         let p = Point::new(1.0, 0.0).transformed(&c);
         assert!((p.x - 1.0).abs() < EPSILON);
         assert!((p.y - 1.0).abs() < EPSILON);
@@ -495,8 +485,8 @@ mod tests {
         let t = Transform::scaled(3.0);
         let tp = pen.transformed(&t);
         match tp {
+            // Diameter 2 scaled by 3 = diameter 6 (radius 3)
             Pen::Elliptical(t2) => {
-                // Circle of diameter 2 scaled by 3 = circle of diameter 6 (radius 3)
                 assert!((t2.txx - 3.0).abs() < EPSILON);
                 assert!((t2.tyy - 3.0).abs() < EPSILON);
             }
@@ -514,7 +504,7 @@ mod tests {
 
     #[test]
     fn test_knot_direction_given_degenerate() {
-        // A degenerate transform that collapses a direction should produce Curl(1.0)
+        // A degenerate transform that collapses a direction should produce `Curl(1.0)`
         let t = Transform {
             txx: 0.0,
             txy: 0.0,
@@ -532,7 +522,7 @@ mod tests {
     // BezierPath transform tests
     // -----------------------------------------------------------------------
 
-    /// Helper: build a simple open `BezierPath` with two knot points and one segment.
+    /// Build a simple open `BezierPath` with two knot points and one segment
     fn sample_bezier_path() -> BezierPath {
         let points = vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)];
         let controls = vec![SegmentControls {
@@ -542,7 +532,7 @@ mod tests {
         BezierPath::from_parts(points, controls, false)
     }
 
-    /// Helper: build a cyclic `BezierPath` (triangle) with three knot points.
+    /// Build a cyclic `BezierPath` (triangle) with three knot points
     fn sample_cyclic_bezier_path() -> BezierPath {
         let points = vec![
             Point::new(0.0, 0.0),
@@ -572,13 +562,11 @@ mod tests {
         let t = Transform::shifted(5.0, 10.0);
         let tp = path.transformed(&t);
 
-        // Knot points shifted
         assert!((tp.knot_point(0).x - 5.0).abs() < EPSILON);
         assert!((tp.knot_point(0).y - 10.0).abs() < EPSILON);
         assert!((tp.knot_point(1).x - 15.0).abs() < EPSILON);
         assert!((tp.knot_point(1).y - 10.0).abs() < EPSILON);
 
-        // Control points shifted
         let c = tp.segment_controls(0);
         assert!((c.post.x - 8.0).abs() < EPSILON);
         assert!((c.post.y - 14.0).abs() < EPSILON);
@@ -592,19 +580,15 @@ mod tests {
         let t = Transform::rotated(90.0);
         let tp = path.transformed(&t);
 
-        // (0,0) rotated 90 -> (0,0)
-        assert!(tp.knot_point(0).x.abs() < EPSILON);
+        assert!(tp.knot_point(0).x.abs() < EPSILON); // (0,0) rotated 90 -> (0,0)
         assert!(tp.knot_point(0).y.abs() < EPSILON);
-        // (10,0) rotated 90 -> (0,10)
-        assert!(tp.knot_point(1).x.abs() < EPSILON);
+        assert!(tp.knot_point(1).x.abs() < EPSILON); // (10,0) rotated 90 -> (0,10)
         assert!((tp.knot_point(1).y - 10.0).abs() < EPSILON);
 
-        // (3,4) rotated 90 -> (-4,3)
         let c = tp.segment_controls(0);
-        assert!((c.post.x + 4.0).abs() < EPSILON);
+        assert!((c.post.x + 4.0).abs() < EPSILON); // (3,4) rotated 90 -> (-4,3)
         assert!((c.post.y - 3.0).abs() < EPSILON);
-        // (7,4) rotated 90 -> (-4,7)
-        assert!((c.pre.x + 4.0).abs() < EPSILON);
+        assert!((c.pre.x + 4.0).abs() < EPSILON); // (7,4) rotated 90 -> (-4,7)
         assert!((c.pre.y - 7.0).abs() < EPSILON);
     }
 
@@ -631,7 +615,6 @@ mod tests {
         let t = Transform::shifted(1.0, 2.0);
         let tp = path.transformed(&t);
 
-        // All three knot points shifted
         assert!((tp.knot_point(0).x - 1.0).abs() < EPSILON);
         assert!((tp.knot_point(0).y - 2.0).abs() < EPSILON);
         assert!((tp.knot_point(1).x - 11.0).abs() < EPSILON);
@@ -639,7 +622,6 @@ mod tests {
         assert!((tp.knot_point(2).x - 6.0).abs() < EPSILON);
         assert!((tp.knot_point(2).y - 12.0).abs() < EPSILON);
 
-        // All three segments' controls shifted
         for i in 0..3 {
             let orig = path.segment_controls(i);
             let transformed = tp.segment_controls(i);

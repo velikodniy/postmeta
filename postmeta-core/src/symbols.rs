@@ -1,13 +1,11 @@
-//! Symbol table for the `MetaPost` interpreter.
+//! Symbol table for the `MetaPost` interpreter
 //!
-//! The symbol table maps symbolic token names to their meaning:
+//! Maps symbolic token names to their meaning:
 //! - **Primitives** have a fixed `(Command, u16)` pair
-//! - **Variables** (tags) start as `TagToken` and gain structure through
-//!   type declarations and equations
+//! - **Variables** (tags) start as `TagToken` and gain structure through type declarations and equations
 //! - **Macros** store a reference to their definition token list
 //!
-//! This corresponds to `mp.web`'s `hash` and `eqtb` arrays, but uses a
-//! `HashMap` for the name→id mapping and a `Vec` for the eqtb entries.
+//! Corresponds to `mp.web`'s `hash` and `eqtb` arrays, but uses a `HashMap` for the name→id mapping and a `Vec` for the eqtb entries.
 
 use std::collections::HashMap;
 
@@ -17,18 +15,16 @@ use crate::command::{Command, PRIMITIVES};
 // Symbol identifier
 // ---------------------------------------------------------------------------
 
-/// A unique identifier for a symbol in the table.
+/// A unique identifier for a symbol in the table
 ///
-/// The first 256 ids (0–255) are reserved for single-byte characters.
-/// Ids 256+ are for multi-character symbolic tokens.
+/// Ids 0–255 are reserved for single-byte characters; ids 256+ are multi-character symbolic tokens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SymbolId(u32);
 
 impl SymbolId {
-    /// The null/invalid symbol.
+    /// The null/invalid symbol
     pub const INVALID: Self = Self(u32::MAX);
 
-    /// Get the raw numeric id.
     #[must_use]
     pub const fn raw(self) -> u32 {
         self.0
@@ -39,18 +35,17 @@ impl SymbolId {
 // Symbol entry (the "eqtb" equivalent)
 // ---------------------------------------------------------------------------
 
-/// The meaning of a symbol: its command code and modifier.
+/// The meaning of a symbol: its command code and modifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SymbolEntry {
-    /// The command code — what this symbol does syntactically.
     pub command: Command,
-    /// Modifier further identifying the specific operation.
     pub modifier: u16,
 }
 
 impl SymbolEntry {
-    /// A tag token (unresolved variable name) with no value yet.
-    /// Also used as the fallback for out-of-range symbol lookups.
+    /// A tag token (unresolved variable name) with no value yet
+    ///
+    /// Also the fallback for out-of-range symbol lookups.
     pub const TAG: Self = Self {
         command: Command::TagToken,
         modifier: 0,
@@ -61,25 +56,22 @@ impl SymbolEntry {
 // Symbol table
 // ---------------------------------------------------------------------------
 
-/// The symbol table: maps names to ids and ids to meanings.
+/// The symbol table: maps names to ids and ids to meanings
 #[derive(Debug)]
 pub struct SymbolTable {
-    /// Name → id mapping.
     name_to_id: HashMap<String, SymbolId>,
-    /// Id → (name, entry). Index is `id.0` for ids >= 256.
-    /// Single-byte chars (0–255) are looked up directly.
+    /// Id → (name, entry) for ids >= 256; single-byte chars are looked up directly
     entries: Vec<(String, SymbolEntry)>,
-    /// Single-byte character entries (indices 0–255).
+    /// Single-byte character entries (indices 0–255)
     char_entries: [SymbolEntry; 256],
-    /// Next available id.
     next_id: u32,
 }
 
 impl SymbolTable {
-    /// Maximum number of user symbols (not counting single-byte chars).
+    /// Maximum number of user symbols (not counting single-byte chars)
     const MAX_SYMBOLS: u32 = 100_000;
 
-    /// Create a new symbol table with all primitives pre-registered.
+    /// Create a new symbol table with all primitives pre-registered
     #[must_use]
     pub fn new() -> Self {
         let mut table = Self {
@@ -180,27 +172,24 @@ impl SymbolTable {
         table
     }
 
-    /// Look up a symbolic token name, returning its id.
+    /// Look up a symbolic token name, returning its id
     ///
-    /// If the name is a single byte, returns the character id directly.
-    /// For unknown multi-char names, inserts a new tag token.
+    /// Single-byte names return the character id directly.
+    /// Unknown multi-char names get a new tag token.
     pub fn lookup(&mut self, name: &str) -> SymbolId {
-        // Single-byte shortcut
         if name.len() == 1 {
             let b = name.as_bytes()[0];
             return SymbolId(u32::from(b));
         }
 
-        // Check existing
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
         }
 
-        // Insert new tag token
         self.insert_new(name, SymbolEntry::TAG)
     }
 
-    /// Look up without inserting. Returns `None` for unknown symbols.
+    /// Look up without inserting; returns `None` for unknown symbols
     #[must_use]
     pub fn lookup_existing(&self, name: &str) -> Option<SymbolId> {
         if name.len() == 1 {
@@ -210,7 +199,6 @@ impl SymbolTable {
         }
     }
 
-    /// Get the entry for a symbol id.
     #[must_use]
     pub fn get(&self, id: SymbolId) -> SymbolEntry {
         if id.0 < 256 {
@@ -225,7 +213,6 @@ impl SymbolTable {
         }
     }
 
-    /// Set the entry for a symbol id.
     pub fn set(&mut self, id: SymbolId, entry: SymbolEntry) {
         if id.0 < 256 {
             self.char_entries[id.0 as usize] = entry;
@@ -237,17 +224,15 @@ impl SymbolTable {
         }
     }
 
-    /// Get the name of a symbol.
     #[must_use]
     pub fn name(&self, id: SymbolId) -> &str {
         if id.0 < 256 {
-            // For single-char symbols, return the character as a string.
-            // We use a static lookup table for printable ASCII.
+            // Static lookup table of printable-ASCII single characters
             static CHAR_NAMES: std::sync::LazyLock<[String; 256]> =
                 std::sync::LazyLock::new(|| {
                     std::array::from_fn(|i| {
                         if (32..127).contains(&i) {
-                            // i is always < 256 from array::from_fn, so the cast is safe.
+                            // i < 256 from array::from_fn, so the cast is safe
                             #[allow(clippy::cast_possible_truncation)]
                             let ch = i as u8;
                             String::from(char::from(ch))
@@ -267,14 +252,11 @@ impl SymbolTable {
         }
     }
 
-    /// Clear a symbol's meaning (set it back to undefined tag).
-    ///
-    /// Used by `save` to hide a name in the current scope.
+    /// Clear a symbol's meaning back to undefined tag; used by `save` to hide a name in the current scope
     pub fn clear(&mut self, id: SymbolId) {
         self.set(id, SymbolEntry::TAG);
     }
 
-    /// Register a primitive keyword.
     fn register_primitive(&mut self, name: &str, command: Command, modifier: u16) {
         let entry = SymbolEntry { command, modifier };
 
@@ -288,12 +270,10 @@ impl SymbolTable {
         }
     }
 
-    /// Register a single-character primitive.
     const fn register_char_primitive(&mut self, ch: u8, command: Command, modifier: u16) {
         self.char_entries[ch as usize] = SymbolEntry { command, modifier };
     }
 
-    /// Insert a new symbol, returning its id.
     fn insert_new(&mut self, name: &str, entry: SymbolEntry) -> SymbolId {
         let id = SymbolId(self.next_id);
         debug_assert!(self.next_id - 256 < Self::MAX_SYMBOLS);

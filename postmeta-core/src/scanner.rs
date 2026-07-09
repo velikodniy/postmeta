@@ -1,9 +1,7 @@
-//! Lexical scanner for `MetaPost` source code.
+//! Lexical scanner for `MetaPost` source code
 //!
-//! Implements the character-class–based tokenizer from the original
-//! `MetaPost` WEB source. Characters are grouped into classes; consecutive
-//! characters of the same class (with exceptions for "isolated" classes)
-//! merge into a single symbolic token.
+//! Implements the character-class tokenizer from the original `MetaPost` WEB source.
+//! Characters are grouped into classes; consecutive characters of the same class (except "isolated" classes) merge into a single symbolic token.
 //!
 //! # Token production rules
 //!
@@ -24,7 +22,7 @@ use crate::token::{Span, Token, TokenKind};
 // Character classes (mirrors mp.web §64)
 // ---------------------------------------------------------------------------
 
-/// Character class assignments. Index by byte value.
+/// Character class assignments, indexed by byte value
 const fn char_class(c: u8) -> u8 {
     match c {
         b'0'..=b'9' => DIGIT,
@@ -73,7 +71,7 @@ const RIGHT_BRACKET: u8 = 18;
 const BRACE: u8 = 19;
 const INVALID: u8 = 20;
 
-/// Classes that always produce a single-character token.
+/// Classes that always produce a single-character token
 const fn is_isolated(class: u8) -> bool {
     matches!(class, COMMA | SEMICOLON | LEFT_PAREN | RIGHT_PAREN)
 }
@@ -82,21 +80,18 @@ const fn is_isolated(class: u8) -> bool {
 // Scanner error
 // ---------------------------------------------------------------------------
 
-/// An error encountered during scanning.
+/// An error encountered during scanning
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanErrorKind {
     InvalidCharacter,
     UnterminatedString,
 }
 
-/// An error encountered during scanning.
+/// An error encountered during scanning
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanError {
-    /// Machine-readable error kind.
     pub kind: ScanErrorKind,
-    /// Human-readable error message.
     pub message: String,
-    /// Location of the error.
     pub span: Span,
 }
 
@@ -116,18 +111,15 @@ impl std::error::Error for ScanError {}
 // Scanner
 // ---------------------------------------------------------------------------
 
-/// Lexical scanner for `MetaPost` source.
+/// Lexical scanner for `MetaPost` source
 pub struct Scanner {
-    /// Source bytes (owned).
     src: Vec<u8>,
-    /// Current byte position.
     pos: usize,
-    /// Accumulated errors (non-fatal).
+    /// Accumulated errors (non-fatal)
     errors: Vec<ScanError>,
 }
 
 impl Scanner {
-    /// Create a new scanner over the given source string.
     #[must_use]
     pub fn new(source: &str) -> Self {
         Self {
@@ -137,7 +129,6 @@ impl Scanner {
         }
     }
 
-    /// Scan the next token.
     pub fn next_token(&mut self) -> Token {
         loop {
             self.skip_whitespace_and_comments();
@@ -176,7 +167,7 @@ impl Scanner {
         }
     }
 
-    /// Scan all remaining tokens (including `Eof`).
+    /// Scan all remaining tokens (including `Eof`)
     #[cfg(test)]
     pub fn scan_all(&mut self) -> Vec<Token> {
         let mut tokens = Vec::new();
@@ -191,21 +182,19 @@ impl Scanner {
         tokens
     }
 
-    /// Return accumulated scan errors.
     #[cfg(test)]
     #[must_use]
     pub fn errors(&self) -> &[ScanError] {
         &self.errors
     }
 
-    /// Drain accumulated scan errors.
+    /// Drain accumulated scan errors
     pub fn take_errors(&mut self) -> Vec<ScanError> {
         std::mem::take(&mut self.errors)
     }
 
     // -- internal helpers --
 
-    /// Skip whitespace and `%`-comments.
     fn skip_whitespace_and_comments(&mut self) {
         while self.pos < self.src.len() {
             let c = self.src[self.pos];
@@ -228,9 +217,7 @@ impl Scanner {
         }
     }
 
-    /// Scan a numeric token starting at `start`.
-    ///
-    /// Called when the character at `start` is a digit.
+    /// Scan a numeric token starting at `start` (a digit)
     fn scan_number(&mut self, start: usize) -> Token {
         // Integer part
         while self.pos < self.src.len() && char_class(self.src[self.pos]) == DIGIT {
@@ -250,7 +237,7 @@ impl Scanner {
         }
 
         let text = &self.src[start..self.pos];
-        // SAFETY: text is guaranteed to be ASCII digits and at most one '.'
+        // text is ASCII digits with at most one '.', so this always parses
         let s = std::str::from_utf8(text).unwrap_or("0");
         let value = s.parse::<f64>().unwrap_or(0.0);
 
@@ -260,11 +247,10 @@ impl Scanner {
         }
     }
 
-    /// Handle a period character.
+    /// Handle a period character
     ///
-    /// Returns `Some(token)` if the period starts a number (`.5`) or a
-    /// multi-period symbolic token (`..`, `...`). Returns `None` if the
-    /// period should be silently ignored.
+    /// Returns `Some(token)` if it starts a number (`.5`) or a multi-period symbolic token (`..`, `...`).
+    /// Returns `None` if the period should be silently ignored.
     fn scan_period(&mut self, start: usize) -> Option<Token> {
         self.pos += 1; // consume the first '.'
 
@@ -277,9 +263,8 @@ impl Scanner {
             }
 
             if next_class == PERIOD {
-                // `..` always forms a token.
-                // `...` forms a token only when there isn't a fourth period;
-                // for longer runs we split as `..`, `..`, ... to match MetaPost.
+                // `..` always forms a token; `...` only when there isn't a fourth period.
+                // Longer runs split as `..`, `..`, ... to match MetaPost.
                 self.pos += 1; // consume the second '.'
                 if self.pos < self.src.len()
                     && char_class(self.src[self.pos]) == PERIOD
@@ -300,10 +285,8 @@ impl Scanner {
         None
     }
 
-    /// Scan the fractional part of a number after the leading `.` has
-    /// been consumed. `start` points to the `.`.
+    /// Scan the fractional part of a number; `start` points to the already-consumed leading `.`
     fn scan_decimal_after_dot(&mut self, start: usize) -> Token {
-        // Consume digits after the dot
         while self.pos < self.src.len() && char_class(self.src[self.pos]) == DIGIT {
             self.pos += 1;
         }
@@ -318,12 +301,11 @@ impl Scanner {
         }
     }
 
-    /// Scan a string literal. The opening `"` is at `self.pos`.
+    /// Scan a string literal; the opening `"` is at `self.pos`
     fn scan_string(&mut self, start: usize) -> Token {
         self.pos += 1; // skip opening '"'
 
         let content_start = self.pos;
-        // Scan until closing `"` or end of line
         while self.pos < self.src.len() && self.src[self.pos] != b'"' && self.src[self.pos] != b'\n'
         {
             self.pos += 1;
@@ -334,7 +316,6 @@ impl Scanner {
         if self.pos < self.src.len() && self.src[self.pos] == b'"' {
             self.pos += 1; // skip closing '"'
         } else {
-            // Unterminated string
             self.errors.push(ScanError {
                 kind: ScanErrorKind::UnterminatedString,
                 message: "unterminated string literal".into(),
@@ -349,9 +330,7 @@ impl Scanner {
         }
     }
 
-    /// Scan a symbolic token. For isolated classes, produces a
-    /// single-character token. For others, merges consecutive
-    /// same-class characters.
+    /// Scan a symbolic token: a single character for isolated classes, otherwise a run of same-class characters
     fn scan_symbolic(&mut self, start: usize, class: u8) -> Token {
         if is_isolated(class) {
             self.pos += 1;
@@ -362,7 +341,6 @@ impl Scanner {
             };
         }
 
-        // Merge consecutive characters of the same class
         while self.pos < self.src.len() && char_class(self.src[self.pos]) == class {
             self.pos += 1;
         }

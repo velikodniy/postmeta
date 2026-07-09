@@ -1,11 +1,10 @@
-//! Font loading and parsing errors.
+//! Font loading and parsing errors
 
 use std::fmt;
 
-/// Errors that can occur when loading or querying fonts.
+/// Errors from loading or querying fonts
 #[derive(Debug)]
 pub enum FontError {
-    /// The font data could not be parsed.
     ParseError(String),
 }
 

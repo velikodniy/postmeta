@@ -1,4 +1,4 @@
-//! Applying affine transforms to values.
+//! Applying affine transforms to values
 
 use std::sync::Arc;
 
@@ -8,7 +8,7 @@ use postmeta_graphics::types::{Point, Transform};
 use crate::error::{ErrorKind, InterpResult, InterpreterError};
 use crate::types::{Type, Value};
 
-/// Apply a transform to a value, returning the transformed `(Value, Type)`.
+/// Apply a transform to a value
 pub(super) fn apply_transform(val: &Value, t: &Transform) -> InterpResult<(Value, Type)> {
     match val {
         Value::Pair(x, y) => {

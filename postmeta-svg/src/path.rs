@@ -3,11 +3,9 @@ use postmeta_graphics::types::Scalar;
 
 use crate::util::flip_y;
 
-/// Convert a resolved [`BezierPath`] to an SVG path data string.
+/// Convert a resolved [`BezierPath`] to an SVG path data string
 ///
-/// Uses cubic Bezier commands (M, C, Z). All coordinates are f64 with
-/// the specified precision. Y coordinates are negated to convert from
-/// `MetaPost` (Y-up) to SVG (Y-down).
+/// Emits cubic commands (M, C, Z) and negates Y per coordinate to map `MetaPost` Y-up onto SVG Y-down.
 pub fn path_to_d(path: &BezierPath, precision: usize) -> String {
     if path.num_knots() == 0 {
         return String::new();
@@ -34,9 +32,7 @@ pub fn path_to_d(path: &BezierPath, precision: usize) -> String {
     d
 }
 
-/// Write "x,y" to the string with the given precision.
-///
-/// Normalizes negative zero to positive zero for cleaner output.
+/// Write "x,y" at the given precision, normalizing negative zero to positive zero
 fn write_point(d: &mut String, x: Scalar, y: Scalar, precision: usize) {
     use std::fmt::Write;
     let x = if x == 0.0 { 0.0 } else { x };

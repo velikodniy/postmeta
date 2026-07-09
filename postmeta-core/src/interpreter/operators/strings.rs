@@ -1,4 +1,4 @@
-//! String operator evaluation.
+//! String operator evaluation
 
 use std::sync::Arc;
 

@@ -1,4 +1,4 @@
-//! Loading plain.mp and exercising its macros end to end.
+//! Loading plain.mp and exercising its macros end to end
 
 use super::helpers::TestInterp;
 
@@ -17,7 +17,7 @@ fn plain_mp_error_count() {
 #[test]
 fn plain_mp_loads() {
     let mut interp = TestInterp::with_plain_mp();
-    // Should not return Err (hard error) — warnings are OK
+    // Should not return Err (hard error); warnings are OK
     interp.run("input plain;");
 }
 

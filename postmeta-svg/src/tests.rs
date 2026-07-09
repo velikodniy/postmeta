@@ -12,7 +12,7 @@ use crate::path::path_to_d;
 use crate::util::{color_to_svg, dash_to_svg, fmt_scalar, pen_stroke_width};
 use crate::{RenderOptions, render_to_string};
 
-/// Make a resolved line from (0,0) to (10,0).
+/// Make a resolved line from (0,0) to (10,0)
 fn make_line() -> BezierPath {
     let mut k0 = Knot::new(Point::ZERO);
     k0.right = KnotDirection::Explicit(Point::new(10.0 / 3.0, 0.0));
@@ -23,7 +23,7 @@ fn make_line() -> BezierPath {
     KnotPath::from_knots(vec![k0, k1], false).resolve()
 }
 
-/// Make a resolved square 0,0 -> 10,0 -> 10,10 -> 0,10 -> cycle.
+/// Make a resolved square 0,0 -> 10,0 -> 10,10 -> 0,10 -> cycle
 fn make_square() -> BezierPath {
     let pts = [
         Point::new(0.0, 0.0),

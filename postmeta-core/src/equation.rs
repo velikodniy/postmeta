@@ -1,34 +1,24 @@
-//! Linear equation solver for `MetaPost`'s declarative equation system.
+//! Linear equation solver for `MetaPost`'s declarative equation system
 //!
-//! `MetaPost`'s key feature is that you can write `x + y = 5; x - y = 1;`
-//! and the system solves for `x = 3, y = 2`. This module implements the
-//! dependency-list-based equation solver from `mp.web` §24.
+//! `MetaPost` lets you write `x + y = 5; x - y = 1;` and solves for `x = 3, y = 2`.
+//! This module implements the dependency-list equation solver from `mp.web` §24.
 //!
 //! # Module split
 //!
-//! This module is PURE dependency-list algebra: nothing here touches
-//! interpreter state — every function takes and returns [`DepList`]s.
-//! The stateful side (reducing deps against the variable store, splitting
-//! compound equations into components, applying solutions, reporting
-//! inconsistencies) lives in `interpreter::equation`, which is this
-//! module's only production client.
+//! This module is pure dependency-list algebra: every function takes and returns [`DepList`]s and never touches interpreter state.
+//! The stateful side (reducing deps against the variable store, splitting compound equations, applying solutions, reporting inconsistencies) lives in `interpreter::equation`, this module's only production client.
 //!
 //! # Value lifecycle
 //!
-//! Numeric variables progress through states:
-//! `Undefined → Numeric → Independent → Dependent → Known`
-//!
+//! Numeric variables progress `Undefined → Numeric → Independent → Dependent → Known`.
 //! An **independent** variable has a serial number and no constraints yet.
-//! A **dependent** variable is a linear combination of independents:
-//! `α₁v₁ + α₂v₂ + ... + αₖvₖ + β`
-//!
+//! A **dependent** variable is a linear combination of independents: `α₁v₁ + ... + αₖvₖ + β`.
 //! When an equation fully constrains a variable, it becomes **known**.
 //!
 //! # Data structures
 //!
-//! A dependency list is a `Vec<DepTerm>` where each term has a coefficient
-//! and a reference to an independent variable. The last term has
-//! `var_id = None` and holds the constant.
+//! A dependency list is a `Vec<DepTerm>`; each term pairs a coefficient with an independent variable.
+//! The last term has `var_id = None` and holds the constant.
 
 use postmeta_graphics::types::Scalar;
 
@@ -36,21 +26,17 @@ use postmeta_graphics::types::Scalar;
 // Variable identifier for the equation system
 // ---------------------------------------------------------------------------
 
-/// Identifies a numeric variable in the equation system.
-///
-/// This is an opaque handle into the variable storage. The equation solver
-/// uses these to track which variables are independent, dependent, or known.
+/// Opaque handle to a numeric variable in the equation system
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct VarId(u32);
 
 impl VarId {
-    /// Handle from a raw index (allocation order in variable storage).
+    /// Handle from a raw index (allocation order in variable storage)
     #[must_use]
     pub const fn new(index: u32) -> Self {
         Self(index)
     }
 
-    /// The raw storage index behind this handle.
     #[must_use]
     pub const fn index(self) -> usize {
         self.0 as usize
@@ -61,24 +47,22 @@ impl VarId {
 // Dependency terms
 // ---------------------------------------------------------------------------
 
-/// One term in a dependency list: `coefficient * variable`.
+/// One term in a dependency list: `coefficient * variable`
 ///
 /// A term with `var_id = None` is the constant term and must be last.
 #[derive(Debug, Clone)]
 pub struct DepTerm {
-    /// The coefficient (fraction or scaled depending on dep type).
     pub coeff: Scalar,
-    /// The independent variable, or `None` for the constant term.
+    /// The independent variable, or `None` for the constant term
     pub var_id: Option<VarId>,
 }
 
-/// A dependency list: a linear combination of independent variables.
+/// A dependency list: a linear combination of independent variables
 ///
-/// Stored as a vector of terms sorted by decreasing serial number of
-/// the independent variable, with the constant term last.
+/// Terms are sorted by decreasing serial number of the independent variable, with the constant term last.
 pub type DepList = Vec<DepTerm>;
 
-/// Create a dependency list for a single known constant.
+/// Create a dependency list holding a single constant
 #[must_use]
 pub fn const_dep(value: Scalar) -> DepList {
     vec![DepTerm {
@@ -87,8 +71,7 @@ pub fn const_dep(value: Scalar) -> DepList {
     }]
 }
 
-/// Create a dependency list for a single independent variable with
-/// coefficient 1.
+/// Create a dependency list for a single independent variable with coefficient 1
 #[must_use]
 pub fn single_dep(var_id: VarId) -> DepList {
     vec![
@@ -103,15 +86,13 @@ pub fn single_dep(var_id: VarId) -> DepList {
     ]
 }
 
-/// Check if a dependency list has reduced to just a constant.
+/// Check if a dependency list has reduced to just a constant
 #[must_use]
 pub fn is_constant(dep: &DepList) -> bool {
     dep.len() == 1 && dep[0].var_id.is_none()
 }
 
-/// Get the constant value from a constant dependency list.
-///
-/// Returns `None` if the list has non-constant terms.
+/// Constant value of the list, or `None` if it has variable terms
 #[must_use]
 pub fn constant_value(dep: &DepList) -> Option<Scalar> {
     if is_constant(dep) {
@@ -121,7 +102,6 @@ pub fn constant_value(dep: &DepList) -> Option<Scalar> {
     }
 }
 
-/// Negate all terms in a dependency list.
 #[cfg(test)]
 pub fn negate(dep: &mut DepList) {
     for term in dep {
@@ -133,10 +113,10 @@ pub fn negate(dep: &mut DepList) {
 // Dependency arithmetic
 // ---------------------------------------------------------------------------
 
-/// Threshold below which a coefficient is treated as zero.
+/// Threshold below which a coefficient is treated as zero
 const COEFF_THRESHOLD: Scalar = 1e-9;
 
-/// Add two dependency lists: `result = a + b`.
+/// Add two dependency lists: `result = a + b`
 ///
 /// Both lists must be sorted by decreasing serial number.
 /// The result is also sorted and cleaned of near-zero coefficients.
@@ -146,7 +126,7 @@ pub fn dep_add(a: &DepList, b: &DepList) -> DepList {
     dep_add_scaled(a, b, 1.0)
 }
 
-/// Compute `a + f * b` (add `b` scaled by `f` to `a`).
+/// Compute `a + f * b`
 ///
 /// Both lists must be sorted by decreasing serial number.
 #[must_use]
@@ -159,8 +139,7 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
     while ai < a.len() && bi < b.len() {
         match (a[ai].var_id, b[bi].var_id) {
             (None, _) => {
-                // a's constant term — b might still have variable terms
-                // Add remaining b terms first
+                // a's constant term — flush b's remaining variable terms first
                 while bi < b.len() && b[bi].var_id.is_some() {
                     let c = f * b[bi].coeff;
                     if c.abs() > COEFF_THRESHOLD {
@@ -171,7 +150,6 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
                     }
                     bi += 1;
                 }
-                // Now add the constant terms
                 let c = if bi < b.len() {
                     f.mul_add(b[bi].coeff, a[ai].coeff)
                 } else {
@@ -196,7 +174,6 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
             }
             (Some(va), Some(vb)) => match va.0.cmp(&vb.0) {
                 std::cmp::Ordering::Greater => {
-                    // a's variable comes first (higher serial)
                     let c = a[ai].coeff;
                     if c.abs() > COEFF_THRESHOLD {
                         result.push(DepTerm {
@@ -207,7 +184,6 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
                     ai += 1;
                 }
                 std::cmp::Ordering::Less => {
-                    // b's variable comes first
                     let c = f * b[bi].coeff;
                     if c.abs() > COEFF_THRESHOLD {
                         result.push(DepTerm {
@@ -218,7 +194,6 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
                     bi += 1;
                 }
                 std::cmp::Ordering::Equal => {
-                    // Same variable — add coefficients
                     let c = f.mul_add(b[bi].coeff, a[ai].coeff);
                     if c.abs() > COEFF_THRESHOLD {
                         result.push(DepTerm {
@@ -238,7 +213,6 @@ pub fn dep_add_scaled(a: &DepList, b: &DepList, f: Scalar) -> DepList {
     result
 }
 
-/// Drain remaining terms from both input lists into the result.
 fn drain_remaining(
     result: &mut DepList,
     a: &DepList,
@@ -275,7 +249,7 @@ fn drain_remaining(
     }
 }
 
-/// Ensure the dependency list ends with a constant term.
+/// Ensure the dependency list ends with a constant term
 fn ensure_constant_term(result: &mut DepList) {
     if result.is_empty() || result.last().is_some_and(|t| t.var_id.is_some()) {
         result.push(DepTerm {
@@ -285,20 +259,18 @@ fn ensure_constant_term(result: &mut DepList) {
     }
 }
 
-/// Multiply all terms by a scalar constant.
 pub fn dep_scale(dep: &mut DepList, factor: Scalar) {
     for term in dep {
         term.coeff *= factor;
     }
 }
 
-/// Substitute `var_id = replacement` into a dependency list.
+/// Substitute `var_id = replacement` into a dependency list
 ///
-/// If `dep` contains a term `c * var_id`, that term is replaced by
-/// `c * replacement`. The result is re-sorted and cleaned.
+/// If `dep` contains a term `c * var_id`, that term is replaced by `c * replacement`.
+/// The result is re-sorted and cleaned.
 #[must_use]
 pub fn dep_substitute(dep: &DepList, var_id: VarId, replacement: &DepList) -> DepList {
-    // Find the coefficient of var_id in dep
     let mut coeff = 0.0;
     let mut rest = Vec::with_capacity(dep.len());
 
@@ -315,7 +287,6 @@ pub fn dep_substitute(dep: &DepList, var_id: VarId, replacement: &DepList) -> De
         return dep.clone();
     }
 
-    // Ensure rest has a constant term
     if rest.is_empty() || rest.last().is_some_and(|t| t.var_id.is_some()) {
         rest.push(DepTerm {
             coeff: 0.0,
@@ -330,33 +301,29 @@ pub fn dep_substitute(dep: &DepList, var_id: VarId, replacement: &DepList) -> De
 // Equation solver
 // ---------------------------------------------------------------------------
 
-/// Result of solving a linear equation.
+/// Result of solving a linear equation
 #[derive(Debug)]
 pub enum SolveResult {
-    /// A variable became known with the given value.
+    /// The pivot variable was solved for
     Solved {
-        /// The variable that was determined.
         var_id: VarId,
-        /// Its dependency list (may be constant or still dependent).
+        /// Dependency list for `var_id` — constant if fully determined
         dep: DepList,
     },
-    /// The equation was redundant (e.g. `0 = 0`).
+    /// The equation was redundant (e.g. `0 = 0`)
     Redundant,
-    /// The equation was inconsistent (e.g. `0 = 5`).
+    /// The equation was inconsistent (e.g. `0 = 5`); carries the nonzero residual
     Inconsistent(Scalar),
 }
 
-/// Solve a linear equation expressed as "dep = 0".
+/// Solve a linear equation expressed as `dep = 0`
 ///
-/// Finds the term with the largest absolute coefficient, pivots on it
-/// (making that variable dependent on the others), and returns the
-/// result. The caller is responsible for substituting into all other
-/// dependency lists.
+/// Pivots on the first significant variable term and expresses that variable in terms of the rest.
+/// The caller must substitute the result into all other dependency lists.
 ///
 /// This is the core of `mp.web`'s `linear_eq` procedure.
 #[must_use]
 pub fn solve_equation(dep: &DepList) -> SolveResult {
-    // If dep is just a constant, it's redundant or inconsistent
     if is_constant(dep) {
         let c = dep[0].coeff;
         if c.abs() > COEFF_THRESHOLD * 64.0 {
@@ -366,8 +333,7 @@ pub fn solve_equation(dep: &DepList) -> SolveResult {
     }
 
     // MetaPost pivots on the variable with the greatest serial number.
-    // Our dep lists are maintained in descending variable-id order, so the
-    // first significant variable term is the pivot.
+    // Dep lists are kept in descending variable-id order, so the first significant variable term is the pivot.
     let Some((pivot_idx, pivot_term)) = dep
         .iter()
         .enumerate()
@@ -400,7 +366,6 @@ pub fn solve_equation(dep: &DepList) -> SolveResult {
         });
     }
 
-    // Ensure constant term is last
     ensure_constant_term(&mut result);
 
     SolveResult::Solved {

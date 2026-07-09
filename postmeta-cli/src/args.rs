@@ -1,4 +1,4 @@
-//! Command-line argument parsing.
+//! Command-line argument parsing
 
 use std::path::PathBuf;
 

@@ -1,30 +1,21 @@
-//! Formatting helpers shared by the SVG backend, including the single
-//! home of the Y-axis flip.
+//! Formatting helpers for the SVG backend, and the single home of the Y-axis flip
 //!
-//! # Coordinate system
-//!
-//! `MetaPost` coordinates are Y-up; SVG coordinates are Y-down. The backend
-//! converts by negating Y per coordinate — no global `scale(1,-1)` or
-//! viewBox trick — via [`flip_y`]: path data and viewBox origins negate Y
-//! directly, and text transforms are conjugated with `S = diag(1, -1)`
-//! (see [`svg_text_matrix`]).
+//! `MetaPost` is Y-up and SVG is Y-down; the backend converts by negating Y per coordinate via [`flip_y`], never with a global `scale(1,-1)` or viewBox trick.
+//! Path data and viewBox origins negate Y directly; text transforms are conjugated with `S = diag(1, -1)` (see [`svg_text_matrix`]).
 
 use postmeta_graphics::types::{
     Color, DashPattern, LineCap, LineJoin, Pen, Scalar, Transform, Vec2,
 };
 
-/// Negate a Y coordinate or Y-coupled matrix term (`MetaPost` Y-up → SVG
-/// Y-down). Every Y flip in the backend goes through this helper.
+/// Negate a Y coordinate or Y-coupled matrix term (`MetaPost` Y-up to SVG Y-down); every Y flip in the backend goes through here
 #[must_use]
 pub const fn flip_y(y: Scalar) -> Scalar {
     -y
 }
 
-/// SVG `transform` attribute for a text object's `MetaPost` transform.
+/// SVG `transform` attribute for a text object's `MetaPost` transform
 ///
-/// The Y-flip conjugates the matrix (`M_svg = S * M_mp * S` with
-/// `S = diag(1, -1)`): the off-diagonal terms and the Y translation are
-/// negated, the diagonal is unchanged.
+/// The Y-flip conjugates the matrix (`M_svg = S * M_mp * S` with `S = diag(1, -1)`): off-diagonal terms and the Y translation are negated, the diagonal is unchanged.
 #[must_use]
 pub fn svg_text_matrix(t: &Transform, precision: usize) -> String {
     format!(
@@ -38,7 +29,7 @@ pub fn svg_text_matrix(t: &Transform, precision: usize) -> String {
     )
 }
 
-/// Convert a [`Color`] to an SVG color string.
+/// Convert a [`Color`] to an SVG color string
 #[expect(
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss,
@@ -57,11 +48,10 @@ pub fn color_to_svg(c: Color) -> String {
     }
 }
 
-/// Extract stroke width from a pen.
+/// Extract a stroke width from a pen
 ///
-/// For elliptical pens, returns the geometric mean of the two axis lengths
-/// (which equals the diameter for a circular pen). For polygonal pens,
-/// returns the maximum vertex distance from the origin (approximation).
+/// Elliptical pens yield the geometric mean of the two axis lengths, which is the diameter for a circular pen.
+/// Polygonal pens approximate with twice the maximum vertex distance from the origin.
 pub fn pen_stroke_width(pen: &Pen) -> Scalar {
     match pen {
         Pen::Elliptical(t) => {
@@ -103,7 +93,7 @@ pub fn dash_to_svg(dash: &DashPattern, precision: usize) -> String {
         .join(",")
 }
 
-/// Format a scalar to the given precision, stripping trailing zeros.
+/// Format a scalar to the given precision, stripping trailing zeros
 pub fn fmt_scalar(v: Scalar, precision: usize) -> String {
     let s = format!("{v:.precision$}");
     if s.contains('.') {

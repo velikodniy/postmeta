@@ -1,23 +1,18 @@
-//! Pure math for Hobby's algorithm: the velocity function, curl ratio,
-//! tension handling, and conversion of solved angles to Bezier control
-//! points.
+//! Pure math for Hobby's algorithm: the velocity function, curl ratio, tension handling, and conversion of solved angles to Bezier control points
 
 use crate::path::KnotPath;
 use crate::types::{EPSILON, KnotDirection, NEAR_ZERO, Point, Scalar, Vec2};
 
-/// Minimum tension value (`MetaPost` uses 3/4).
+/// Minimum tension value (`MetaPost` uses 3/4)
 const MIN_TENSION: Scalar = 0.75;
 
 // ---------------------------------------------------------------------------
 // Control point computation
 // ---------------------------------------------------------------------------
 
-/// Convert solved turning angles to Bezier control points for one segment.
+/// Convert solved turning angles to Bezier control points for one segment
 ///
-/// Given the departure angle theta at knot `i` and arrival angle phi at
-/// knot `j`, the chord vector is rotated by theta (resp. -phi) and
-/// scaled by the velocity function to obtain the outgoing (resp.
-/// incoming) control point positions.
+/// Given the departure angle theta at knot `i` and arrival angle phi at knot `j`, the chord vector is rotated by theta (resp. -phi) and scaled by the velocity function to obtain the outgoing (resp. incoming) control point positions.
 pub(super) fn set_controls_for_segment(
     path: &mut KnotPath,
     i: usize,
@@ -84,12 +79,10 @@ pub(super) fn set_controls_for_segment(
     path.knots[j].left = KnotDirection::Explicit(left_cp);
 }
 
-/// Enforce the "at least" tension constraint (bounding triangle).
+/// Enforce the "at least" tension constraint (bounding triangle)
 ///
-/// When both turning angles bend the same way, the tangent lines at
-/// the two knots form a triangle. `MetaPost`'s "at least" tension
-/// (signaled by a negative tension value) limits the control-point
-/// distances so the curve stays inside that triangle.
+/// When both turning angles bend the same way, the tangent lines at the two knots form a triangle.
+/// `MetaPost`'s "at least" tension (a negative tension value) limits the control-point distances so the curve stays inside that triangle.
 #[expect(
     clippy::too_many_arguments,
     reason = "mirrors mp.web set_controls which requires all sin/cos and tension values"
@@ -116,8 +109,7 @@ fn clamp_at_least(
         return (rr, ss);
     }
 
-    // Safety factor: multiply by (1 + 1/65536) to avoid boundary case.
-    let sine = sine * (1.0 + 1.0 / 65536.0);
+    let sine = sine * (1.0 + 1.0 / 65536.0); // safety factor to avoid boundary case
 
     let mut rr = rr;
     let mut ss = ss;
@@ -141,13 +133,10 @@ fn clamp_at_least(
     (rr, ss)
 }
 
-/// Compute control-point distance as a fraction of the chord length.
+/// Compute control-point distance as a fraction of the chord length
 ///
-/// Implements Hobby's velocity function (Hobby 1986, section 3).
-/// Given the departure angle theta and arrival angle phi of a spline
-/// segment, this determines how far the control point sits from its
-/// knot relative to the chord. The result is inversely proportional
-/// to tension.
+/// Implements Hobby's velocity function (Hobby 1986, section 3): given the departure angle theta and arrival angle phi of a spline segment, determines how far the control point sits from its knot relative to the chord.
+/// The result is inversely proportional to tension.
 fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> Scalar {
     let sqrt2 = std::f64::consts::SQRT_2;
     let sqrt5 = 5.0_f64.sqrt();
@@ -159,17 +148,14 @@ fn velocity(st: Scalar, ct: Scalar, sf: Scalar, cf: Scalar, tension: Scalar) -> 
         return 0.0;
     }
 
-    // Divide by tension first, then cap at 4.
-    let result = num / (denom * tension);
+    let result = num / (denom * tension); // divide by tension first, then cap at 4
     result.min(4.0)
 }
 
-/// Convert an endpoint curl value to an angle ratio.
+/// Convert an endpoint curl value to an angle ratio
 ///
-/// At an open-path endpoint, the curl parameter gamma controls how
-/// much the curve bends. This function computes the ratio
-/// theta/phi (or phi/theta) that satisfies the curl boundary
-/// condition for the given pair of tensions (Hobby 1986, section 4).
+/// At an open-path endpoint, the curl parameter gamma controls how much the curve bends.
+/// Computes the ratio theta/phi (or phi/theta) that satisfies the curl boundary condition for the given pair of tensions (Hobby 1986, section 4).
 pub(super) fn curl_ratio(gamma: Scalar, a_tension: Scalar, b_tension: Scalar) -> Scalar {
     let at = tension_val(a_tension);
     let bt = tension_val(b_tension);
@@ -192,11 +178,9 @@ pub(super) fn curl_ratio(gamma: Scalar, a_tension: Scalar, b_tension: Scalar) ->
     }
 }
 
-/// Get the effective tension value, clamping at minimum and handling
-/// "at least" (negative values).
+/// Get the effective tension value, clamping at minimum and handling "at least" (negative values)
 pub(super) const fn tension_val(t: Scalar) -> Scalar {
-    // Negative means "at least" — take absolute value, clamp to minimum.
-    t.abs().max(MIN_TENSION)
+    t.abs().max(MIN_TENSION) // negative means "at least"
 }
 
 // ---------------------------------------------------------------------------

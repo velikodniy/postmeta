@@ -1,8 +1,7 @@
-//! Path operations and Hobby's spline algorithm.
+//! Path operations and Hobby's spline algorithm
 //!
 //! This module provides:
-//! - Hobby's algorithm for computing smooth cubic Bezier control points
-//!   through a sequence of knots with direction/tension/curl constraints.
+//! - Hobby's algorithm for computing smooth cubic Bezier control points through a sequence of knots with direction/tension/curl constraints.
 //! - [`BezierPath`] — a resolved cubic Bezier path with per-segment controls.
 
 pub mod bezier_path;
@@ -11,10 +10,9 @@ pub(crate) mod tridiagonal;
 
 pub use bezier_path::{BezierPath, SegmentControls};
 
-/// A shared, immutable resolved path.
+/// A shared, immutable resolved path
 ///
-/// Paths are reference-counted so that pictures, capsules, and drawing
-/// state can share them without cloning the underlying control points.
+/// Paths are reference-counted so that pictures, capsules, and drawing state can share them without cloning the underlying control points.
 pub type SharedPath = std::sync::Arc<BezierPath>;
 
 use crate::types::{Knot, KnotDirection};
@@ -23,12 +21,9 @@ use crate::types::{Knot, KnotDirection};
 // KnotPath
 // ---------------------------------------------------------------------------
 
-/// A knot-based path: a sequence of knots with direction/tension constraints,
-/// optionally cyclic.
+/// A knot-based path: a sequence of knots with direction/tension constraints, optionally cyclic
 ///
-/// After Hobby's algorithm runs (via [`resolve()`](Self::resolve)), all
-/// `KnotDirection` values will be `Explicit` (computed Bezier control points)
-/// and the result is returned as a [`BezierPath`].
+/// After Hobby's algorithm runs (via [`resolve()`](Self::resolve)), all `KnotDirection` values will be `Explicit` and the result is returned as a [`BezierPath`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct KnotPath {
     pub knots: Vec<Knot>,
@@ -36,7 +31,6 @@ pub struct KnotPath {
 }
 
 impl KnotPath {
-    /// Create an empty open path.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -45,15 +39,12 @@ impl KnotPath {
         }
     }
 
-    /// Create a path from knots.
     #[must_use]
     pub const fn from_knots(knots: Vec<Knot>, is_cyclic: bool) -> Self {
         Self { knots, is_cyclic }
     }
 
-    /// Number of segments in the path.
-    /// For a cyclic path with N knots, there are N segments.
-    /// For an open path with N knots, there are N-1 segments.
+    /// Number of segments in the path: N for a cyclic path with N knots, N-1 for an open path
     #[must_use]
     pub fn num_segments(&self) -> usize {
         if self.knots.is_empty() {
@@ -66,17 +57,16 @@ impl KnotPath {
         }
     }
 
-    /// Resolve direction constraints via Hobby's algorithm and return
-    /// a [`BezierPath`] with explicit cubic control points.
+    /// Resolve direction constraints via Hobby's algorithm and return a [`BezierPath`] with explicit cubic control points
     #[must_use]
     pub fn resolve(mut self) -> BezierPath {
         hobby::make_choices(&mut self);
         self.into_bezier_path()
     }
 
-    /// Convert a fully-resolved `KnotPath` (all directions `Explicit`) into
-    /// a [`BezierPath`].  Non-explicit directions fall back to the on-curve
-    /// point.
+    /// Convert a fully-resolved `KnotPath` (all directions `Explicit`) into a [`BezierPath`]
+    ///
+    /// Non-explicit directions fall back to the on-curve point.
     pub(crate) fn into_bezier_path(self) -> BezierPath {
         if self.knots.is_empty() {
             return BezierPath::new();
@@ -123,7 +113,6 @@ mod tests {
 
     #[test]
     fn test_num_segments() {
-        // Empty path
         let p = KnotPath::new();
         assert_eq!(p.num_segments(), 0);
 
@@ -134,7 +123,7 @@ mod tests {
         );
         assert_eq!(p.num_segments(), 1);
 
-        // Cyclic path with 3 knots = 3 segments
+        // Cyclic path: N segments
         let p = KnotPath::from_knots(
             vec![
                 Knot::new(Point::new(0.0, 0.0)),
@@ -166,7 +155,7 @@ mod tests {
         );
         assert_eq!(p.num_segments(), 2);
 
-        // Cyclic path with 3 knots = 3 segments
+        // Cyclic path: N segments
         let p = KnotPath::from_knots(
             vec![
                 Knot::new(Point::ZERO),

@@ -1,4 +1,4 @@
-//! Interpreter integration tests, grouped by theme.
+//! Interpreter integration tests, grouped by theme
 
 mod helpers;
 

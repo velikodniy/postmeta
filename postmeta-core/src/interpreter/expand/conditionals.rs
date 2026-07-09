@@ -8,10 +8,8 @@ use crate::interpreter::EqualsMode;
 impl Interpreter {
     /// Handle `if <boolean>:` — evaluate the condition and enter a branch.
     ///
-    /// On return, `self.cur` is the first non-expandable token of the
-    /// active branch (or the token after `fi` if no branch is taken).
+    /// On return, `self.cur` is the first non-expandable token of the active branch, or the token after `fi` if no branch is taken.
     pub(in crate::interpreter) fn expand_if(&mut self) {
-        // Evaluate the boolean expression after `if`
         self.get_x_next();
         let condition = match self.scan_expression(EqualsMode::Relation) {
             Ok(result) => match result.exp {
@@ -28,18 +26,15 @@ impl Interpreter {
             }
         };
 
-        // Expect `:` after the condition
         if self.cur.command == Command::Colon {
-            self.get_next(); // consume the colon
+            self.get_next();
         }
 
         if condition {
             self.control_flow.if_stack.push(IfState::Active);
-            // `cur` is now the first token of the true branch — expand it
             self.expand_current();
         } else {
             self.control_flow.if_stack.push(IfState::Skipping);
-            // Skip tokens until else/elseif/fi. On return, `cur` is set.
             self.skip_to_fi_or_else();
         }
     }
@@ -56,12 +51,11 @@ impl Interpreter {
         };
 
         if modifier == FiOrElseOp::Fi {
-            // End of conditional
             self.control_flow.if_stack.pop();
             self.get_next();
             self.expand_current();
         } else if modifier == FiOrElseOp::Else || modifier == FiOrElseOp::ElseIf {
-            // Active branch done — skip remaining branches to `fi`.
+            // Active branch done — skip remaining branches to `fi`
             if let Some(state) = self.control_flow.if_stack.last_mut() {
                 *state = IfState::Done;
             }
@@ -71,8 +65,8 @@ impl Interpreter {
 
     /// Skip tokens until we find `else`, `elseif`, or `fi` at the current nesting level.
     ///
-    /// Called when a conditional branch is false. On return, `self.cur` is set
-    /// to the first non-expandable token of the next active branch or after `fi`.
+    /// Called when a conditional branch is false.
+    /// On return, `self.cur` is the first non-expandable token of the next active branch or after `fi`.
     fn skip_to_fi_or_else(&mut self) {
         let mut depth: u32 = 0;
         loop {
@@ -103,7 +97,7 @@ impl Interpreter {
                         if let Some(state) = self.control_flow.if_stack.last_mut() {
                             *state = IfState::Active;
                         }
-                        self.get_next(); // consume `else`
+                        self.get_next();
                         if self.cur.command == Command::Colon {
                             self.get_next();
                         }
@@ -130,7 +124,7 @@ impl Interpreter {
 
     /// Skip tokens until we find `fi` at the current nesting level.
     ///
-    /// Called when we already took a branch and hit `else`/`elseif`.
+    /// Called after already taking a branch and hitting `else`/`elseif`.
     /// On return, `self.cur` is the next non-expandable token after `fi`.
     fn skip_to_fi(&mut self) {
         let mut depth: u32 = 0;

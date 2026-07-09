@@ -1,11 +1,7 @@
-//! Runtime value types for the `MetaPost` interpreter.
+//! Runtime value types for the `MetaPost` interpreter
 //!
-//! Every expression in `MetaPost` evaluates to a [`Value`]. The type system
-//! mirrors the original WEB source (§12): numeric values progress through
-//! states from `unknown` → `independent` → `dependent` → `known`.
-//!
-//! Non-numeric types (boolean, string, pen, path, picture) are either
-//! known or unknown (forming rings of equivalent unknowns).
+//! Every expression evaluates to a [`Value`]. The type system mirrors the original WEB source (§12): numeric values progress through states from `unknown` → `independent` → `dependent` → `known`.
+//! Non-numeric types (boolean, string, pen, path, picture) are either known or unknown, forming rings of equivalent unknowns.
 
 use std::sync::Arc;
 
@@ -14,85 +10,66 @@ use postmeta_graphics::types::{
     Color, DashPattern, LineCap, LineJoin, Pen, Picture, Scalar, Transform,
 };
 
-/// Tolerance for numeric equality in `MetaPost` language semantics.
+/// Tolerance for numeric equality in `MetaPost` language semantics
 ///
-/// Two numeric values that differ by less than this are considered equal
-/// by `=`/`<>` comparisons and `Value::PartialEq`.
-/// This matches `MetaPost`'s behavior where numeric precision is limited.
+/// Values differing by less than this are equal under `=`/`<>` and `Value::PartialEq`, matching `MetaPost`'s limited numeric precision.
 pub const NUMERIC_TOLERANCE: Scalar = 1e-4;
 
 // ---------------------------------------------------------------------------
 // MetaPost type codes
 // ---------------------------------------------------------------------------
 
-/// The type of a `MetaPost` value or variable.
+/// The type of a `MetaPost` value or variable
 ///
-/// The ordering matters: types >= `Numeric` are numeric; types with
-/// `Unknown*` variants can participate in nonlinear equations.
+/// The ordering matters: types >= `Numeric` are numeric; types with `Unknown*` variants can participate in nonlinear equations.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Type {
-    /// Never mentioned.
     #[default]
     Undefined = 0,
-    /// No value (e.g. result of a procedure call).
+    /// No value (e.g. result of a procedure call)
     Vacuous = 1,
-    /// A known boolean value.
     Boolean = 2,
-    /// An unknown boolean (in an equivalence ring).
+    /// An unknown boolean (in an equivalence ring)
     UnknownBoolean = 3,
-    /// A known string value.
     String = 4,
-    /// An unknown string.
     UnknownString = 5,
-    /// A known pen value.
     Pen = 6,
-    /// An unknown pen.
     UnknownPen = 7,
-    /// A known path value.
     Path = 8,
-    /// An unknown path.
     UnknownPath = 9,
-    /// A known picture value.
     Picture = 10,
-    /// An unknown picture.
     UnknownPicture = 11,
-    /// A transform (6 numeric parts).
+    /// A transform (6 numeric parts)
     TransformType = 12,
-    /// A color (3 numeric parts: red, green, blue).
+    /// A color (3 numeric parts: red, green, blue)
     ColorType = 13,
-    /// A pair (2 numeric parts: x, y).
+    /// A pair (2 numeric parts: x, y)
     PairType = 14,
-    /// Declared numeric but not yet used in equations.
+    /// Declared numeric but not yet used in equations
     Numeric = 15,
-    /// A known numeric value.
     Known = 16,
-    /// Linear combination with fraction coefficients.
+    /// Linear combination with fraction coefficients
     Dependent = 17,
-    /// A free variable with serial number.
+    /// A free variable with serial number
     Independent = 18,
 }
 
 impl Type {
-    /// Whether this is a numeric type (can participate in equations).
     #[must_use]
     pub const fn is_numeric(self) -> bool {
         (self as u8) >= (Self::Numeric as u8)
     }
 
-    /// Whether this is a compound type with numeric sub-parts.
     #[must_use]
     pub const fn is_compound(self) -> bool {
         matches!(self, Self::PairType | Self::ColorType | Self::TransformType)
     }
 
-    /// Number of numeric components of a compound type.
+    /// Number of numeric components of a compound type
     ///
-    /// Pairs have 2, colors 3, transforms 6; every other type is atomic and
-    /// returns `None`. Compound allocation, equation splitting, and
-    /// assignment are all driven by this count, so a future compound type
-    /// (e.g. `cmykcolor`) only needs an entry here and in
-    /// [`Self::component_suffixes`].
+    /// Pairs have 2, colors 3, transforms 6; other types are atomic and return `None`.
+    /// Compound allocation, equation splitting, and assignment are all driven by this count, so a future compound type (e.g. `cmykcolor`) only needs an entry here and in [`Self::component_suffixes`].
     #[must_use]
     pub const fn components(self) -> Option<usize> {
         match self {
@@ -103,10 +80,10 @@ impl Type {
         }
     }
 
-    /// Variable-name suffixes of the components, in storage order.
+    /// Variable-name suffixes of the components, in storage order
     ///
-    /// These are the `.x`/`.y`-style suffixes used to register component
-    /// variables (e.g. `p.x`, `c.r`, `T.txx`). Empty for atomic types.
+    /// These are the `.x`/`.y`-style suffixes used to register component variables (e.g. `p.x`, `c.r`, `T.txx`).
+    /// Empty for atomic types.
     #[must_use]
     pub const fn component_suffixes(self) -> &'static [&'static str] {
         match self {
@@ -117,7 +94,7 @@ impl Type {
         }
     }
 
-    /// Whether this is an unknown (ring) type.
+    /// Whether this is an unknown (ring) type
     #[must_use]
     pub const fn is_unknown(self) -> bool {
         matches!(
@@ -130,7 +107,6 @@ impl Type {
         )
     }
 
-    /// Get the known variant of an unknown type.
     #[must_use]
     pub const fn known_variant(self) -> Self {
         match self {
@@ -143,7 +119,6 @@ impl Type {
         }
     }
 
-    /// Get the unknown variant of a known type.
     #[must_use]
     pub const fn unknown_variant(self) -> Self {
         match self {
@@ -187,33 +162,23 @@ fn scalar_approx_eq(a: Scalar, b: Scalar) -> bool {
 // Known values
 // ---------------------------------------------------------------------------
 
-/// A fully-resolved `MetaPost` value.
+/// A fully-resolved `MetaPost` value
 #[derive(Debug, Clone)]
 pub enum Value {
-    /// No value.
     Vacuous,
-    /// Boolean.
     Boolean(bool),
-    /// Numeric (known scalar).
     Numeric(Scalar),
-    /// Pair (known x, y).
+    /// Known x, y
     Pair(Scalar, Scalar),
-    /// Color (known r, g, b).
     Color(Color),
-    /// Transform (known).
     Transform(Transform),
-    /// String.
     String(Arc<str>),
-    /// Path.
     Path(Arc<BezierPath>),
-    /// Pen.
     Pen(Pen),
-    /// Picture.
     Picture(Picture),
 }
 
 impl Value {
-    /// Get the `MetaPost` type of this value.
     #[must_use]
     pub const fn ty(&self) -> Type {
         match self {
@@ -230,7 +195,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a numeric value.
     #[must_use]
     pub const fn as_numeric(&self) -> Option<Scalar> {
         if let Self::Numeric(v) = self {
@@ -240,7 +204,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a boolean value.
     #[must_use]
     pub const fn as_boolean(&self) -> Option<bool> {
         if let Self::Boolean(v) = self {
@@ -250,7 +213,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a pair value.
     #[must_use]
     pub const fn as_pair(&self) -> Option<(Scalar, Scalar)> {
         if let Self::Pair(x, y) = self {
@@ -260,7 +222,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a string value.
     #[must_use]
     pub const fn as_string(&self) -> Option<&Arc<str>> {
         if let Self::String(s) = self {
@@ -270,7 +231,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a path value.
     #[must_use]
     pub const fn as_path(&self) -> Option<&Arc<BezierPath>> {
         if let Self::Path(p) = self {
@@ -280,7 +240,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a picture value.
     #[must_use]
     pub const fn as_picture(&self) -> Option<&Picture> {
         if let Self::Picture(p) = self {
@@ -290,7 +249,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a pen value.
     #[must_use]
     pub const fn as_pen(&self) -> Option<&Pen> {
         if let Self::Pen(p) = self {
@@ -300,7 +258,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a color value.
     #[must_use]
     pub const fn as_color(&self) -> Option<&Color> {
         if let Self::Color(c) = self {
@@ -310,7 +267,6 @@ impl Value {
         }
     }
 
-    /// Try to extract a transform value.
     #[must_use]
     pub const fn as_transform(&self) -> Option<Transform> {
         if let Self::Transform(t) = self {
@@ -375,20 +331,14 @@ impl std::fmt::Display for Value {
 // Pen stroke parameters (for drawing state)
 // ---------------------------------------------------------------------------
 
-/// Current drawing parameters, accumulated by `withpen`, `withcolor`, `dashed`.
+/// Current drawing parameters, accumulated by `withpen`, `withcolor`, `dashed`
 #[derive(Debug, Clone)]
 pub struct DrawingState {
-    /// Current pen.
     pub pen: Pen,
-    /// Current color.
     pub color: Color,
-    /// Dash pattern, if any.
     pub dash: Option<DashPattern>,
-    /// Line cap style.
     pub line_cap: LineCap,
-    /// Line join style.
     pub line_join: LineJoin,
-    /// Miter limit.
     pub miter_limit: Scalar,
 }
 

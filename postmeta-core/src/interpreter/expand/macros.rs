@@ -30,21 +30,17 @@ impl Interpreter {
             MacroDefOp::PrimaryDef | MacroDefOp::SecondaryDef | MacroDefOp::TertiaryDef
         );
 
-        self.get_next(); // skip `def`/`vardef`/etc.
+        self.get_next();
 
         if is_binary_def {
-            // primarydef/secondarydef/tertiarydef: <param> <name> <param> = body enddef
-            // e.g., `primarydef a dotprod b = ...`
             self.do_binary_macro_def(def_op)
         } else {
-            // def/vardef: <name>(param_list) = body enddef
             self.do_normal_macro_def(is_vardef)
         }
     }
 
     /// Handle `def <name>(params) = body enddef` or `vardef <name>(params) = body enddef`.
     fn do_normal_macro_def(&mut self, is_vardef: bool) -> InterpResult<()> {
-        // Get macro name
         let Some(macro_sym) = self.cur.sym else {
             self.report_error(ErrorKind::MissingToken, "Expected macro name after def");
             self.skip_to_enddef();
@@ -52,7 +48,7 @@ impl Interpreter {
         };
         let macro_name = self.cur_symbolic_name().unwrap_or("").to_owned();
 
-        self.get_next(); // skip macro name
+        self.get_next();
 
         // For vardef: check for `@#` suffix parameter marker
         let mut has_at_suffix = false;
@@ -60,22 +56,18 @@ impl Interpreter {
             && self.cur.command == Command::MacroSpecial
             && MacroSpecialOp::from_modifier(self.cur.modifier) == Some(MacroSpecialOp::MacroSuffix)
         {
-            // `@#` suffix parameter — consume it
             has_at_suffix = true;
             self.get_next();
         }
 
-        // Parse parameter list
         let params = self.scan_macro_params()?;
 
-        // Expect `=`
         if self.cur.command == Command::Equals || self.cur.command == Command::Assignment {
             self.get_next();
         } else {
             self.report_error(ErrorKind::MissingToken, "Expected `=` in macro definition");
         }
 
-        // Scan the body until `enddef`, replacing param names with Param(idx)
         let mut param_names: Vec<String> = params.iter().map(|(name, _, _)| name.clone()).collect();
         if has_at_suffix {
             // The `@#` suffix parameter gets the next parameter index
@@ -90,7 +82,7 @@ impl Interpreter {
             param_groups.push(u16::MAX);
         }
 
-        // For vardefs, pre-bake begingroup/endgroup into the body.
+        // For vardefs, pre-bake begingroup/endgroup into the body
         let body: SharedTokenList = if is_vardef {
             let bg = self.state.symbols.lookup("begingroup");
             let eg = self.state.symbols.lookup("endgroup");
@@ -103,7 +95,6 @@ impl Interpreter {
             body.into()
         };
 
-        // Store the macro
         let info = MacroInfo {
             params: param_types,
             param_groups,
@@ -113,12 +104,9 @@ impl Interpreter {
         };
         self.state.macros.insert(macro_sym, info);
 
-        // For regular `def`, set the symbol to `DefinedMacro` so that
-        // `get_x_next` expands it (expandable = cmd < min_command = 14).
-        // For `vardef`, keep the symbol as `TagToken` — the macro nature is
-        // detected by `scan_primary` when it checks `self.state.macros` after
-        // suffix collection.  This matches `mp.web`: vardef macros are stored
-        // in the variable structure, not in `eq_type`.
+        // For regular `def`, set the symbol to `DefinedMacro` so `get_x_next` expands it (expandable = cmd < min_command = 14).
+        // For `vardef`, keep the symbol as `TagToken` — the macro nature is detected by `scan_primary` when it checks `self.state.macros` after suffix collection.
+        // This matches `mp.web`: vardef macros are stored in the variable structure, not in `eq_type`.
         if !is_vardef {
             self.state.symbols.set(
                 macro_sym,
@@ -129,11 +117,9 @@ impl Interpreter {
             );
         }
 
-        // Skip past enddef (scan_macro_body consumed it)
-        // Get the next token
+        // scan_macro_body already consumed enddef, so this reads the next token
         self.get_x_next();
 
-        // Consume trailing semicolon
         if self.cur.command == Command::Semicolon {
             self.get_x_next();
         }
@@ -147,7 +133,6 @@ impl Interpreter {
     /// Syntax: `primarydef <lhs_param> <op_name> <rhs_param> = body enddef`
     #[allow(clippy::unnecessary_wraps)]
     fn do_binary_macro_def(&mut self, def_op: MacroDefOp) -> InterpResult<()> {
-        // Parse: <lhs_param> <op_name> <rhs_param>
         let lhs_name = if let Some(s) = self.cur_symbolic_name() {
             s.to_owned()
         } else {
@@ -158,7 +143,7 @@ impl Interpreter {
             self.skip_to_enddef();
             return Ok(());
         };
-        self.get_next(); // skip lhs param
+        self.get_next();
 
         let Some(op_sym) = self.cur.sym else {
             self.report_error(
@@ -168,7 +153,7 @@ impl Interpreter {
             self.skip_to_enddef();
             return Ok(());
         };
-        self.get_next(); // skip op name
+        self.get_next();
 
         let rhs_name = if let Some(s) = self.cur_symbolic_name() {
             s.to_owned()
@@ -180,14 +165,12 @@ impl Interpreter {
             self.skip_to_enddef();
             return Ok(());
         };
-        self.get_next(); // skip rhs param
+        self.get_next();
 
-        // Expect `=`
         if self.cur.command == Command::Equals || self.cur.command == Command::Assignment {
             self.get_next();
         }
 
-        // Scan body with two parameter names
         let param_names = vec![lhs_name, rhs_name];
         let body = self.scan_macro_body(&param_names);
 
@@ -200,7 +183,6 @@ impl Interpreter {
         };
         self.state.macros.insert(op_sym, info);
 
-        // Set the symbol to the appropriate operator command
         let cmd = match def_op {
             MacroDefOp::PrimaryDef => Command::SecondaryPrimaryMacro,
             MacroDefOp::SecondaryDef => Command::TertiarySecondaryMacro,
@@ -230,43 +212,35 @@ impl Interpreter {
 
     /// Scan macro parameter list: `(expr x, suffix s, text t)`.
     ///
-    /// Returns a list of (name, type, group) tuples. Delimited parameters
-    /// within the same `(…)` share a group number. Undelimited parameters
-    /// get `u16::MAX`. If there are no parentheses, returns an empty list
-    /// (parameterless macro).
+    /// Returns a list of (name, type, group) tuples.
+    /// Delimited parameters within the same `(…)` share a group number; undelimited parameters get `u16::MAX`.
+    /// If there are no parentheses, returns an empty list (parameterless macro).
     #[allow(clippy::unnecessary_wraps)]
     fn scan_macro_params(&mut self) -> InterpResult<Vec<(String, ParamType, u16)>> {
         let mut params: Vec<(String, ParamType, u16)> = Vec::new();
         let mut group_idx: u16 = 0;
 
-        // Parse delimited parameters: (expr a, suffix b, text t)
-        // Multiple delimited groups are allowed: (expr a)(text t)
+        // Parse delimited parameters: (expr a, suffix b, text t); multiple delimited groups are allowed: (expr a)(text t)
         while self.cur.command == Command::LeftDelimiter {
-            self.get_next(); // skip `(`
+            self.get_next();
 
-            // Empty param list: ()
             if self.cur.command == Command::RightDelimiter {
                 self.get_next();
             } else {
-                // Track the current type within a delimited group.
-                // In MetaPost, `(suffix a, b)` means both a and b are suffix.
-                // The type keyword applies to all following names until the next
-                // type keyword or closing paren (mp.web §12882).
+                // Track the current type within a delimited group: in `MetaPost`, `(suffix a, b)` means both a and b are suffix.
+                // The type keyword applies to all following names until the next type keyword or closing paren (`mp.web` §12882).
                 let mut current_delimited_type = ParamType::Expr;
                 loop {
-                    // Expect a param type: expr, suffix, or text
                     let param_type = if self.cur.command == Command::ParamType {
                         let pt = Self::delimited_param_type(self.cur.modifier);
-                        self.get_next(); // skip type keyword
+                        self.get_next();
                         current_delimited_type = pt;
                         pt
                     } else {
                         current_delimited_type
                     };
 
-                    // Get the parameter name.
-                    // Can't use map_or_else: cur_symbolic_name borrows self,
-                    // but report_error needs &mut self.
+                    // Can't use map_or_else: cur_symbolic_name borrows self but report_error needs &mut self
                     #[allow(clippy::option_if_let_else)]
                     let name = if let Some(s) = self.cur_symbolic_name() {
                         s.to_owned()
@@ -274,7 +248,7 @@ impl Interpreter {
                         self.report_error(ErrorKind::MissingToken, "Expected parameter name");
                         String::new()
                     };
-                    self.get_next(); // skip param name
+                    self.get_next();
 
                     params.push((name, param_type, group_idx));
 
@@ -291,12 +265,11 @@ impl Interpreter {
             group_idx += 1;
         }
 
-        // Parse undelimited parameters: primary g, expr x, suffix s, text t
-        // These appear between the closing `)` (or macro name) and `=`.
+        // Parse undelimited parameters: primary g, expr x, suffix s, text t; these appear between the closing `)` (or macro name) and `=`.
         // Special case: `expr t of p` adds both t (expr) and p (suffix).
         while self.cur.command == Command::ParamType {
             let pt = Self::undelimited_param_type(self.cur.modifier);
-            self.get_next(); // skip type keyword
+            self.get_next();
 
             let name = self.cur_symbolic_name().unwrap_or("").to_owned();
             if name.is_empty() {
@@ -308,7 +281,7 @@ impl Interpreter {
 
             // Check for `of <name>` pattern (e.g., `expr t of p`)
             if self.cur.command == Command::OfToken {
-                self.get_next(); // skip `of`
+                self.get_next();
                 let of_name = self.cur_symbolic_name().unwrap_or("").to_owned();
                 self.get_next();
                 params.push((of_name, ParamType::OfPrimary, u16::MAX));
@@ -340,10 +313,7 @@ impl Interpreter {
         }
     }
 
-    /// Scan a suffix argument for macro expansion.
-    ///
-    /// Collects symbolic tokens (and bracket subscripts) until a non-suffix
-    /// token is found.
+    /// Scan a suffix argument for macro expansion: collects symbolic tokens (and bracket subscripts) until a non-suffix token is found
     fn scan_suffix_arg(&mut self) -> TokenList {
         let mut suffix_tokens = TokenList::new();
         loop {
@@ -357,7 +327,7 @@ impl Interpreter {
             }
 
             if self.cur.command == Command::LeftBracket {
-                // Capture a full bracketed subscript, including nested brackets.
+                // Capture a full bracketed subscript, including nested brackets
                 let mut depth: u32 = 0;
                 loop {
                     if self.cur.command == Command::LeftBracket {
@@ -381,9 +351,7 @@ impl Interpreter {
         suffix_tokens
     }
 
-    /// Scan a delimited text argument for macro expansion.
-    ///
-    /// Collects tokens until closing delimiter or comma (if not last param).
+    /// Scan a delimited text argument for macro expansion: collects tokens until closing delimiter or comma (if not last param)
     fn scan_text_arg(&mut self, param_idx: usize, all_params: &[ParamType]) -> TokenList {
         let mut text_tokens = TokenList::new();
         let mut delim_depth: u32 = 0;
@@ -410,9 +378,7 @@ impl Interpreter {
         text_tokens
     }
 
-    /// Scan a macro body until `enddef`, tracking nested `def`/`enddef` pairs.
-    ///
-    /// Parameter names are replaced with `StoredToken::Param(idx)` references.
+    /// Scan a macro body until `enddef`, tracking nested `def`/`enddef` pairs; parameter names are replaced with `StoredToken::Param(idx)` references
     fn scan_macro_body(&mut self, param_names: &[String]) -> TokenList {
         let mut body = TokenList::new();
         let mut depth: u32 = 0;
@@ -443,11 +409,8 @@ impl Interpreter {
                     return body;
                 }
                 _ => {
-                    // Check if this token matches a parameter name.
-                    // Parameter substitution applies at ALL nesting depths
-                    // (inside nested def..enddef too), matching mp.web behaviour.
-                    // The depth counter only tracks def/enddef pairs to find the
-                    // outer body boundary.
+                    // Parameter substitution applies at all nesting depths (inside nested def..enddef too), matching `mp.web` behavior.
+                    // The depth counter only tracks def/enddef pairs to find the outer body boundary.
                     if let Some(name) = self.cur_symbolic_name() {
                         if let Some(idx) = param_names.iter().position(|p| p == name) {
                             body.push(StoredToken::Param(idx));
@@ -464,9 +427,8 @@ impl Interpreter {
 
     /// Expand a binary macro operator (from `primarydef`/`secondarydef`/`tertiarydef`).
     ///
-    /// The left operand has already been evaluated and taken. The current
-    /// token is the operator name. We need to scan the right operand at the
-    /// next lower precedence level, then expand the body.
+    /// The left operand has already been evaluated and taken; the current token is the operator name.
+    /// Scans the right operand at the next lower precedence level, then expands the body.
     pub(in crate::interpreter) fn expand_binary_macro(
         &mut self,
         left: &Value,
@@ -485,7 +447,6 @@ impl Interpreter {
             ));
         };
 
-        // Determine which precedence to scan the RHS at
         let cmd = self.cur.command;
         self.get_x_next();
         let rhs_result = match cmd {
@@ -502,14 +463,9 @@ impl Interpreter {
             value_to_stored_tokens(&right, &mut self.state.symbols),
         ];
 
-        // After scanning the RHS, `self.cur` holds the first token
-        // beyond the operand (the look-ahead).  mp.web §15789 uses
-        // `back_input` to push this token back BEFORE the body
-        // expansion so it is naturally read after the body is consumed.
-        //
-        // In our architecture, `back_input` uses a single slot with
-        // highest priority, so we instead push the look-ahead as a
-        // one-token level below the body.
+        // After scanning the RHS, `self.cur` holds the first token beyond the operand (the look-ahead).
+        // `mp.web` §15789 uses `back_input` to push this token back before the body expansion so it is naturally read after the body is consumed.
+        // In this architecture, `back_input` uses a single slot with highest priority, so the look-ahead is instead pushed as a one-token level below the body.
         let mut saved = TokenList::new();
         self.store_current_token(&mut saved);
         if !saved.is_empty() {
@@ -518,13 +474,12 @@ impl Interpreter {
                 .push_token_list(saved, Vec::new(), "binary-mac-saved");
         }
 
-        // Push the body on top — it will be read before the saved token.
+        // Push the body on top — it will be read before the saved token
         let args: Vec<SharedTokenList> = args.into_iter().map(Into::into).collect();
         self.state
             .input
             .push_token_list(Arc::clone(&macro_info.body), args, "binary macro");
 
-        // Get next token from expansion and evaluate the body
         self.get_x_next();
         self.scan_expression(EqualsMode::Relation)
     }
@@ -556,20 +511,16 @@ impl Interpreter {
 
     /// Expand a user-defined macro.
     ///
-    /// Scans arguments according to the macro's parameter types, then pushes
-    /// the body as a token list with parameter bindings, and advances to
-    /// the first token of the expansion.
+    /// Scans arguments according to the macro's parameter types, then pushes the body as a token list with parameter bindings, and advances to the first token of the expansion.
     ///
-    /// NOTE: `expand_current` uses `expand_defined_macro_push_only` instead
-    /// so the central loop controls advancement.
+    /// NOTE: `expand_current` uses `expand_defined_macro_push_only` instead so the central loop controls advancement.
     pub(in crate::interpreter) fn expand_defined_macro(&mut self) {
         self.expand_defined_macro_inner();
         self.get_next();
     }
 
-    /// Core logic for expanding a user-defined macro: scan arguments and push
-    /// the body expansion onto the input stack.  Returns `false` on error
-    /// (caller decides whether to advance the token stream).
+    /// Core logic for expanding a user-defined macro: scan arguments and push the body expansion onto the input stack.
+    /// Returns `false` on error (caller decides whether to advance the token stream).
     #[allow(clippy::too_many_lines)]
     pub(super) fn expand_defined_macro_inner(&mut self) -> bool {
         let Some(macro_sym) = self.cur.sym else {
@@ -586,12 +537,10 @@ impl Interpreter {
         let mut args: Vec<TokenList> = Vec::new();
 
         if !macro_info.params.is_empty() {
-            self.get_x_next(); // advance past the macro name, expanding conditionals/etc.
+            self.get_x_next(); // advance past the macro name, expanding conditionals/etc
 
-            // For vardefs with `@#`, the suffix tokens sit between the macro
-            // name and the argument list `(`.  Collect them now, before the
-            // regular param loop, and insert the arg at the `@#` position
-            // (the last param) afterwards.
+            // For vardefs with `@#`, the suffix tokens sit between the macro name and the argument list `(`.
+            // Collect them now, before the regular param loop, and insert the arg at the `@#` position (the last param) afterwards.
             let at_suffix_arg = if macro_info.has_at_suffix {
                 Some(self.scan_suffix_arg())
             } else {
@@ -600,7 +549,7 @@ impl Interpreter {
 
             let mut in_delimiters = false;
 
-            // Number of regular params (excluding the trailing @# if present).
+            // Number of regular params (excluding the trailing @# if present)
             let regular_param_count = if macro_info.has_at_suffix {
                 macro_info.params.len() - 1
             } else {
@@ -620,7 +569,7 @@ impl Interpreter {
                     ParamType::Expr | ParamType::Suffix | ParamType::Text => {
                         if !in_delimiters {
                             if self.cur.command == Command::LeftDelimiter {
-                                self.get_x_next(); // skip `(`
+                                self.get_x_next();
                                 in_delimiters = true;
                             } else {
                                 self.report_error(
@@ -645,34 +594,24 @@ impl Interpreter {
                             }
                             _ => {}
                         }
-                        // Determine if the next regular param is undelimited.
                         let next_regular_is_undelimited = if i + 1 < regular_param_count {
                             macro_info.params[i + 1].is_undelimited()
                         } else {
                             false
                         };
-                        // After scanning the argument, we see either `,` or `)`.
-                        //
-                        // mp.web §13242: when we see `,` and the NEXT param is
-                        // delimited but in a DIFFERENT group, the comma crosses
-                        // the group boundary — no `)(`  pair is required.  We
-                        // simply consume the comma and stay in_delimiters.
+                        // After scanning the argument, either `,` or `)` follows.
+                        // `mp.web` §13242: when `,` is followed by a NEXT param that is delimited but in a DIFFERENT group, the comma crosses the group boundary — no `)(` pair is required, so just consume the comma and stay in_delimiters.
                         if self.cur.command == Command::Comma {
                             self.get_x_next();
                         }
-                        // Close delimiters when we see `)` and either the next
-                        // param is undelimited, in a different delimited group,
-                        // or this is the last regular parameter.
+                        // Close delimiters when `)` is seen and either the next param is undelimited, in a different delimited group, or this is the last regular parameter
                         if self.cur.command == Command::RightDelimiter
                             && (next_regular_is_undelimited
                                 || i + 1 >= regular_param_count
                                 || (next_group != current_group && next_group != u16::MAX))
                         {
-                            // Only advance past `)` if there are more params to
-                            // scan.  When this is the LAST parameter, leave
-                            // `self.cur` at `)` so the token that follows the
-                            // macro call (typically `;`) is not consumed before
-                            // the body expansion is pushed.
+                            // Only advance past `)` if there are more params to scan.
+                            // When this is the last parameter, leave `self.cur` at `)` so the token that follows the macro call (typically `;`) is not consumed before the body expansion is pushed.
                             if i + 1 < regular_param_count {
                                 self.get_x_next();
                             }
@@ -699,9 +638,7 @@ impl Interpreter {
                         args.push(self.scan_suffix_arg());
                     }
                     ParamType::OfPrimary => {
-                        // `expr t of p` — consume the `of` delimiter, then
-                        // scan the argument as a primary expression (mp.web
-                        // §710: both sides of `of` are expr parameters).
+                        // `expr t of p` — consume the `of` delimiter, then scan the argument as a primary expression (`mp.web` §710: both sides of `of` are expr parameters)
                         if self.cur.command == Command::OfToken {
                             self.get_x_next();
                         }
@@ -722,19 +659,15 @@ impl Interpreter {
                 }
             }
 
-            // Append the pre-collected @# suffix arg at the end (its param
-            // index in the body matches the last position).
+            // Append the pre-collected @# suffix arg at the end (its param index in the body matches the last position)
             if let Some(suffix_arg) = at_suffix_arg {
                 args.push(suffix_arg);
             }
         }
 
-        // When the last *regular* parameter is undelimited, `self.cur` holds
-        // the first token AFTER the arguments (mp.web §389).  We must
-        // preserve it by pushing it as a one-token input level BEFORE the
-        // body expansion.  For `@#` vardefs the trailing `UndelimitedSuffix`
-        // was already collected before the regular params, so check the last
-        // regular param instead.
+        // When the last *regular* parameter is undelimited, `self.cur` holds the first token after the arguments (`mp.web` §389).
+        // It must be preserved by pushing it as a one-token input level before the body expansion.
+        // For `@#` vardefs the trailing `UndelimitedSuffix` was already collected before the regular params, so check the last regular param instead.
         let last_regular_param = if macro_info.has_at_suffix {
             let regular_count = macro_info.params.len().saturating_sub(1);
             macro_info
@@ -786,10 +719,8 @@ impl Interpreter {
     }
 }
 
-/// Convert an `ExprResultValue` to a single-element token list containing a
-/// capsule that preserves dependency information. This is used for expr
-/// arguments to macros so that the equation solver can still track unknown
-/// variables passed through macro parameters.
+/// Convert an `ExprResultValue` to a single-element token list containing a capsule that preserves dependency information.
+/// Used for expr arguments to macros so the equation solver can still track unknown variables passed through macro parameters.
 fn expr_result_to_capsule(result: ExprResultValue) -> TokenList {
     vec![StoredToken::Capsule(Arc::new(result))]
 }

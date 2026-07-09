@@ -1,9 +1,7 @@
-//! Token input system for the `MetaPost` interpreter.
+//! Token input system for the `MetaPost` interpreter
 //!
-//! The input system provides a uniform stream of tokens from multiple
-//! sources: source text (via the scanner), macro replacement text, loop
-//! bodies, and `scantokens` strings. These are managed as a stack of
-//! input levels, matching `mp.web`'s input stack.
+//! Provides a uniform token stream from multiple sources: source text (via the scanner), macro replacement text, loop bodies, and `scantokens` strings.
+//! Sources are managed as a stack of input levels, matching `mp.web`'s input stack.
 
 use std::sync::Arc;
 
@@ -20,22 +18,19 @@ use crate::types::{Type, Value};
 // Resolved token — what the parser sees after hash lookup
 // ---------------------------------------------------------------------------
 
-/// A token after symbol-table lookup, ready for parsing.
+/// A token after symbol-table lookup, ready for parsing
 #[derive(Debug, Clone)]
 pub struct ResolvedToken {
-    /// The command code from the symbol table.
     pub command: Command,
-    /// The modifier from the symbol table.
     pub modifier: u16,
-    /// The symbol id (for variables, macros). `None` for literals.
+    /// Symbol id for variables and macros; `None` for literals
     pub sym: Option<SymbolId>,
-    /// The original token (for span info and literal values).
+    /// The original token, kept for span info and literal values
     pub token: Token,
-    /// Capsule payload: an already-evaluated expression state.
+    /// Capsule payload: an already-evaluated expression state
     ///
-    /// Present only when `command == CapsuleToken` and this token was produced
-    /// by `back_expr`. The expression parser picks this up instead of
-    /// evaluating the token normally.
+    /// Present only when `command == CapsuleToken` and the token came from `back_expr`.
+    /// The expression parser uses this value instead of evaluating the token.
     pub capsule: Option<Arc<ExprValue>>,
 }
 
@@ -43,67 +38,49 @@ pub struct ResolvedToken {
 // Stored token (for macro bodies and loop bodies)
 // ---------------------------------------------------------------------------
 
-/// A token stored in a macro body or loop iteration list.
+/// A token stored in a macro body or loop iteration list
 #[derive(Debug, Clone)]
 pub enum StoredToken {
-    /// A symbolic token (referenced by symbol id).
     Symbol(SymbolId),
-    /// A numeric literal.
     Numeric(f64),
-    /// A string literal.
     StringLit(String),
-    /// A macro parameter reference (index into param stack).
+    /// A macro parameter reference (index into the param stack)
     Param(usize),
-    /// A capsule: an already-evaluated expression pushed back for rescanning.
+    /// An already-evaluated expression pushed back for rescanning
     ///
-    /// This corresponds to `mp.web`'s `stash_cur_exp`/`back_expr` mechanism.
-    /// When the expression parser needs to push a value back into the input
-    /// stream (e.g., after discovering that `[` was not the start of a
-    /// mediation), the value is wrapped in a capsule token.
-    ///
-    /// Wrapped in `Arc` for O(1) cloning — capsules are frequently cloned
-    /// when parameter token lists are expanded.
+    /// Corresponds to `mp.web`'s `stash_cur_exp`/`back_expr` mechanism, e.g. re-injecting a value after `[` turns out not to start a mediation.
+    /// `Arc` makes the frequent clones during parameter expansion O(1).
     Capsule(Arc<ExprValue>),
 }
 
-/// A mutable token list used while building macro/loop bodies.
+/// A mutable token list used while building macro/loop bodies
 pub type TokenList = Vec<StoredToken>;
 
-/// A shared, immutable token list for efficient cloning.
+/// A shared, immutable token list for cheap cloning
 ///
-/// Macro bodies, loop bodies, and parameter token lists are cloned on
-/// every invocation. Using `Arc` makes those clones O(1) reference-count
-/// increments instead of O(n) deep copies.
+/// Macro bodies, loop bodies, and parameter lists are cloned on every invocation; `Arc` makes that O(1).
 pub type SharedTokenList = Arc<[StoredToken]>;
 
 // ---------------------------------------------------------------------------
 // Input level
 // ---------------------------------------------------------------------------
 
-/// One level on the input stack.
+/// One level on the input stack
 enum InputLevel {
-    /// Reading from source text.
     Source {
-        /// The scanner for this source.
         scanner: Scanner,
     },
-    /// Reading from a token list (macro body, loop, scantokens).
+    /// A token list: macro body, loop body, or `scantokens`
     TokenList {
-        /// The tokens to read (shared via `Arc` for cheap cloning).
         tokens: SharedTokenList,
-        /// Current position in the list.
         pos: usize,
-        /// Parameters for macro expansion (shared via `Arc`).
         params: Vec<SharedTokenList>,
-        /// Whether this is a loop body iteration (forever/for/forsuffixes).
-        /// Used by `exitif` to find and pop the current loop's input level.
+        /// Marks a loop body iteration so `exitif` can find and pop this level
         is_loop_body: bool,
     },
-    /// A single token pushed back by `back_input`.
+    /// A single token pushed back by `back_input`
     ///
-    /// Kept as its own level (as in `mp.web`, where `back_input` pushes a
-    /// one-token list) so repeated push-backs stack LIFO and no token can
-    /// be silently dropped.
+    /// A separate level (as in `mp.web`, where `back_input` pushes a one-token list) so repeated push-backs stack LIFO and no token is silently dropped.
     BackedUp(Box<ResolvedToken>),
 }
 
@@ -111,28 +88,26 @@ enum InputLevel {
 // Input system
 // ---------------------------------------------------------------------------
 
-/// Internal action returned by `try_next_from_current`.
+/// Internal action returned by `try_next_from_current`
 enum LevelAction {
-    /// A token was produced.
     Token(ResolvedToken),
-    /// The current level is exhausted; pop it.
+    /// The current level is exhausted; pop it
     Pop,
-    /// Skip current stored token and continue reading same level.
+    /// Skip the current stored token and keep reading the same level
     Continue,
-    /// A parameter expansion needs to be pushed.
+    /// A parameter expansion needs to be pushed
     PushParam(SharedTokenList, usize),
 }
 
-/// The token input system, managing a stack of input sources.
+/// The token input system, managing a stack of input sources
 pub struct InputSystem {
-    /// Stack of input levels (top = currently reading).
+    /// Stack of input levels (top = currently reading)
     levels: Vec<InputLevel>,
-    /// Scanner diagnostics collected while producing tokens.
+    /// Scanner diagnostics collected while producing tokens
     pending_scan_errors: Vec<ScanError>,
 }
 
 impl InputSystem {
-    /// Create a new input system.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -141,16 +116,14 @@ impl InputSystem {
         }
     }
 
-    /// Drain scanner diagnostics gathered since the last call.
+    /// Drain scanner diagnostics gathered since the last call
     pub fn take_scan_errors(&mut self) -> Vec<ScanError> {
         std::mem::take(&mut self.pending_scan_errors)
     }
 
-    /// Push a source text as a new input level.
-    /// Number of source (scanner) levels currently on the input stack.
+    /// Number of source (scanner) levels currently on the input stack
     ///
-    /// Used to bound `input`/`scantokens` nesting so that recursive file
-    /// inclusion terminates with an error instead of unbounded growth.
+    /// Used to bound `input`/`scantokens` nesting so recursive file inclusion errors out instead of growing unboundedly.
     #[must_use]
     pub fn source_depth(&self) -> usize {
         self.levels
@@ -164,7 +137,7 @@ impl InputSystem {
         self.levels.push(InputLevel::Source { scanner });
     }
 
-    /// Push a token list as a new input level (for macro expansion).
+    /// Push a token list as a new input level (for macro expansion)
     pub fn push_token_list(
         &mut self,
         tokens: impl Into<SharedTokenList>,
@@ -179,9 +152,7 @@ impl InputSystem {
         });
     }
 
-    /// Push a token list that is a loop body iteration.
-    ///
-    /// Marked so that `exitif` can find and pop it during premature exit.
+    /// Push a loop-body token list, marked so `exitif` can find and pop it
     pub fn push_loop_body(&mut self, tokens: SharedTokenList, params: Vec<SharedTokenList>) {
         self.levels.push(InputLevel::TokenList {
             tokens,
@@ -191,16 +162,13 @@ impl InputSystem {
         });
     }
 
-    /// Pop input levels until a loop body level is found and removed.
+    /// Pop input levels until a loop body level is found and removed
     ///
-    /// This implements `MetaPost`'s premature loop exit: when `exitif` fires,
-    /// all intervening token list levels (macro expansions, backed-up tokens,
-    /// etc.) are discarded until the loop body's input level is found and popped.
+    /// Implements `MetaPost`'s premature loop exit: `exitif` discards all intervening token-list and backed-up levels up to and including the loop body.
     /// Source-file levels are never removed.
     ///
     /// Returns `true` if a loop body level was found and removed.
     pub fn pop_to_loop_body(&mut self) -> bool {
-        // Also clear any backed-up token
         while let Some(level) = self.levels.last() {
             match level {
                 InputLevel::Source { .. } => return false,
@@ -219,24 +187,19 @@ impl InputSystem {
         false
     }
 
-    /// Push a token back into the input stream.
+    /// Push a token back into the input stream
     ///
-    /// The next call to `next_raw_token` will return this token instead of
-    /// reading from the input stack. This is `mp.web`'s `back_input` — used
-    /// when the parser has read one token too far and needs to "unscan" it.
-    /// Repeated push-backs stack LIFO: the most recently backed-up token is
-    /// returned first.
+    /// The next `next_raw_token` call returns this token first.
+    /// This is `mp.web`'s `back_input`, used when the parser has read one token too far.
+    /// Repeated push-backs stack LIFO.
     pub fn back_input(&mut self, token: ResolvedToken) {
         self.levels.push(InputLevel::BackedUp(Box::new(token)));
     }
 
-    /// Push an already-evaluated expression back into the input stream.
+    /// Push an already-evaluated expression back into the input stream
     ///
-    /// The value is wrapped in a `StoredToken::Capsule` and placed as a
-    /// single-token input level so that the next `next_raw_token` returns a
-    /// `CapsuleToken` carrying the value. This is `mp.web`'s `back_expr` —
-    /// used when the expression parser needs to re-inject a computed value
-    /// (e.g., after discovering that `[` was not a mediation bracket).
+    /// The value is wrapped in a [`StoredToken::Capsule`] level so the next `next_raw_token` returns a `CapsuleToken` carrying it.
+    /// This is `mp.web`'s `back_expr`, used to re-inject a computed value (e.g. when `[` turns out not to be a mediation bracket).
     pub fn back_expr(
         &mut self,
         value: Value,
@@ -254,11 +217,9 @@ impl InputSystem {
         self.push_token_list(tokens, Vec::new(), "backed-up expr");
     }
 
-    /// Get the next raw token from the input.
+    /// Get the next raw token from the input
     ///
-    /// This handles the input stack: when one level is exhausted,
-    /// it pops back to the previous level. If a token was pushed back
-    /// via `back_input`, it is returned first.
+    /// Pops exhausted levels automatically; tokens pushed via `back_input` are returned first.
     pub fn next_raw_token(&mut self, symbols: &mut SymbolTable) -> ResolvedToken {
         loop {
             if self.levels.is_empty() {
@@ -274,8 +235,6 @@ impl InputSystem {
                 };
             }
 
-            // Try to get a token from the current level.
-            // Returns Some(result) or None (level exhausted or needs expansion).
             let action = self.try_next_from_current(symbols);
 
             match action {
@@ -296,7 +255,6 @@ impl InputSystem {
         }
     }
 
-    /// Try to get the next token from the current top level.
     fn try_next_from_current(&mut self, symbols: &mut SymbolTable) -> LevelAction {
         if matches!(self.levels.last(), Some(InputLevel::BackedUp(_)))
             && let Some(InputLevel::BackedUp(token)) = self.levels.pop()
@@ -309,7 +267,7 @@ impl InputSystem {
         };
 
         match level {
-            // Handled (and popped) above.
+            // Handled (and popped) above
             InputLevel::BackedUp(_) => LevelAction::Continue,
             InputLevel::Source { scanner } => {
                 let token = scanner.next_token();
@@ -339,7 +297,7 @@ impl InputSystem {
                             let param_tokens = params[idx].clone();
                             LevelAction::PushParam(param_tokens, idx)
                         } else {
-                            // Bad param ref — skip it and continue this level.
+                            // Bad param ref — skip it and continue this level
                             LevelAction::Continue
                         }
                     }
@@ -350,7 +308,6 @@ impl InputSystem {
         }
     }
 
-    /// Check if the input stack is empty.
     #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -368,10 +325,9 @@ impl Default for InputSystem {
 // Token resolution
 // ---------------------------------------------------------------------------
 
-/// Resolve a scanned token by looking up symbolic tokens in the symbol table.
+/// Resolve a scanned token by looking up symbolic tokens in the symbol table
 ///
-/// Takes the token by value and moves it into the result — no clone — since
-/// the caller owns the freshly-scanned token and has no further use for it.
+/// Takes the token by value and moves it into the result — no clone — since the caller owns the freshly-scanned token and has no further use for it.
 fn resolve_token(token: Token, symbols: &mut SymbolTable) -> ResolvedToken {
     let (command, modifier, sym) = match &token.kind {
         TokenKind::Symbolic(name) => {
@@ -392,13 +348,10 @@ fn resolve_token(token: Token, symbols: &mut SymbolTable) -> ResolvedToken {
     }
 }
 
-/// Resolve a stored token (from a macro body, loop, or token list) into a
-/// [`ResolvedToken`].
+/// Resolve a stored token (from a macro body, loop, or token list) into a [`ResolvedToken`]
 ///
-/// Returns `None` for [`StoredToken::Param`]: parameter references have no
-/// direct resolution — substitution pushes a new input level instead.
-/// Symbol names are not materialized on this hot path; consumers that need
-/// the name use `symbols.name(sym)`.
+/// Returns `None` for [`StoredToken::Param`]: parameter references have no direct resolution — substitution pushes a new input level instead.
+/// Symbol names are not materialized on this hot path; consumers that need the name use `symbols.name(sym)`.
 fn stored_to_resolved(stored: &StoredToken, symbols: &SymbolTable) -> Option<ResolvedToken> {
     let blank_span = crate::token::Span::at(0);
     match stored {
@@ -449,10 +402,9 @@ fn stored_to_resolved(stored: &StoredToken, symbols: &SymbolTable) -> Option<Res
     }
 }
 
-/// Convert a resolved token back into its storable form.
+/// Convert a resolved token back into its storable form
 ///
-/// Returns `None` for tokens with no storable representation (EOF, or a
-/// capsule token that lost its payload).
+/// Returns `None` for tokens with no storable representation (EOF, or a capsule token that lost its payload).
 pub(crate) fn resolved_to_stored_token(tok: &ResolvedToken) -> Option<StoredToken> {
     if tok.command == Command::CapsuleToken {
         if let Some(payload) = &tok.capsule {

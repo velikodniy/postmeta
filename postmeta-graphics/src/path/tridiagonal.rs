@@ -1,18 +1,17 @@
-//! Tridiagonal system solvers for Hobby's spline algorithm.
+//! Tridiagonal system solvers for Hobby's spline algorithm
 //!
 //! After Hobby's forward elimination sweep, the system is in "reduced" form:
 //!
 //!   theta[k] + uu[k] * theta[k+1] = vv[k]
 //!
-//! where `uu[k]` is the upper-diagonal ratio and `vv[k]` is the partially
-//! solved right-hand side.  Back-substitution then recovers:
+//! where `uu[k]` is the upper-diagonal ratio and `vv[k]` is the partially solved right-hand side.
+//! Back-substitution then recovers:
 //!
 //!   theta[k] = vv[k] - uu[k] * theta[k+1]
 //!
 //! This module provides:
 //! - [`OpenSolver`] — for open (non-cyclic) path segments.
-//! - [`CyclicSolver`] — for purely cyclic paths (all-Open directions),
-//!   which carry an extra `ww[k]` coefficient tracking `theta[0]`.
+//! - [`CyclicSolver`] — for purely cyclic paths (all-Open directions), which carry an extra `ww[k]` coefficient tracking `theta[0]`.
 
 use crate::types::{NEAR_ZERO, Scalar};
 
@@ -20,21 +19,20 @@ use crate::types::{NEAR_ZERO, Scalar};
 // Open (non-cyclic) solver
 // ---------------------------------------------------------------------------
 
-/// Reduced tridiagonal solver for open (non-cyclic) path segments.
+/// Reduced tridiagonal solver for open (non-cyclic) path segments
 ///
-/// Hobby's mock-curvature equations form a tridiagonal system. Forward
-/// elimination reduces each row to `theta[k] + uu[k] * theta[k+1] = vv[k]`.
-/// Once the boundary condition determines `theta[last]`, back-substitution
-/// recovers all unknowns in O(n) time.
+/// Hobby's mock-curvature equations form a tridiagonal system.
+/// Forward elimination reduces each row to `theta[k] + uu[k] * theta[k+1] = vv[k]`.
+/// Once the boundary condition determines `theta[last]`, back-substitution recovers all unknowns in O(n) time.
 pub struct OpenSolver {
-    /// Upper-diagonal ratios after forward elimination.
+    /// Upper-diagonal ratios after forward elimination
     uu: Vec<Scalar>,
-    /// Partially solved RHS values after forward elimination.
+    /// Partially solved RHS values after forward elimination
     vv: Vec<Scalar>,
 }
 
 impl OpenSolver {
-    /// Create a new solver with a given capacity (number of unknowns).
+    /// Create a new solver with a given capacity (number of unknowns)
     pub fn with_capacity(n: usize) -> Self {
         Self {
             uu: Vec::with_capacity(n),
@@ -42,7 +40,7 @@ impl OpenSolver {
         }
     }
 
-    /// Push a reduced row: `theta[k] + uu * theta[k+1] = vv`.
+    /// Push a reduced row: `theta[k] + uu * theta[k+1] = vv`
     ///
     /// Rows must be pushed in order from k=0 to k=n-2.
     pub fn push_row(&mut self, uu: Scalar, vv: Scalar) {
@@ -50,21 +48,17 @@ impl OpenSolver {
         self.vv.push(vv);
     }
 
-    /// Access the upper-diagonal ratio of the last pushed row.
-    ///
-    /// Used by boundary condition logic to compute `theta[last]`.
+    /// Access the upper-diagonal ratio of the last pushed row, used to compute `theta[last]`
     pub fn last_uu(&self) -> Scalar {
         self.uu.last().copied().unwrap_or(0.0)
     }
 
-    /// Access the RHS value of the last pushed row.
-    ///
-    /// Used by boundary condition logic to compute `theta[last]`.
+    /// Access the RHS value of the last pushed row, used to compute `theta[last]`
     pub fn last_vv(&self) -> Scalar {
         self.vv.last().copied().unwrap_or(0.0)
     }
 
-    /// Perform back-substitution given the terminal value `theta[last]`.
+    /// Perform back-substitution given the terminal value `theta[last]`
     ///
     /// Returns the full solution vector `theta[0..=last]`.
     pub fn back_substitute(self, theta_last: Scalar) -> Vec<Scalar> {
@@ -82,83 +76,73 @@ impl OpenSolver {
 // Cyclic solver
 // ---------------------------------------------------------------------------
 
-/// Reduced tridiagonal solver for purely cyclic (all-Open) paths.
+/// Reduced tridiagonal solver for purely cyclic (all-Open) paths
 ///
-/// Extends [`OpenSolver`] with an extra coefficient `ww[k]` that tracks
-/// each row's dependency on `theta[0]`. The cyclic closure condition
-/// `theta[0] = theta[n]` provides the additional equation needed to
-/// determine `theta[0]`, after which standard back-substitution applies.
+/// Extends [`OpenSolver`] with an extra coefficient `ww[k]` that tracks each row's dependency on `theta[0]`.
+/// The cyclic closure condition `theta[0] = theta[n]` provides the additional equation needed to determine `theta[0]`, after which standard back-substitution applies.
 pub struct CyclicSolver {
-    /// Upper-diagonal ratios after forward elimination.
+    /// Upper-diagonal ratios after forward elimination
     uu: Vec<Scalar>,
-    /// Partially solved RHS values (excluding theta[0] contribution).
+    /// Partially solved RHS values (excluding theta[0] contribution)
     vv: Vec<Scalar>,
-    /// Coefficients of theta[0] in each reduced row.
+    /// Coefficients of theta[0] in each reduced row
     ww: Vec<Scalar>,
 }
 
 impl CyclicSolver {
-    /// Create a new cyclic solver.
+    /// Create a new cyclic solver
     ///
-    /// `n` is the number of knots; the arrays will hold `n + 1` entries
-    /// (indices 0 through n, where index n wraps back to knot 0).
+    /// `n` is the number of knots; the arrays will hold `n + 1` entries (indices 0 through n, where index n wraps back to knot 0).
     pub fn new(n: usize) -> Self {
         let mut uu = Vec::with_capacity(n + 1);
         let mut vv = Vec::with_capacity(n + 1);
         let mut ww = Vec::with_capacity(n + 1);
-        // Initial row: theta[0] + 0*theta[1] = 0 + 1*theta[0]
-        // (identity: theta[0] = theta[0])
+        // Initial row is the identity theta[0] = theta[0]
         uu.push(0.0);
         vv.push(0.0);
         ww.push(1.0);
         Self { uu, vv, ww }
     }
 
-    /// Access the upper-diagonal ratio of the last pushed row.
+    /// Access the upper-diagonal ratio of the last pushed row
     pub fn last_uu(&self) -> Scalar {
         self.uu.last().copied().unwrap_or(0.0)
     }
 
-    /// Access the RHS value of the last pushed row.
+    /// Access the RHS value of the last pushed row
     pub fn last_vv(&self) -> Scalar {
         self.vv.last().copied().unwrap_or(0.0)
     }
 
-    /// Access the theta[0] coefficient of the last pushed row.
+    /// Access the theta[0] coefficient of the last pushed row
     pub fn last_ww(&self) -> Scalar {
         self.ww.last().copied().unwrap_or(0.0)
     }
 
-    /// Push a reduced row for the cyclic system.
-    ///
-    /// `theta[k] + uu*theta[k+1] = vv + ww*theta[0]`
+    /// Push a reduced row for the cyclic system: `theta[k] + uu*theta[k+1] = vv + ww*theta[0]`
     pub fn push_row(&mut self, uu: Scalar, vv: Scalar, ww: Scalar) {
         self.uu.push(uu);
         self.vv.push(vv);
         self.ww.push(ww);
     }
 
-    /// Solve the cyclic system via backward iteration and back-substitution.
+    /// Solve the cyclic system via backward iteration and back-substitution
     ///
-    /// Uses the cyclic closure condition `theta[0] = theta[n]` to determine
-    /// `theta[0]`, then performs standard back-substitution for the remaining
-    /// unknowns.
+    /// Uses the cyclic closure condition `theta[0] = theta[n]` to determine `theta[0]`, then performs standard back-substitution for the remaining unknowns.
     ///
     /// Returns the solution vector `theta[0..n]` (length `n`).
     pub fn solve(mut self, n: usize) -> Vec<Scalar> {
-        // Backward iteration to solve for theta[0].
-        // Processing order: k = n-1, n-2, ..., 1, then k = n.
+        // Backward iteration to solve for theta[0]: k = n-1, n-2, ..., 1, then k = n
         let mut aa_val = 0.0_f64;
         let mut bb_val = 1.0_f64;
         for k in (1..n).rev() {
             aa_val = aa_val.mul_add(-self.uu[k], self.vv[k]);
             bb_val = bb_val.mul_add(-self.uu[k], self.ww[k]);
         }
-        // Final step: process k = n (wraps to knot 0).
+        // Final step: k = n wraps to knot 0
         aa_val = aa_val.mul_add(-self.uu[n], self.vv[n]);
         bb_val = bb_val.mul_add(-self.uu[n], self.ww[n]);
 
-        // theta[0] = aa / (1 - bb)
         let theta0 = if (1.0 - bb_val).abs() < NEAR_ZERO {
             0.0
         } else {
@@ -171,15 +155,13 @@ impl CyclicSolver {
             self.vv[k] += theta0 * self.ww[k];
         }
 
-        // Back-substitution
         let mut theta = vec![0.0_f64; n + 1];
         theta[n] = theta0;
         for k in (0..n).rev() {
             theta[k] = self.uu[k].mul_add(-theta[k + 1], self.vv[k]);
         }
 
-        // Return theta[0..n] (trim the wrap-around entry).
-        theta.truncate(n);
+        theta.truncate(n); // trim the wrap-around entry
         theta
     }
 }
@@ -203,13 +185,9 @@ mod tests {
     /// Solution: x0 = 1, x1 = 1, x2 = 1.
     #[test]
     fn solve_3x3_system() {
-        // Manual forward elimination of the 3x3 system:
-        // Row 0: 2*x0 - x1 = 1  =>  x0 + (-0.5)*x1 = 0.5
-        //   uu[0] = -0.5, vv[0] = 0.5  (but our convention is theta[k] + uu[k]*theta[k+1] = vv[k])
-        //   Actually: x0 - 0.5*x1 = 0.5 => uu[0] = -(-1/2) ... Let me redo this.
-        //
-        // The reduced form is: theta[k] + uu[k]*theta[k+1] = vv[k]
-        // which means theta[k] = vv[k] - uu[k]*theta[k+1].
+        // Manual forward elimination of the 3x3 system.
+        // The reduced form is theta[k] + uu[k]*theta[k+1] = vv[k],
+        // i.e. theta[k] = vv[k] - uu[k]*theta[k+1].
         //
         // Row 0: 2*x0 - 1*x1 + 0*x2 = 1
         //   Divide by diagonal: x0 - 0.5*x1 = 0.5
@@ -244,7 +222,7 @@ mod tests {
         assert!((theta[2] - 1.0).abs() < tol, "x2 = {}", theta[2]);
     }
 
-    /// A simple 2x2 tridiagonal system:
+    /// A simple 2x2 tridiagonal system
     ///   | 4  1 | |x0|   | 1 |
     ///   | 1  3 | |x1| = | 2 |
     ///
@@ -282,10 +260,10 @@ mod tests {
         );
     }
 
-    /// Identity system: I * x = b should give x = b.
+    /// Identity system: `I * x = b` should give `x = b`
     ///
-    /// The identity matrix in reduced form has uu[k] = 0 for all k,
-    /// and vv[k] = b[k]. Back-substitution trivially returns vv.
+    /// The identity matrix in reduced form has uu[k] = 0 for all k, and vv[k] = b[k].
+    /// Back-substitution trivially returns vv.
     #[test]
     fn solve_3x3_identity_rhs() {
         let b = [3.0, 7.0, 11.0];
@@ -302,7 +280,7 @@ mod tests {
         assert!((theta[2] - b[2]).abs() < tol, "x2 = {}", theta[2]);
     }
 
-    /// A 4x4 system to verify larger sizes work correctly.
+    /// A 4x4 system to verify larger sizes work correctly
     ///
     ///   | 2 -1  0  0 | |x0|   | 1 |
     ///   |-1  2 -1  0 | |x1| = | 0 |
@@ -331,28 +309,17 @@ mod tests {
         }
     }
 
-    /// Cyclic solver: 3-knot cycle with uniform coefficients.
+    /// Cyclic solver: 3-knot cycle with uniform coefficients
     ///
-    /// For a regular polygon (equilateral triangle), all psi angles
-    /// are equal (2*pi/3), and with unit tensions the system is
-    /// symmetric. The solution should have all theta values equal.
+    /// For a regular polygon (equilateral triangle), all psi angles are equal (2*pi/3), and with unit tensions the system is symmetric.
+    /// The solution should have all theta values equal.
     #[test]
     fn cyclic_uniform_3_knots() {
-        // For a perfectly symmetric 3-knot cycle with unit tensions:
-        // All uu, vv, ww should be identical at each step.
-        // We test by constructing a simple known case.
-        //
-        // With all-zero psi and unit tensions:
-        // theta[k] = 0 for all k (straight lines around the cycle).
+        // Rows with vv=0 and ww=0 for k>=1 give the trivial solution theta=0
+        // (straight lines around the cycle).
         let n = 3;
         let mut solver = CyclicSolver::new(n);
 
-        // Push n rows (k=1..3) with zero forcing and equal coefficients.
-        // For the trivial case: uu=0.5, vv=0, ww tracks theta[0].
-        // Row 1: uu=0.5, vv=0, ww = -0.5*1.0 = ... let's just use a known pattern.
-        //
-        // Actually, let's directly verify the back-sub mechanics:
-        // If we push rows where vv=0 and ww=0 for k>=1, the solution is theta=0.
         for _ in 0..n {
             solver.push_row(0.0, 0.0, 0.0);
         }
@@ -364,17 +331,13 @@ mod tests {
         }
     }
 
-    /// Cyclic solver: verify that ww propagation correctly determines theta[0].
+    /// Cyclic solver: verify that ww propagation correctly determines theta[0]
     ///
-    /// Construct a system where the solution is theta[k] = 1 for all k.
+    /// Constructs a system where the solution is theta[k] = c for all k, using
+    /// uu[k]=0, ww[k]=0 for k>=1, vv[k]=c: back-substitution then gives
+    /// theta[k] = vv[k] = c directly, and closure recovers theta[0] = c.
     #[test]
     fn cyclic_constant_solution() {
-        // If theta[k] = c for all k, and uu[k]*theta[k+1] = uu[k]*c,
-        // then vv[k] + ww[k]*c = c + uu[k]*c, i.e., vv[k] = c*(1 + uu[k] - ww[k]).
-        //
-        // Simplest: uu[k]=0 for all k, ww[k]=0 for k>=1, vv[k]=c.
-        // Then theta[k] = vv[k] = c after back-sub, and closure gives
-        // theta[0] = vv accumulated = c.
         let n = 4;
         let c = 2.5;
         let mut solver = CyclicSolver::new(n);
@@ -389,7 +352,7 @@ mod tests {
         }
     }
 
-    /// Verify that `last_uu` and `last_vv` accessors work correctly.
+    /// Verify that `last_uu` and `last_vv` accessors work correctly
     #[test]
     fn open_solver_accessors() {
         let mut solver = OpenSolver::with_capacity(3);

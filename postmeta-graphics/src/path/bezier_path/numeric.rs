@@ -1,28 +1,27 @@
-//! Private numeric helpers shared by [`BezierPath`](super::BezierPath)
-//! query and subpath operations.
+//! Private numeric helpers shared by [`BezierPath`](super::BezierPath) query and subpath operations
 
 use crate::bezier::CubicSegment;
 use crate::types::{EPSILON, Scalar, index_to_scalar, scalar_to_index};
 
-/// Decompose a normalized time into `(segment_index, fraction)`.
+/// Decompose a normalized time into `(segment_index, fraction)`
 pub(super) fn time_to_seg_frac(t: Scalar, n: usize) -> (usize, Scalar) {
     let seg = scalar_to_index(t).min(n - 1);
     let frac = t - index_to_scalar(seg);
     (seg, frac)
 }
 
-/// Evaluate a degree-2 Bernstein polynomial `B(b0, b1, b2; t)`.
+/// Evaluate a degree-2 Bernstein polynomial `B(b0, b1, b2; t)`
 pub(super) fn bernstein_eval(b0: Scalar, b1: Scalar, b2: Scalar, param: Scalar) -> Scalar {
     let s = 1.0 - param;
     s.mul_add(s * b0, (2.0 * s * param).mul_add(b1, param * param * b2))
 }
 
-/// Sentinel for unused root slots in [`find_bernstein_roots`].
+/// Sentinel for unused root slots in [`find_bernstein_roots`]
 const NO_ROOT: Scalar = f64::NAN;
 
-/// Find real roots of the degree-2 Bernstein polynomial `B(b0, b1, b2; t) = 0`.
+/// Find real roots of the degree-2 Bernstein polynomial `B(b0, b1, b2; t) = 0`
 ///
-/// Returns up to 2 roots (not necessarily in `[0,1]`).  Unused slots are `NAN`.
+/// Returns up to 2 roots (not necessarily in `[0,1]`); unused slots are `NAN`.
 pub(super) fn find_bernstein_roots(b0: Scalar, b1: Scalar, b2: Scalar) -> [Scalar; 2] {
     // Convert to power basis: B(b0,b1,b2;t) = b0(1-t)^2 + 2*b1*t(1-t) + b2*t^2
     //   = b0 + (2*b1 - 2*b0)*t + (b0 - 2*b1 + b2)*t^2
@@ -50,8 +49,7 @@ pub(super) fn find_bernstein_roots(b0: Scalar, b1: Scalar, b2: Scalar) -> [Scala
     [t1, t2]
 }
 
-/// Bisect to find the parameter `t` in [0,1] such that the arc length
-/// from 0 to `t` on `seg` equals `target`.
+/// Bisect to find the parameter `t` in [0,1] such that the arc length from 0 to `t` on `seg` equals `target`
 pub(super) fn bisect_arc_length(seg: &CubicSegment, target: Scalar) -> Scalar {
     const TOL: Scalar = 1e-6;
     const MAX_ITER: u32 = 50;

@@ -1,8 +1,6 @@
 //! Statement execution.
 //!
-//! Implements individual statement handlers: type declarations, `addto`,
-//! `clip`, `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`,
-//! `newinternal`, `show`, `message`, and `endgroup`.
+//! Implements individual statement handlers: type declarations, `addto`, `clip`, `setbounds`, `shipout`, `save`, `interim`, `let`, `delimiters`, `newinternal`, `show`, `message`, and `endgroup`.
 
 use postmeta_graphics::transform::Transformable;
 use postmeta_graphics::types::{
@@ -52,15 +50,12 @@ impl Interpreter {
                 let root_sym = self.cur.sym;
                 let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
-                // Use get_next (non-expanding) to avoid expanding vardef
-                // suffixes like `lft` in `pair laboff.lft`.
+                // get_next (non-expanding) avoids expanding vardef suffixes like `lft` in `pair laboff.lft`
                 self.get_next();
 
-                // Collect suffix tokens (tag tokens, subscripts, and symbols
-                // that might be macros but are suffix parts).  The scanner
-                // drops `.` separators, so suffix parts appear as consecutive
-                // tokens.  We use non-expanding reads to avoid triggering
-                // vardef expansion on suffix names.
+                // Collect suffix tokens (tag tokens, subscripts, and symbols that might be macros but are suffix parts).
+                // The scanner drops `.` separators, so suffix parts appear as consecutive tokens; non-expanding reads
+                // avoid triggering vardef expansion on suffix names.
                 loop {
                     if self.cur.command == Command::LeftBracket {
                         // Subscript array suffix `[]`
@@ -89,12 +84,10 @@ impl Interpreter {
                         break;
                     }
                 }
-                // Expand whatever follows the variable name.
+                // Expand whatever follows the variable name
                 self.expand_current();
 
-                // Clear the variable and all its suffixed descendants so
-                // that re-declaring (e.g. `numeric t[]` inside a loop)
-                // resets subscripted forms like `t[0]`, `t[1]`, etc.
+                // Clear the variable and all its suffixed descendants so re-declaring (e.g. `numeric t[]` inside a loop) resets subscripted forms like `t[0]`, `t[1]`, etc.
                 if let Some(sym) = root_sym {
                     self.state.variables.invalidate_sym_cache_entry(sym);
                 }
@@ -131,7 +124,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Convert a `TypeNameOp` modifier to a `Type`.
+    /// Convert a `TypeNameOp` modifier to a `Type`
     const fn type_op_to_type(type_op: TypeNameOp) -> Type {
         match type_op {
             TypeNameOp::Numeric => Type::Numeric,
@@ -198,9 +191,7 @@ impl Interpreter {
                     &pic_name,
                     |target| match target_path {
                         DoublePathTarget::Dot { x, y } => {
-                            // `draw <pair> withpen <pen>` draws a dot-like mark.
-                            // Emulate this via the pen outline path shifted to the
-                            // pair position, then filled.
+                            // `draw <pair> withpen <pen>` draws a dot-like mark: the pen outline shifted to the pair position, then filled
                             let dot = postmeta_graphics::path::BezierPath::from(&ds.pen);
                             let shifted = dot.transformed(&Transform::shifted(x, y));
                             target.add_fill(FillObject {
@@ -252,7 +243,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Scan `withpen`, `withcolor`, `dashed` options.
+    /// Scan `withpen`, `withcolor`, `dashed` options
     fn scan_with_options(&mut self) -> InterpResult<(DrawingState, bool)> {
         let mut ds = DrawingState {
             pen: Pen::default(),
@@ -295,7 +286,7 @@ impl Interpreter {
         Ok((ds, pen_specified))
     }
 
-    /// Execute `clip`/`setbounds` statement.
+    /// Execute `clip`/`setbounds` statement
     pub(in crate::interpreter) fn do_bounds(&mut self) -> InterpResult<()> {
         let is_clip = BoundsOp::from_modifier(self.cur.modifier) == Some(BoundsOp::Clip);
         self.get_x_next();
@@ -336,13 +327,11 @@ impl Interpreter {
 
     /// Scan a compound picture target name used by `addto` and `clip/setbounds`.
     ///
-    /// This accepts symbolic suffix chains like `pic.layer.sub` and keeps
-    /// suffix names from expanding while they are being collected.
+    /// Accepts symbolic suffix chains like `pic.layer.sub`, keeping suffix names from expanding while collected.
     fn scan_target_picture_name(&mut self) -> Option<String> {
         let mut name = self.cur_symbolic_name()?.to_owned();
 
-        // Use non-expanding reads so vardef suffix names are treated as suffix
-        // tokens here, mirroring type-declaration parsing behavior.
+        // Non-expanding reads treat vardef suffix names as suffix tokens here, mirroring type-declaration parsing
         self.get_next();
         while self.cur.command == Command::TagToken
             || self.cur.command == Command::DefinedMacro
@@ -355,13 +344,12 @@ impl Interpreter {
             self.get_next();
         }
 
-        // Re-expand whatever token follows the target name so statement parsing
-        // continues in normal expanded mode.
+        // Re-expand whatever token follows the target name so statement parsing continues in normal expanded mode
         self.expand_current();
         Some(name)
     }
 
-    /// Execute `shipout` statement.
+    /// Execute `shipout` statement
     pub(in crate::interpreter) fn do_shipout(&mut self) -> InterpResult<()> {
         self.state
             .picture_manager
@@ -390,15 +378,13 @@ impl Interpreter {
 
     /// Execute `outer` statement (no-op — skip the token list).
     ///
-    /// In `MetaPost`, `outer` marks tokens so they cannot appear inside
-    /// macro definitions.  We parse the comma-separated token list but
-    /// do not enforce the restriction.
+    /// In `MetaPost`, `outer` marks tokens so they cannot appear inside macro definitions.
+    /// The comma-separated token list is parsed but the restriction is not enforced.
     ///
     /// Syntax: `outer <token> [, <token>]* ;`
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_outer(&mut self) -> InterpResult<()> {
-        // Read token names separated by commas until semicolon.
-        // Use get_next (non-expanding) to avoid triggering `end`/`bye`.
+        // Read token names separated by commas until semicolon; get_next (non-expanding) avoids triggering `end`/`bye`
         loop {
             self.get_next(); // read a token name (skip it)
             self.get_next(); // read separator (comma or semicolon)
@@ -410,7 +396,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Execute `save` statement.
+    /// Execute `save` statement
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_save(&mut self) -> InterpResult<()> {
         self.get_x_next();
@@ -434,7 +420,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Execute `interim` statement.
+    /// Execute `interim` statement
     pub(in crate::interpreter) fn do_interim(&mut self) -> InterpResult<()> {
         self.get_x_next();
         if self.cur.command != Command::InternalQuantity {
@@ -480,10 +466,10 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Execute `let` statement.
+    /// Execute `let` statement
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_let(&mut self) -> InterpResult<()> {
-        // LHS: get_symbol (non-expanding), like mp.web's do_let
+        // LHS: get_symbol (non-expanding), like `mp.web`'s do_let
         self.get_next();
         let lhs = self.cur.sym;
         self.get_x_next();
@@ -507,7 +493,7 @@ impl Interpreter {
         if let (Some(l), Some(r)) = (lhs, rhs) {
             let entry = self.state.symbols.get(r);
             self.state.symbols.set(l, entry);
-            // Rebind macro metadata: clear stale LHS, then copy RHS if macro.
+            // Rebind macro metadata: clear stale LHS, then copy RHS if macro
             self.state.macros.rebind(l, r);
         } else {
             self.report_error(
@@ -522,17 +508,14 @@ impl Interpreter {
     /// Execute `delimiters` statement.
     ///
     /// Syntax: `delimiters <left> <right>;`
-    /// Declares a pair of matching delimiters (like `(` and `)`).
-    /// Each pair gets a unique modifier so the parser can match them.
+    /// Declares a pair of matching delimiters (like `(` and `)`); each pair gets a unique modifier so the parser can match them.
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_delimiters(&mut self) -> InterpResult<()> {
         self.get_x_next();
 
-        // Get left delimiter symbol
         let left_sym = self.cur.sym;
         self.get_x_next();
 
-        // Get right delimiter symbol
         let right_sym = self.cur.sym;
         self.get_x_next();
 
@@ -574,7 +557,6 @@ impl Interpreter {
 
         loop {
             if let Some(name) = self.cur_symbolic_name().map(str::to_owned) {
-                // Register the new internal
                 let Some(idx) = self.state.internals.new_internal(&name) else {
                     self.report_error(
                         ErrorKind::Overflow,
@@ -583,7 +565,6 @@ impl Interpreter {
                     break;
                 };
 
-                // Set the symbol to InternalQuantity
                 if let Some(sym) = self.cur.sym {
                     self.state.symbols.set(
                         sym,
@@ -607,19 +588,18 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Execute `show` statement.
+    /// Execute `show` statement
     pub(in crate::interpreter) fn do_show(&mut self) -> InterpResult<()> {
         // show_type distinguishes show/showtoken/showdependencies — used later
         let _ = self.cur.modifier;
         self.get_x_next();
-        // Print the value
         let val = self.scan_expression(EqualsMode::Relation)?.exp;
         self.report_info(format!(">> {val}"));
         self.eat_semicolon();
         Ok(())
     }
 
-    /// Execute `message` / `errmessage` statement.
+    /// Execute `message` / `errmessage` statement
     pub(in crate::interpreter) fn do_message(&mut self) -> InterpResult<()> {
         let is_err = MessageOp::from_modifier(self.cur.modifier) == Some(MessageOp::ErrMessage);
         self.get_x_next();
@@ -638,16 +618,16 @@ impl Interpreter {
     }
 
     /// Execute mode-setting commands (`batchmode`, `nonstopmode`, etc.).
+    ///
+    /// Mode commands affect terminal interaction in original `MetaPost`; `PostMeta` runs non-interactively, so these are accepted as no-ops.
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_mode_command(&mut self) -> InterpResult<()> {
-        // Mode commands affect terminal interaction in original MetaPost.
-        // PostMeta runs non-interactively, so these are accepted as no-ops.
         self.get_x_next();
         self.eat_semicolon();
         Ok(())
     }
 
-    /// Execute `randomseed` statement.
+    /// Execute `randomseed` statement
     pub(in crate::interpreter) fn do_randomseed(&mut self) -> InterpResult<()> {
         self.get_x_next();
         if self.cur.command != Command::Assignment {
@@ -687,9 +667,9 @@ impl Interpreter {
         Ok(())
     }
 
+    /// PostScript specials are ignored by the SVG backend
     #[allow(clippy::unnecessary_wraps)]
     pub(in crate::interpreter) fn do_special(&mut self) -> InterpResult<()> {
-        // PostScript specials are ignored by the SVG backend.
         self.get_x_next();
 
         // Parse and discard the payload expression if present.
@@ -732,7 +712,7 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Restore scope at `endgroup`.
+    /// Restore scope at `endgroup`
     pub(super) fn do_endgroup(&mut self) {
         self.state.scope_manager.end_group(
             &mut self.state.symbols,
@@ -749,15 +729,13 @@ impl Interpreter {
 
 /// Extract a [`DashPattern`] from a dash-pattern picture.
 ///
-/// In `MetaPost`, `dashpattern(on a off b on c off d ...)` produces a
-/// picture where each `_on_` segment is encoded as a horizontal stroke.
-/// The x-range of each stroke gives the on-segment, and the y-coordinate
-/// of every stroke equals the total pattern length (because each `_on_`
-/// and `_off_` operation shifts the entire picture upward by its distance).
+/// `dashpattern(on a off b on c off d ...)` produces a picture where each `_on_` segment is encoded as a horizontal stroke.
+/// The x-range of each stroke gives the on-segment; the y-coordinate of every stroke equals the total pattern length,
+/// because each `_on_`/`_off_` operation shifts the entire picture upward by its distance.
 ///
 /// Returns `None` if the picture contains no strokes.
 fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
-    // Collect (xmin, xmax) of each stroke and the y-coordinate (total length).
+    // Collect (xmin, xmax) of each stroke and the y-coordinate (total length)
     let mut on_segments: Vec<(f64, f64)> = Vec::new();
     let mut total_length: f64 = 0.0;
 
@@ -774,7 +752,7 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
                 xmin = xmin.min(p.x);
                 xmax = xmax.max(p.x);
             }
-            // The y-coordinate is the total pattern length.
+            // The y-coordinate is the total pattern length
             total_length = total_length.max(points[0].y);
 
             on_segments.push((xmin, xmax));
@@ -785,11 +763,10 @@ fn extract_dash_pattern(pic: &Picture) -> Option<DashPattern> {
         return None;
     }
 
-    // Sort by starting x position.
+    // Sort by starting x position
     on_segments.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
-    // Build alternating on/off dashes in cyclic order starting from the first
-    // on-segment. A leading gap is represented via dash offset.
+    // Build alternating on/off dashes in cyclic order starting from the first on-segment; a leading gap is represented via dash offset
     let first_start = on_segments[0].0;
     let mut dashes: Vec<f64> = Vec::with_capacity(on_segments.len() * 2);
 

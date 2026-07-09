@@ -1,8 +1,7 @@
-//! Pen operations for `MetaPost`.
+//! Pen operations for `MetaPost`
 //!
 //! `MetaPost` pens come in two forms:
-//! - **Elliptical**: a transformed unit circle (`pencircle scaled 2` etc.).
-//!   Stored as an affine matrix mapping the unit circle to the pen shape.
+//! - **Elliptical**: a transformed unit circle (`pencircle scaled 2` etc.). Stored as an affine matrix mapping the unit circle to the pen shape.
 //! - **Polygonal**: a convex polygon of vertices (via `makepen`).
 //!
 //! Key conversions:
@@ -19,19 +18,17 @@ use crate::types::{NEAR_ZERO, Point, Scalar, Vec2, index_to_scalar};
 // Pen
 // ---------------------------------------------------------------------------
 
-/// A pen: either elliptical (common) or polygonal.
+/// A pen: either elliptical (common) or polygonal
 #[derive(Debug, Clone, PartialEq)]
 pub enum Pen {
-    /// An elliptical pen defined by an affine transform of the unit circle.
-    /// The transform maps the unit circle to the pen shape.
+    /// An elliptical pen defined by an affine transform of the unit circle
     Elliptical(Transform),
-    /// A convex polygonal pen defined by its vertices in counter-clockwise
-    /// order.
+    /// A convex polygonal pen defined by its vertices in counter-clockwise order
     Polygonal(Vec<Point>),
 }
 
 impl Pen {
-    /// Create a circular pen with the given diameter centered at origin.
+    /// Create a circular pen with the given diameter centered at origin
     #[must_use]
     pub const fn circle(diameter: Scalar) -> Self {
         let r = diameter / 2.0;
@@ -42,34 +39,28 @@ impl Pen {
         })
     }
 
-    /// The null pen: a single point at the origin.
+    /// The null pen: a single point at the origin
     #[must_use]
     pub const fn null() -> Self {
         Self::Elliptical(Transform::ZERO)
     }
 
-    /// Find the support point of the pen in a given direction.
+    /// Find the support point of the pen in a given direction
     ///
-    /// For an elliptical pen defined by transform T, the support point is
-    /// `T * normalize(T^{-T} * dir)` -- the point on the ellipse whose
-    /// outward normal aligns with `dir`. For a polygonal pen, it is the
-    /// vertex with the maximum dot product. Used for computing stroked
-    /// path envelopes.
+    /// For an elliptical pen defined by transform T, the support point is `T * normalize(T^{-T} * dir)` — the point on the ellipse whose outward normal aligns with `dir`.
+    /// For a polygonal pen, it is the vertex with the maximum dot product.
+    /// Used for computing stroked path envelopes.
     ///
-    /// Returns `None` for degenerate pens: a singular elliptical transform
-    /// (e.g. the null pen), a direction annihilated by the transform, or a
-    /// polygonal pen with no vertices.
+    /// Returns `None` for degenerate pens: a singular elliptical transform (e.g. the null pen), a direction annihilated by the transform, or a polygonal pen with no vertices.
     #[must_use]
     pub fn offset(&self, dir: Vec2) -> Option<Point> {
         match self {
             Self::Elliptical(t) => {
-                // For an elliptical pen: find the point on the transformed circle
-                // that has the outward normal in direction `dir`.
-                //
-                // If T maps the unit circle to the pen, the offset in direction d
-                // is T_linear * normalize(T_linear^{-T} * d).  Only the 2x2 linear
-                // part matters — translation represents the pen's origin, not its
-                // shape.
+                // Find the point on the transformed circle whose outward normal
+                // is `dir`: if T maps the unit circle to the pen, the offset in
+                // direction d is T_linear * normalize(T_linear^{-T} * d). Only
+                // the 2x2 linear part matters — translation is the pen's origin,
+                // not its shape.
                 let det = t.txx.mul_add(t.tyy, -(t.txy * t.tyx));
                 if det.abs() < NEAR_ZERO {
                     return None;
@@ -102,7 +93,7 @@ impl Pen {
 }
 
 impl Default for Pen {
-    /// The default pen is a circle with diameter 0.5.
+    /// The default pen is a circle with diameter 0.5
     fn default() -> Self {
         Self::circle(0.5)
     }
@@ -112,7 +103,7 @@ impl Default for Pen {
 // BezierPath ↔ Pen conversions
 // ---------------------------------------------------------------------------
 
-/// `makepen` for `BezierPath`: convert a bezier path to a polygonal pen.
+/// `makepen` for `BezierPath`: convert a bezier path to a polygonal pen
 ///
 /// Extracts the on-curve knot points and computes their convex hull.
 ///
@@ -134,12 +125,10 @@ impl TryFrom<&BezierPath> for Pen {
     }
 }
 
-/// `makepath` for `BezierPath`: convert a pen to a `BezierPath`.
+/// `makepath` for `BezierPath`: convert a pen to a `BezierPath`
 ///
-/// - **Elliptical** pens produce an 8-knot circular approximation built as
-///   a `BezierPath` with explicit cubic controls.
-/// - **Polygonal** pens produce a cyclic `BezierPath` with straight-line
-///   segments through the vertices.
+/// - **Elliptical** pens produce an 8-knot circular approximation built as a `BezierPath` with explicit cubic controls.
+/// - **Polygonal** pens produce a cyclic `BezierPath` with straight-line segments through the vertices.
 impl From<&Pen> for BezierPath {
     fn from(pen: &Pen) -> Self {
         match pen {
@@ -164,11 +153,10 @@ impl From<&Pen> for BezierPath {
     }
 }
 
-/// Generate an 8-point approximation of an ellipse as a [`BezierPath`].
+/// Generate an 8-point approximation of an ellipse as a [`BezierPath`]
 ///
-/// The 8 points are at 0, 45, 90, ..., 315 degrees on the unit circle,
-/// transformed by the affine. Control points use the cubic Bezier
-/// approximation constant for 45-degree arcs: `kappa = (4/3) * tan(pi/16)`.
+/// The 8 points are at 0, 45, 90, ..., 315 degrees on the unit circle, transformed by the affine.
+/// Control points use the cubic Bezier approximation constant for 45-degree arcs: `kappa = (4/3) * tan(pi/16)`.
 fn make_ellipse_bezier_path(t: &Transform) -> BezierPath {
     const KAPPA: Scalar = 0.265_207_840_674;
     const N: usize = 8;
@@ -239,9 +227,9 @@ mod tests {
 
     #[test]
     fn degenerate_pens_have_no_support_point() {
-        // Null pen: singular transform.
+        // Null pen: singular transform
         assert!(Pen::null().offset(Vec2::new(1.0, 0.0)).is_none());
-        // Polygonal pen with no vertices.
+        // Polygonal pen with no vertices
         assert!(
             Pen::Polygonal(Vec::new())
                 .offset(Vec2::new(1.0, 0.0))
@@ -360,7 +348,7 @@ mod tests {
         assert_eq!(bp.num_knots(), 3);
         assert_eq!(bp.num_segments(), 3);
 
-        // Knot points should match the vertices.
+        // Knot points should match the vertices
         assert!((bp.knot_point(0).x).abs() < EPSILON);
         assert!((bp.knot_point(0).y).abs() < EPSILON);
         assert!((bp.knot_point(1).x - 1.0).abs() < EPSILON);
@@ -411,8 +399,7 @@ mod tests {
         let pen = Pen::circle(2.0); // radius 1
         let dir = Vec2::new(1.0, 1.0);
         let offset = pen.offset(dir).expect("support point");
-        // Should be at ~(1/sqrt(2), 1/sqrt(2))
-        let expected = 1.0 / 2.0_f64.sqrt();
+        let expected = 1.0 / 2.0_f64.sqrt(); // ~(1/sqrt(2), 1/sqrt(2))
         assert!(
             (offset.x - expected).abs() < 0.01,
             "offset.x = {}, expected {}",

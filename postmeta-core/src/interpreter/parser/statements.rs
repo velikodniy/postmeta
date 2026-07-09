@@ -6,11 +6,11 @@ use crate::interpreter::{Interpreter, LhsBinding};
 use crate::types::Value;
 
 impl Interpreter {
-    /// Execute one statement.
+    /// Execute one statement
     ///
     /// # Errors
     ///
-    /// Returns an error when expression parsing/evaluation fails inside a statement.
+    /// Returns an error when expression parsing or evaluation fails inside a statement.
     #[allow(clippy::too_many_lines)]
     pub fn do_statement(&mut self) -> InterpResult<()> {
         match self.cur.command {
@@ -19,7 +19,7 @@ impl Interpreter {
                 self.get_x_next();
                 Ok(())
             }
-            Command::Stop => Ok(()), // End of input
+            Command::Stop => Ok(()),
 
             Command::TypeName => self.do_type_declaration(),
             Command::AddTo => self.do_addto(),
@@ -72,8 +72,7 @@ impl Interpreter {
             }
 
             _ => {
-                // Expression or equation — `=` should be treated as an
-                // equation delimiter, not as comparison (mp.web: var_flag = assignment).
+                // Expression or equation — `=` is an equation delimiter here, not a comparison (mp.web: var_flag = assignment)
                 let mut cur_result = self.scan_expression(EqualsMode::Equation)?;
 
                 if self.cur.command == Command::Equals {
@@ -114,7 +113,7 @@ impl Interpreter {
                         )?;
                     }
                 } else if self.cur.command == Command::Assignment {
-                    // Assignment chain: a := b := ... := rhs
+                    // Assignment chain: a := b := ... := rhs.
                     // All left-hand sides receive the final rhs value.
                     let mut pending_lhs: Vec<Option<LhsBinding>> = Vec::new();
                     while self.cur.command == Command::Assignment {
@@ -129,26 +128,22 @@ impl Interpreter {
                     }
                 } else {
                     // Bare expression-statement (no `=` or `:=`).
-                    // Preserve the result in cur_expr so that
-                    // begingroup/endgroup can return the last expression
-                    // as the group's value (mp.web's "stash_cur_exp").
+                    // Preserve the result so begingroup/endgroup can return the last expression as the group's value (mp.web's "stash_cur_exp").
                     self.set_cur_result(cur_result);
                 }
 
-                // Expect statement terminator
                 if self.cur.command == Command::Semicolon {
                     self.get_x_next();
                 } else if self.cur.command == Command::EndGroup
                     || self.cur.command == Command::Stop
                     || self.cur.command == Command::NewInternal
                 {
-                    // OK — some commands may begin immediately without an
-                    // explicit semicolon between statements.
+                    // Some commands may begin immediately without an explicit semicolon between statements
                 } else if self.cur.command == Command::MacroSpecial
                     && MacroSpecialOp::from_modifier(self.cur.modifier)
                         == Some(MacroSpecialOp::EndDef)
                 {
-                    // Allow an implicit terminator before `enddef` in macro bodies.
+                    // Allow an implicit terminator before `enddef` in macro bodies
                     self.get_x_next();
                 } else {
                     self.report_error(
@@ -158,7 +153,7 @@ impl Interpreter {
                             self.cur.command, self.cur.token.kind
                         ),
                     );
-                    // Skip to the next semicolon (or end) to recover.
+                    // Skip to the next semicolon (or end) to recover
                     while self.cur.command != Command::Semicolon
                         && self.cur.command != Command::Stop
                         && self.cur.command != Command::EndGroup
@@ -171,7 +166,7 @@ impl Interpreter {
         }
     }
 
-    /// Implement `write <expr> to <expr>`.
+    /// Implement `write <expr> to <expr>`
     fn do_write(&mut self) -> InterpResult<()> {
         self.get_x_next();
         let text_res = self.scan_expression(EqualsMode::Relation)?;

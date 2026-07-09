@@ -1,7 +1,6 @@
 //! Path construction parsing.
 //!
-//! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}`
-//! brace directions, and `cycle`.
+//! Handles `..` path joins, `tension`/`controls` options, `{dir}` / `{curl n}` brace directions, and `cycle`.
 
 use postmeta_graphics::path::KnotPath;
 use postmeta_graphics::types::{Knot, KnotDirection, Point, Scalar};
@@ -21,17 +20,16 @@ use crate::interpreter::EqualsMode;
 
 /// Pending left-side specification for the next knot in path construction.
 ///
-/// When `tension t1 and t2` or `controls p1 and p2` is parsed, the second
-/// value applies to the *next* knot's left side and must be carried forward.
+/// The second value of `tension t1 and t2` or `controls p1 and p2` applies to the *next* knot's left side and must be carried forward.
 enum PendingJoin {
-    /// Pending left tension for the next knot.
+    /// Pending left tension for the next knot
     Tension(Scalar),
-    /// Pending explicit left control point for the next knot.
+    /// Pending explicit left control point for the next knot
     Control(Point),
 }
 
 impl Interpreter {
-    /// Parse a path expression starting from the given left-hand value.
+    /// Parse a path expression starting from the given left-hand value
     #[allow(clippy::too_many_lines)]
     pub(super) fn scan_path_construction(
         &mut self,
@@ -64,8 +62,7 @@ impl Interpreter {
 
         loop {
             // Parse optional pre-join direction {dir} or {curl n}.
-            // Multiple consecutive directions can appear when macros like
-            // `--` expand to `{curl 1}..{curl 1}` — the last one wins.
+            // Multiple consecutive directions can appear when macros like `--` expand to `{curl 1}..{curl 1}` — the last one wins.
             let mut pre_dir = if self.cur.command == Command::LeftBrace {
                 Some(self.scan_brace_direction()?)
             } else {
@@ -84,8 +81,7 @@ impl Interpreter {
                 self.get_x_next();
                 u16::MAX // special value for &
             } else {
-                // A trailing `{dir}` at the end of an open path applies to the
-                // incoming (left) side of the last knot, not its outgoing side.
+                // A trailing `{dir}` at the end of an open path applies to the incoming (left) side of the last knot, not its outgoing side
                 if let Some(dir) = pre_dir {
                     if let Some(last) = knots.last_mut() {
                         last.left = dir;
@@ -94,8 +90,7 @@ impl Interpreter {
                 break;
             };
 
-            // Direction before a join applies to the outgoing (right) side of
-            // the current knot.
+            // A direction before a join applies to the outgoing (right) side of the current knot
             if let Some(dir) = pre_dir {
                 if let Some(last) = knots.last_mut() {
                     last.right = dir;
@@ -145,7 +140,7 @@ impl Interpreter {
             // Parse the next point
             let point_val = self.scan_tertiary()?.exp;
 
-            // `&` can concatenate paths; a pair is treated as a one-knot path.
+            // `&` can concatenate paths; a pair is treated as a one-knot path
             if join_type == u16::MAX {
                 let mut rhs_knots = match point_val {
                     Value::Path(rhs) => rhs.to_knot_path().knots,
@@ -172,9 +167,7 @@ impl Interpreter {
             }
 
             match point_val {
-                // MetaPost allows `..` with a path operand in macros like
-                // `buildcycle`; treat this as joining to the first knot of the
-                // right path and appending the whole path.
+                // MetaPost allows `..` with a path operand (e.g. in `buildcycle`): join to the right path's first knot and append the whole path
                 Value::Path(rhs) => {
                     let mut rhs_knots = rhs.to_knot_path().knots;
                     if rhs_knots.is_empty() {
@@ -218,7 +211,6 @@ impl Interpreter {
             }
         }
 
-        // Build the path
         let knot_path = KnotPath::from_knots(knots, is_cyclic);
         let bezier_path = knot_path.resolve();
 
@@ -229,8 +221,7 @@ impl Interpreter {
 
     /// Concatenate path knots for `&`.
     ///
-    /// If the tail point of `lhs` equals the head point of `rhs`, merge the
-    /// shared knot and keep the outgoing side from `rhs`.
+    /// If the tail point of `lhs` equals the head point of `rhs`, the shared knot is merged keeping the outgoing side from `rhs`.
     fn append_path_concat(lhs: &mut Vec<Knot>, rhs: Vec<Knot>) {
         let mut rhs_iter = rhs.into_iter();
         let Some(first_rhs) = rhs_iter.next() else {
@@ -290,7 +281,7 @@ impl Interpreter {
                     last.right_tension = t1;
                 }
 
-                // Path syntax requires a second `..` after tension options.
+                // Path syntax requires a second `..` after tension options
                 if self.cur.command != Command::PathJoin {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
@@ -318,7 +309,7 @@ impl Interpreter {
                     last.right = KnotDirection::Explicit(Point::new(x1, y1));
                 }
 
-                // Path syntax requires a second `..` after control options.
+                // Path syntax requires a second `..` after control options
                 if self.cur.command != Command::PathJoin {
                     return Err(InterpreterError::new(
                         ErrorKind::UnexpectedToken,
@@ -333,14 +324,12 @@ impl Interpreter {
         }
     }
 
-    /// Convert a value to a path knot.
+    /// Convert a value to a path knot
     fn value_to_knot(val: &Value) -> InterpResult<Knot> {
         match val {
             Value::Pair(x, y) => Ok(Knot::new(Point::new(*x, *y))),
             Value::Numeric(v) => {
-                // Single numeric — treat as (v, 0)? Or error?
-                // In MetaPost, a numeric in path context uses z-convention
-                // For now, error
+                // MetaPost's z-convention for bare numerics in paths is not implemented, so error
                 Err(InterpreterError::new(
                     ErrorKind::TypeError,
                     format!("Expected pair in path, got numeric {v}"),
@@ -353,7 +342,7 @@ impl Interpreter {
         }
     }
 
-    /// Parse a brace-enclosed direction: `{dir}` or `{curl n}`.
+    /// Parse a brace-enclosed direction: `{dir}` or `{curl n}`
     fn scan_brace_direction(&mut self) -> InterpResult<KnotDirection> {
         self.get_x_next(); // skip `{`
 
@@ -371,8 +360,7 @@ impl Interpreter {
             }
             Ok(KnotDirection::Curl(curl_val))
         } else {
-            // {<expression>} — direction as pair, or numeric angle in degrees
-            // (converted to internal radians).
+            // {<expression>} — direction as pair, or numeric angle in degrees (converted to internal radians)
             let dir = self.scan_expression(EqualsMode::Relation)?.exp;
             if self.cur.command == Command::RightBrace {
                 self.get_x_next();

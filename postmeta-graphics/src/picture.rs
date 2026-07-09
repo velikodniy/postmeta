@@ -1,7 +1,7 @@
-//! Picture assembly operations for `MetaPost`.
+//! Picture assembly operations for `MetaPost`
 //!
-//! A picture is an ordered collection of graphical objects. The key
-//! `MetaPost` primitives for building pictures are:
+//! A picture is an ordered collection of graphical objects.
+//! The key `MetaPost` primitives for building pictures are:
 //!
 //! - `addto <pic> contour <path>` — add a filled region
 //! - `addto <pic> doublepath <path>` — add a stroked path
@@ -16,12 +16,9 @@ use crate::types::{FillObject, GraphicsObject, StrokeObject};
 // Picture
 // ---------------------------------------------------------------------------
 
-/// An ordered collection of graphical objects.
+/// An ordered collection of graphical objects
 ///
-/// The fields are crate-private: external consumers build pictures through
-/// [`Picture::push`]/[`Picture::add_fill`]/[`Picture::add_stroke`]/
-/// [`Picture::clip`]/[`Picture::set_bounds`] and read them through the
-/// accessor methods, so the storage layout can evolve without breaking them.
+/// The fields are crate-private: external consumers build pictures through [`Picture::push`]/[`Picture::add_fill`]/[`Picture::add_stroke`]/[`Picture::clip`]/[`Picture::set_bounds`] and read them through the accessor methods, so the storage layout can evolve without breaking them.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Picture {
     pub(crate) objects: Vec<GraphicsObject>,
@@ -43,55 +40,53 @@ impl Picture {
         self.objects.push(obj);
     }
 
-    /// The objects in this picture, in paint order.
+    /// The objects in this picture, in paint order
     #[must_use]
     pub fn objects(&self) -> &[GraphicsObject] {
         &self.objects
     }
 
-    /// Iterate over the objects in paint order.
+    /// Iterate over the objects in paint order
     pub fn iter(&self) -> std::slice::Iter<'_, GraphicsObject> {
         self.objects.iter()
     }
 
-    /// The first object, if any.
+    /// The first object, if any
     #[must_use]
     pub fn first(&self) -> Option<&GraphicsObject> {
         self.objects.first()
     }
 
-    /// Number of objects in the picture.
+    /// Number of objects in the picture
     #[must_use]
     pub fn len(&self) -> usize {
         self.objects.len()
     }
 
-    /// Whether the picture contains no objects.
+    /// Whether the picture contains no objects
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.objects.is_empty()
     }
 
-    /// The clip path applied to this picture's objects, if any.
+    /// The clip path applied to this picture's objects, if any
     #[must_use]
     pub const fn clip_path(&self) -> Option<&SharedPath> {
         self.clip_path.as_ref()
     }
 
-    /// The artificial bounding path set by `setbounds`, if any.
+    /// The artificial bounding path set by `setbounds`, if any
     #[must_use]
     pub const fn bounds_path(&self) -> Option<&SharedPath> {
         self.bounds_path.as_ref()
     }
 
-    /// Append all objects from another picture.
+    /// Append all objects from another picture
     pub fn merge(&mut self, other: Self) {
         self.objects.extend(other.objects);
     }
 
-    /// Add a filled contour to the picture.
-    ///
-    /// The path must be cyclic. Corresponds to `addto <pic> contour <path>`.
+    /// Add a filled contour to the picture (`addto <pic> contour <path>`), path must be cyclic
     pub fn add_fill(&mut self, fill: FillObject) {
         debug_assert!(
             fill.path.is_cyclic(),
@@ -100,14 +95,14 @@ impl Picture {
         self.push(GraphicsObject::Fill(fill));
     }
 
-    /// Add a stroked path to the picture.
+    /// Add a stroked path to the picture
     ///
     /// Corresponds to `addto <pic> doublepath <path>`.
     pub fn add_stroke(&mut self, stroke: StrokeObject) {
         self.push(GraphicsObject::Stroke(stroke));
     }
 
-    /// Clip the picture to a cyclic path.
+    /// Clip the picture to a cyclic path
     ///
     /// Wraps all existing objects in a nested picture with a `clip_path`.
     pub fn clip(&mut self, clip_path: impl Into<SharedPath>) {
@@ -123,7 +118,7 @@ impl Picture {
         self.push(GraphicsObject::Picture(nested));
     }
 
-    /// Set an artificial bounding box on the picture.
+    /// Set an artificial bounding box on the picture
     ///
     /// Wraps all existing objects in a nested picture with a `bounds_path`.
     pub fn set_bounds(&mut self, bounds_path: impl Into<SharedPath>) {

@@ -1,4 +1,4 @@
-//! Numeric evaluation, operators, comparisons, and mediation.
+//! Numeric evaluation, operators, comparisons, and mediation
 
 use super::helpers::TestInterp;
 
@@ -6,7 +6,6 @@ use super::helpers::TestInterp;
 fn eval_numeric_literal() {
     let mut interp = TestInterp::new();
     interp.run("show 42;");
-    // Should have a show message
     let msg = interp.first_show();
     assert!(msg.contains("42"), "expected 42 in: {msg}");
 }
@@ -29,9 +28,8 @@ fn eval_multiplication() {
 
 #[test]
 fn division_by_variable() {
-    // Regression: `360/n` was miscomputed as `360*n` because the
-    // fraction check in scan_primary consumed `/` without restoring
-    // it when the denominator was a variable (not a numeric literal).
+    // Regression: `360/n` was miscomputed as `360*n`.
+    // The fraction check consumed `/` without restoring it for a variable denominator.
     let mut interp = TestInterp::new();
     interp.run("numeric n; n := 5; show 360/n;");
     let msg = interp.first_show();
@@ -189,7 +187,6 @@ fn eval_xpart_ypart_pair() {
 
 #[test]
 fn eval_xpart_shifted_pair() {
-    // (3, 7) shifted (10, 20) = (13, 27)
     let mut interp = TestInterp::new();
     interp.run("show xpart ((3,7) shifted (10,20));");
     let msg = interp.first_show();
@@ -208,7 +205,6 @@ fn eval_xpart_shifted_pair() {
 #[test]
 fn mediation_basic() {
     let mut interp = TestInterp::new();
-    // 0.5[10,20] = 15
     interp.run("show 0.5[10, 20];");
     let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
@@ -217,13 +213,11 @@ fn mediation_basic() {
 #[test]
 fn mediation_endpoints() {
     let mut interp = TestInterp::new();
-    // 0[a,b] = a
     interp.run("show 0[3, 7];");
     let msg = interp.first_show();
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 
     let mut interp = TestInterp::new();
-    // 1[a,b] = b
     interp.run("show 1[3, 7];");
     let msg = interp.first_show();
     assert!(msg.contains("7"), "expected 7 in: {msg}");
@@ -232,7 +226,6 @@ fn mediation_endpoints() {
 #[test]
 fn mediation_fraction() {
     let mut interp = TestInterp::new();
-    // 1/4[0,100] = 25
     interp.run("show 1/4[0, 100];");
     let msg = interp.first_show();
     assert!(msg.contains("25"), "expected 25 in: {msg}");
@@ -301,7 +294,6 @@ fn length_of_numeric_returns_abs() {
 
 #[test]
 fn equals_as_comparison_in_if() {
-    // Inside `if`, `=` should be a comparison, not an equation
     let mut interp = TestInterp::new();
     interp.run("if 3 = 3: message \"yes\"; fi");
     let msgs = interp.shows();
@@ -310,8 +302,7 @@ fn equals_as_comparison_in_if() {
 
 #[test]
 fn equals_as_comparison_in_exitif() {
-    // `exitif n = 3` — the `=` must be comparison, not equation.
-    // `exitif` finishes the current iteration body; loop stops at endfor.
+    // `exitif` finishes the current iteration body; the loop stops at endfor
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "numeric n, s; n := 0; s := 0;\n",
@@ -319,13 +310,11 @@ fn equals_as_comparison_in_exitif() {
         "show n;\n",
     ));
     let msg = interp.first_show();
-    // Loop runs 3 times (n=1,2,3), exits when n=3
     assert!(msg.contains("3"), "expected 3 in: {msg}");
 }
 
 #[test]
 fn equals_as_equation_in_statement() {
-    // At statement level, `=` should be an equation
     let mut interp = TestInterp::new();
     interp.run("numeric x; x = 42; show x;");
     let msg = interp.first_show();
@@ -333,7 +322,7 @@ fn equals_as_equation_in_statement() {
 }
 
 // ===================================================================
-// Regression tests for equality, step loops, scantokens, equations
+// Equality-tolerance regressions
 // ===================================================================
 
 // Lock down the interpreter's comparison tolerance behavior.
@@ -353,7 +342,6 @@ fn equality_comparison_detects_large_diff() {
     // 1 = 1.001 should be false (diff > 1e-4 threshold for equation consistency)
     let mut interp = TestInterp::new();
     interp.run("if 1 = 1.001: show 1; fi;");
-    // Should NOT have any info messages if comparison is false
     let infos = interp.shows();
     assert!(
         infos.is_empty(),

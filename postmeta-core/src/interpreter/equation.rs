@@ -1,16 +1,10 @@
 //! Equation and assignment logic — the stateful side of equation solving.
 //!
-//! Handles `lhs = rhs` equations (including unknown-variable assignment)
-//! and `:=` explicit assignments. Compound types (pair, color, transform)
-//! are split into one equation per component, driven by
-//! [`Type::components`](crate::types::Type::components).
+//! Handles `lhs = rhs` equations (including unknown-variable assignment) and `:=` explicit assignments.
+//! Compound types (pair, color, transform) split into one equation per component, driven by [`Type::components`](crate::types::Type::components).
 //!
-//! # Module split
-//!
-//! The pure dependency-list algebra lives in [`crate::equation`]; this
-//! module is its interpreter-facing client. `reduce_dep_with_knowns`
-//! stays here (not in the algebra module) because substitution reads the
-//! variable store to discover which variables became known or dependent.
+//! The pure dependency-list algebra lives in [`crate::equation`]; this module is its interpreter-facing client.
+//! `reduce_dep_with_knowns` stays here because substitution reads the variable store to discover which variables became known or dependent.
 
 use crate::equation::{
     DepList, SolveResult, const_dep, dep_add_scaled, dep_scale, dep_substitute, solve_equation,
@@ -23,8 +17,7 @@ use crate::variables::{NumericState, VarValue};
 use super::helpers::value_to_scalar;
 use super::{Interpreter, LhsBinding};
 
-/// Numeric components of a known compound value, in storage order
-/// (matching [`Type::component_suffixes`]).
+/// Numeric components of a known compound value, in storage order (matching [`Type::component_suffixes`])
 fn value_components(value: &Value) -> Option<Vec<f64>> {
     match value {
         Value::Pair(x, y) => Some(vec![*x, *y]),
@@ -34,7 +27,7 @@ fn value_components(value: &Value) -> Option<Vec<f64>> {
     }
 }
 
-/// Human-readable kind for compound-equation error messages.
+/// Human-readable kind for compound-equation error messages
 const fn compound_kind(ty: Type) -> &'static str {
     match ty {
         Type::PairType => "pair",
@@ -45,14 +38,12 @@ const fn compound_kind(ty: Type) -> &'static str {
 }
 
 impl Interpreter {
-    /// Substitute all known and dependent variables in `dep` until only
-    /// independent variables (or a constant) remain.
+    /// Substitute known and dependent variables in `dep` until only independent variables (or a constant) remain
     fn reduce_dep_with_knowns(&mut self, dep: DepList) -> DepList {
         const MAX_REDUCTION_PASSES: usize = 1024;
         let mut reduced = dep;
 
-        // Repeat because substituting one dependent variable may introduce
-        // another known/dependent variable into the dep list.
+        // Repeat because one substitution may introduce another known/dependent variable into the dep list
         for _ in 0..MAX_REDUCTION_PASSES {
             let mut substitutions = Vec::new();
             for term in &reduced {
@@ -100,18 +91,14 @@ impl Interpreter {
         }
     }
 
-    /// Dependency lists for each numeric component of one equation side,
-    /// in storage order.
+    /// Dependency lists for each numeric component of one equation side, in storage order.
     ///
     /// Three sources, tried in order:
-    /// 1. expression-level pair dependencies (pairs only — the expression
-    ///    pipeline tracks components for pairs);
-    /// 2. a bare compound variable reference: each component variable's
-    ///    dependency (negated for `-v` forms);
+    /// 1. expression-level pair dependencies (pairs only — the expression pipeline tracks components for pairs);
+    /// 2. a bare compound variable reference: each component variable's dependency (negated for `-v` forms);
     /// 3. a known compound value: constant dependencies.
     ///
-    /// Returns `None` when the side has no component representation (then
-    /// the caller falls back to scalar or assignment handling).
+    /// Returns `None` when the side has no component representation; the caller then falls back to scalar or assignment handling.
     fn side_component_deps(
         &mut self,
         value: &Value,
@@ -122,9 +109,7 @@ impl Interpreter {
             return Some(vec![dx.clone(), dy.clone()]);
         }
 
-        // The parser clears the binding for anything but a bare (possibly
-        // negated) variable reference, so a Variable binding here means the
-        // whole side IS that variable.
+        // The parser clears the binding for anything but a bare (possibly negated) variable reference, so a Variable binding here means the whole side IS that variable
         if let Some(LhsBinding::Variable { id, negated }) = binding {
             let n = value.ty().components()?;
             let ids = self.state.variables.get(*id).component_ids()?;
@@ -146,8 +131,8 @@ impl Interpreter {
     /// Execute an equation: `lhs = rhs`.
     ///
     /// Compound types (pair, color, transform) are solved component-wise.
-    /// If the LHS has a bindable form (`x`, `-x`, internal quantity), treat the
-    /// equation like assignment to that LHS. Otherwise check numeric consistency.
+    /// A bindable LHS (`x`, `-x`, internal quantity) is treated as an assignment target.
+    /// Otherwise numeric consistency is checked.
     pub(super) fn do_equation(
         &mut self,
         lhs: &Value,
@@ -160,8 +145,7 @@ impl Interpreter {
         let (lhs_dep, lhs_pair_dep) = lhs_deps;
         let (rhs_dep, rhs_pair_dep) = rhs_deps;
 
-        // Component-wise solving for compound types. One equation per
-        // component, solved in storage order (x-then-y for pairs).
+        // Component-wise solving for compound types: one equation per component, in storage order (x-then-y for pairs)
         if lhs.ty().is_compound() || rhs.ty().is_compound() {
             let lhs_comps =
                 self.side_component_deps(lhs, lhs_binding.as_ref(), lhs_pair_dep.as_ref());
@@ -196,11 +180,8 @@ impl Interpreter {
             return Ok(());
         }
 
-        // If one side is numeric with missing deps (nonlinear result) and the
-        // equation has a bindable LHS, do NOT silently assign — the deps were
-        // lost due to nonlinearity.  Nonlinear dependency errors are reported
-        // at the operation site (mul_deps); here we just prevent silent
-        // assignment of the junk value.
+        // A numeric side with missing deps lost them to nonlinearity, so do NOT silently assign the junk value.
+        // The nonlinearity error is reported at the operation site (mul_deps).
         if matches!((lhs, rhs), (Value::Numeric(_), Value::Numeric(_)))
             && (lhs_dep.is_none() || rhs_dep.is_none())
         {
@@ -309,9 +290,8 @@ impl Interpreter {
 
     /// Assign a value to a variable.
     ///
-    /// When both the variable and the value are compound of the same width
-    /// (pair, color, transform), each component variable is set to its known
-    /// component value; otherwise the value is stored on the variable itself.
+    /// When variable and value are compound of the same width (pair, color, transform), each component variable is set to its known component value.
+    /// Otherwise the value is stored on the variable itself.
     pub(super) fn assign_to_variable(&mut self, var_id: crate::equation::VarId, value: &Value) {
         if let Value::Numeric(v) = value {
             self.state

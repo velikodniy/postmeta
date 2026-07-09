@@ -2,10 +2,8 @@ use crate::command::Command;
 use crate::error::ErrorKind;
 use crate::input::TokenList;
 
-/// Maximum nesting depth of source input levels (`input` files and
-/// `scantokens` strings). Recursive inclusion (`a.mp` inputting `b.mp`
-/// inputting `a.mp`) hits this bound and reports an error instead of
-/// growing the input stack forever.
+/// Maximum nesting depth of source input levels (`input` files and `scantokens` strings).
+/// Recursive inclusion (`a.mp` inputting `b.mp` inputting `a.mp`) hits this bound and reports an error instead of growing the input stack forever.
 const MAX_INPUT_DEPTH: usize = 64;
 use crate::interpreter::ExprResultValue;
 use crate::interpreter::operators::compute_text_metrics;
@@ -21,9 +19,8 @@ impl Interpreter {
     /// Reads the named file via the filesystem trait and pushes it as a new
     /// source input level.
     pub(in crate::interpreter) fn expand_input(&mut self) {
-        self.get_next(); // skip `input`
+        self.get_next();
 
-        // Get the filename from the next token
         let filename = match &self.cur.token.kind {
             crate::token::TokenKind::Symbolic(_) => {
                 self.cur_symbolic_name().unwrap_or("").to_owned()
@@ -37,7 +34,6 @@ impl Interpreter {
             }
         };
 
-        // Try to read the file
         let contents = self.state.fs.read_file(&filename);
 
         match contents {
@@ -66,40 +62,35 @@ impl Interpreter {
     /// Handle `verbatimtex ... etex`.
     ///
     /// Skips all tokens (without expansion) until `etex` or end of input.
-    /// In the original `MetaPost` this passes TeX preamble material to the
-    /// typesetter; `PostMeta` discards it since we don't invoke TeX.
+    /// In the original `MetaPost` this passes TeX preamble material to the typesetter; `PostMeta` discards it since it does not invoke TeX.
     pub(super) fn expand_verbatimtex(&mut self) {
         loop {
             self.get_next();
             match self.cur.command {
                 Command::EtexMarker | Command::Stop => break,
-                _ => {} // discard
+                _ => {}
             }
         }
-        // Advance past etex so caller sees the next real token.
+        // Advance past etex so the caller sees the next real token
         self.get_next();
     }
 
     /// Handle `btex ... etex`.
     ///
-    /// Collects the raw text between `btex` and `etex` (without macro
-    /// expansion) and produces a picture capsule containing a `TextObject`.
-    /// In the original `MetaPost` this would be shipped to TeX for typesetting;
-    /// `PostMeta` treats it as plain text rendered with the default font
-    /// (`cmr10` at 10pt). Producing a picture directly makes `btex...etex`
-    /// results immediately transformable (e.g. `draw btex...etex shifted z`),
-    /// matching real `MetaPost` behavior. The `thelabel` macro in `plain.mp`
-    /// already handles picture input via its `if picture s` branch.
+    /// Collects the raw text between `btex` and `etex` (without macro expansion) and produces a picture capsule containing a `TextObject`.
+    /// In the original `MetaPost` this would be shipped to TeX for typesetting; `PostMeta` treats it as plain text rendered with the default font (`cmr10` at 10pt).
+    /// Producing a picture directly makes `btex...etex` results immediately transformable (e.g. `draw btex...etex shifted z`), matching real `MetaPost` behavior.
+    /// The `thelabel` macro in `plain.mp` already handles picture input via its `if picture s` branch.
     pub(super) fn expand_start_tex(&mut self) {
         let mut parts: Vec<String> = Vec::new();
 
-        // Read raw tokens (no expansion) until EtexMarker or end of input.
+        // Read raw tokens (no expansion) until EtexMarker or end of input
         loop {
             self.get_next();
             match self.cur.command {
                 Command::EtexMarker | Command::Stop => break,
                 _ => {
-                    // Reconstruct text from token content.
+                    // Reconstruct text from token content
                     match &self.cur.token.kind {
                         crate::token::TokenKind::Symbolic(_) => {
                             if let Some(name) = self.cur_symbolic_name() {
@@ -118,7 +109,7 @@ impl Interpreter {
 
         let text = parts.join(" ");
 
-        // Build a TextObject with default font settings (cmr10 at 10pt).
+        // Default font settings (cmr10 at 10pt)
         let font_name = "cmr10";
         let font_size = 10.0;
         let metrics = compute_text_metrics(
@@ -138,10 +129,10 @@ impl Interpreter {
         let mut pic = Picture::new();
         pic.push(GraphicsObject::Text(text_obj));
 
-        // Push a picture capsule — directly transformable.
+        // Push a picture capsule — directly transformable
         self.back_expr_value(ExprResultValue::plain(Value::Picture(pic)));
 
-        // Advance past the capsule and continue expansion.
+        // Advance past the capsule and continue expansion
         self.get_next();
         self.expand_current();
     }
@@ -150,34 +141,26 @@ impl Interpreter {
     ///
     /// Evaluates the string expression and scans it as if it were source input.
     ///
-    /// mp.web §13039: after `scan_primary` obtains the string, the token
-    /// that terminated the primary (e.g. `;`) is pushed back via
-    /// `back_input`, then the source string is pushed on top.  This
-    /// ensures the terminator is read after the scantokens source is
-    /// exhausted.
+    /// `mp.web` §13039: after `scan_primary` obtains the string, the token that terminated the primary (e.g. `;`) is pushed back via `back_input`, then the source string is pushed on top.
+    /// This ensures the terminator is read after the scantokens source is exhausted.
     ///
-    /// In our architecture `back_input` uses a single slot with highest
-    /// priority, so we instead push the saved token as a one-token level
-    /// *below* the source (push it first, then push the source on top).
+    /// In this architecture `back_input` uses a single slot with highest priority, so the saved token is instead pushed as a one-token level *below* the source (push it first, then push the source on top).
     pub(super) fn expand_scantokens(&mut self) {
         self.expand_scantokens_inner();
         self.get_next();
         self.expand_current();
     }
 
-    /// Core logic for `scantokens`: scan the string expression and push the
-    /// resulting source onto the input stack.
+    /// Core logic for `scantokens`: scan the string expression and push the resulting source onto the input stack
     fn expand_scantokens_inner(&mut self) {
-        self.get_x_next(); // skip `scantokens`, expand
+        self.get_x_next();
 
-        // Scan the string expression
         if let Ok(result) = self.scan_primary() {
             if let Value::String(ref s) = result.exp {
                 let source = s.to_string();
 
-                // Save the token that terminated scan_primary (mp.web's
-                // back_input).  Push it as a level below the source so it
-                // is read after the source is exhausted.
+                // Save the token that terminated scan_primary (`mp.web`'s `back_input`).
+                // Push it as a level below the source so it is read after the source is exhausted.
                 let mut saved = TokenList::new();
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
@@ -204,8 +187,7 @@ impl Interpreter {
 
     /// Handle `expandafter`.
     ///
-    /// mp.web §13032: `expandafter A B` performs ONE expansion step on B,
-    /// then places A in front of B's expansion result.
+    /// `mp.web` §13032: `expandafter A B` performs one expansion step on B, then places A in front of B's expansion result.
     ///
     /// ```text
     /// get_t_next;  p := cur_tok;  {read A}
@@ -214,57 +196,50 @@ impl Interpreter {
     /// back_list(p);               {push A in front}
     /// ```
     ///
-    /// In our architecture each expand handler ends with
-    /// `get_next(); expand_current();`, performing full expansion.
-    /// For expandafter we need exactly one step, so we call a
-    /// push-only variant of the handler that sets up the input stack
-    /// but does **not** read the first result token.  Then we push A
-    /// on top and let `get_next(); expand_current();` do the rest.
+    /// In this architecture each expand handler ends with `get_next(); expand_current();`, performing full expansion.
+    /// `expandafter` needs exactly one step, so a push-only variant of the handler sets up the input stack but does **not** read the first result token, then A is pushed on top and `get_next(); expand_current();` does the rest.
     pub(super) fn expand_expandafter(&mut self) {
         self.expand_expandafter_push_only();
 
-        // Read the first result token and continue expanding.
+        // Read the first result token and continue expanding
         self.get_next();
         self.expand_current();
     }
 
     /// Push-only variant of `expand_scantokens` for use by `expandafter`.
     ///
-    /// Same as `expand_scantokens` but does NOT call `get_next();
-    /// expand_current();` — the source is left on the input stack.
+    /// Same as `expand_scantokens` but does not call `get_next(); expand_current();` — the source is left on the input stack.
     fn expand_scantokens_push_only(&mut self) {
         self.expand_scantokens_inner();
     }
 
     /// Push-only variant of `expand_defined_macro` for use by `expandafter`.
     ///
-    /// Same as `expand_defined_macro` but does NOT call `get_next();
-    /// expand_current();` — the expansion is left on the input stack.
+    /// Same as `expand_defined_macro` but does not call `get_next(); expand_current();` — the expansion is left on the input stack.
     pub(super) fn expand_defined_macro_push_only(&mut self) {
         self.expand_defined_macro_inner();
     }
 
     /// Push-only variant of `expand_expandafter`.
     ///
-    /// Performs the full expandafter logic (read A, read B, one-step expand B,
-    /// push A in front) but does NOT call `get_next(); expand_current()` at
-    /// the end.  Used by `expand_one_step` for nested expandafter chains.
+    /// Performs the full expandafter logic (read A, read B, one-step expand B, push A in front) but does not call `get_next(); expand_current()` at the end.
+    /// Used by `expand_one_step` for nested expandafter chains.
     fn expand_expandafter_push_only(&mut self) {
-        // Read token A without expanding.
+        // Read token A without expanding
         self.get_next();
         let saved_a: TokenList =
             std::iter::once_with(|| crate::input::resolved_to_stored_token(&self.cur))
                 .flatten()
                 .collect();
 
-        // Read token B without expanding.
+        // Read token B without expanding
         self.get_next();
 
         if self.cur.command.is_expandable() {
-            // Perform ONE expansion step for B.
+            // Perform one expansion step for B
             self.expand_one_step();
         } else {
-            // B is not expandable — push it back.
+            // B is not expandable — push it back
             let mut saved_b = TokenList::new();
             self.store_current_token(&mut saved_b);
             if !saved_b.is_empty() {
@@ -274,34 +249,29 @@ impl Interpreter {
             }
         }
 
-        // Push A in front of whatever B produced.
+        // Push A in front of whatever B produced
         if !saved_a.is_empty() {
             self.state
                 .input
                 .push_token_list(saved_a, Vec::new(), "expandafter-a");
         }
 
-        // Do NOT call get_next/expand_current — caller handles continuation.
+        // Do NOT call get_next/expand_current — caller handles continuation
     }
 
     /// Perform exactly one expansion step for the token in `self.cur`.
     ///
-    /// This dispatches to a push-only variant of the appropriate handler.
-    /// After this call, the expansion result is on the input stack but
-    /// `self.cur` is stale — the caller must call `get_next()` to read
-    /// the first result token.
+    /// Dispatches to a push-only variant of the appropriate handler.
+    /// After this call, the expansion result is on the input stack but `self.cur` is stale — the caller must call `get_next()` to read the first result token.
     fn expand_one_step(&mut self) {
         match self.cur.command {
             Command::DefinedMacro => self.expand_defined_macro_push_only(),
             Command::ScanTokens => self.expand_scantokens_push_only(),
             Command::ExpandAfter => self.expand_expandafter_push_only(),
             Command::IfTest => {
-                // For conditionals, full expansion is the only sensible
-                // one-step behaviour: evaluate the condition and enter
-                // the correct branch.
+                // For conditionals, full expansion is the only sensible one-step behavior: evaluate the condition and enter the correct branch
                 self.expand_if();
-                // expand_if left self.cur at the first token of the
-                // branch — push it back so the caller can re-read it.
+                // expand_if left self.cur at the first token of the branch — push it back so the caller can re-read it
                 let mut saved = TokenList::new();
                 self.store_current_token(&mut saved);
                 if !saved.is_empty() {
@@ -321,9 +291,7 @@ impl Interpreter {
                 }
             }
             _ => {
-                // For other expandable commands (iteration, exitif,
-                // repeat_loop, etc.), fall back to full expansion and
-                // push the result back.
+                // For other expandable commands (iteration, exitif, repeat_loop, etc.), fall back to full expansion and push the result back
                 self.expand_current();
                 let mut saved = TokenList::new();
                 self.store_current_token(&mut saved);

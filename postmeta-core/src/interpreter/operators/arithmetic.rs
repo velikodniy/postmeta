@@ -1,4 +1,4 @@
-//! Numeric, boolean, and comparison operator evaluation.
+//! Numeric, boolean, and comparison operator evaluation
 
 use std::cmp::Ordering;
 
@@ -21,13 +21,13 @@ pub(super) fn sqrt(input: &Value) -> InterpResult<(Value, Type)> {
     ))
 }
 
-/// Sine of an angle in degrees.
+/// Sine of an angle in degrees
 pub(super) fn sind(input: &Value) -> InterpResult<(Value, Type)> {
     let v = value_to_scalar(input)?;
     Ok((Value::Numeric(v.to_radians().sin()), Type::Known))
 }
 
-/// Cosine of an angle in degrees.
+/// Cosine of an angle in degrees
 pub(super) fn cosd(input: &Value) -> InterpResult<(Value, Type)> {
     let v = value_to_scalar(input)?;
     Ok((Value::Numeric(v.to_radians().cos()), Type::Known))
@@ -101,8 +101,7 @@ pub(super) fn length(input: &Value) -> InterpResult<(Value, Type)> {
     Ok((Value::Numeric(n), Type::Known))
 }
 
-/// Explicit multiplication: scalar * scalar, scalar * pair, pair * scalar,
-/// scalar * color, color * scalar.
+/// Explicit `*` multiplication: scalar with scalar, pair, or color
 pub(super) fn times(left: &Value, right: &Value) -> InterpResult<(Value, Type)> {
     match (left, right) {
         (Value::Numeric(a), Value::Numeric(b)) => Ok((Value::Numeric(a * b), Type::Known)),
@@ -127,7 +126,7 @@ pub(super) fn times(left: &Value, right: &Value) -> InterpResult<(Value, Type)> 
     }
 }
 
-/// Implicit multiplication of a numeric `factor` with the right operand.
+/// Implicit multiplication of a numeric `factor` with the right operand
 pub(super) fn implicit_mul(factor: &Value, right: &Value) -> InterpResult<(Value, Type)> {
     let a = value_to_scalar(factor)?;
     match right {
@@ -194,7 +193,7 @@ pub(super) fn tertiary_binary_value(
     right: &Value,
 ) -> InterpResult<(Value, Type)> {
     match op {
-        // Pythagorean addition: `a ++ b = sqrt(a² + b²)`.
+        // Pythagorean addition: `a ++ b = sqrt(a² + b²)`
         TertiaryBinaryOp::PythagAdd => {
             let a = value_to_scalar(left)?;
             let b = value_to_scalar(right)?;

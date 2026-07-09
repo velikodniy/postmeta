@@ -1,4 +1,4 @@
-//! Macro definition and expansion: def/vardef/*def, let, scantokens, expandafter.
+//! Macro definition and expansion: def/vardef/*def, let, scantokens, expandafter
 
 use crate::command::Command;
 
@@ -55,12 +55,10 @@ fn eval_vardef() {
 
 #[test]
 fn eval_def_with_body_statements() {
-    // A macro that assigns to a variable
     let mut interp = TestInterp::new();
     interp.run(
         "numeric result; def setresult(expr x) = result := x enddef; setresult(42); show result;",
     );
-    // Find the show message (skip any info/error messages before it)
     let msg = interp.first_show();
     assert!(msg.contains("42"), "expected show 42, got: {msg}");
 }
@@ -103,9 +101,8 @@ fn eval_scantokens_define_and_use() {
 
 #[test]
 fn expandafter_text_macro_scantokens() {
-    // expandafter mymac scantokens "abc"; should NOT consume the
-    // statement after it.  The `;` terminates the text parameter,
-    // and `message "B"` must still execute.
+    // `expandafter mymac scantokens "abc";` must not consume the following statement.
+    // The `;` terminates the text parameter, so `message "B"` still executes.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "def mymac text t = message \"in mymac\"; enddef;\n",
@@ -125,7 +122,7 @@ fn expandafter_text_macro_scantokens() {
 
 #[test]
 fn expandafter_simple_token() {
-    // expandafter with a non-expandable B should just reorder.
+    // expandafter with a non-expandable B just reorders the two tokens
     let mut interp = TestInterp::new();
     interp.run("expandafter message \"hello\"; end");
     let msgs = interp.shows();
@@ -134,19 +131,9 @@ fn expandafter_simple_token() {
 
 #[test]
 fn expandafter_triple_redefine_macro() {
-    // The triple-expandafter pattern from boxes.mp:
-    //   expandafter def expandafter clearboxes expandafter =
-    //     clearboxes message "hi";
-    //   enddef;
-    // This should APPEND `message "hi"` to clearboxes' body.
-    // Step by step:
-    //   1. expandafter reads A=`def`, reads B=`expandafter`, B is expandable
-    //   2. Inner expandafter reads A=`clearboxes`, reads B=`expandafter`, B is expandable
-    //   3. Innermost expandafter reads A=`=`, reads B=`clearboxes` (a defined macro)
-    //   4. One-step expand of clearboxes pushes its body (empty at first)
-    //   5. `=` is placed in front → scanner sees `= <old body>`
-    //   6. Back in step 2: `clearboxes` is placed in front → `clearboxes = <old body>`
-    //   7. Back in step 1: `def` is placed in front → `def clearboxes = <old body> message "hi"; enddef;`
+    // The triple-expandafter pattern from boxes.mp appends to a macro body.
+    // The expandafters defer `def clearboxes =` while `clearboxes` expands to its old body.
+    // The scanner then sees `def clearboxes = <old body> message "hi"; enddef;`.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "def clearboxes = enddef;\n",
@@ -166,7 +153,6 @@ fn expandafter_triple_redefine_macro() {
 
 #[test]
 fn expandafter_triple_accumulate() {
-    // Multiple rounds of triple-expandafter accumulation.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "def clearboxes = enddef;\n",
@@ -232,8 +218,7 @@ fn eval_def_undelimited_expr() {
 #[test]
 fn let_does_not_expand_rhs() {
     let mut interp = TestInterp::new();
-    // Without fix, this crashes with "Expected pair, got known numeric"
-    // because the let would try to expand foo's body
+    // Without the fix, `let` expanded foo's body and crashed with "Expected pair, got known numeric"
     interp.run(
         "def foo(expr z, d) = shifted -z rotated d shifted z enddef; \
              let bar = foo; show 1;",
@@ -323,7 +308,6 @@ fn tertiarydef_with_picture() {
 
 #[test]
 fn vardef_stays_tag_token() {
-    // After defining a vardef, the symbol should remain TagToken
     let mut interp = TestInterp::new();
     interp.run("vardef foo primary x = x + 1 enddef;");
     let sym = interp.interp.state.symbols.lookup("foo");
@@ -334,17 +318,14 @@ fn vardef_stays_tag_token() {
 
 #[test]
 fn vardef_expands_in_expression() {
-    // vardef macro should expand when used as standalone primary
     let mut interp = TestInterp::new();
     interp.run("vardef foo primary x = x + 1 enddef; show foo 5;");
-    // show produces an error with the value
     let msg = interp.first_show();
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
 
 #[test]
 fn vardef_suffix_not_expanded() {
-    // A vardef symbol appearing as a suffix should NOT be expanded
     let mut interp = TestInterp::new();
     interp.run("pair p.foo; vardef foo primary x = x enddef; p.foo = (1,2);");
 }
@@ -417,8 +398,8 @@ fn multiple_delimited_groups_allow_boundary_comma() {
 
 #[test]
 fn trailing_tokens_after_undelimited_expr() {
-    // A macro with undelimited `primary` param stops scanning after the
-    // primary.  The trailing `;` must survive and terminate the statement.
+    // Scanning stops after the undelimited primary.
+    // The trailing `;` must survive and terminate the statement.
     let mut interp = TestInterp::new();
     interp.run("def greet primary x = show x enddef; greet 42;");
     interp.assert_no_errors();
@@ -428,7 +409,6 @@ fn trailing_tokens_after_undelimited_expr() {
 
 #[test]
 fn vardef_returns_value() {
-    // A vardef should return the value of its last expression.
     let mut interp = TestInterp::new();
     interp.run("vardef triple(expr x) = 3 * x enddef; show triple(7);");
     let msg = interp.first_show();
@@ -437,7 +417,6 @@ fn vardef_returns_value() {
 
 #[test]
 fn vardef_at_suffix_with_params() {
-    // vardef foo@#(expr s) should bind @# to the suffix and s to the arg
     let mut interp = TestInterp::new();
     interp.run(r#"vardef foo@#(expr s) = show str @#; show s enddef; foo.bar("hello");"#);
     let infos = interp.shows();
@@ -456,8 +435,7 @@ fn vardef_at_suffix_with_params() {
 
 #[test]
 fn abs_of_numeric_via_plain_mp_let() {
-    // plain.mp line 135: `let abs = length;`
-    // abs should work on numerics since length does
+    // plain.mp has `let abs = length;`, so abs must work on numerics like length
     let mut interp = TestInterp::new();
     interp.run("let abs = length; show abs(-42);");
     let msg = interp.first_show();
@@ -482,9 +460,9 @@ fn delimited_suffix_comma_shares_type() {
 
 #[test]
 fn delimited_suffix_in_def_endbox_pattern() {
-    // The endbox_ pattern from boxes.mp: `def endbox_(suffix cl, $) = cl($); enddef`
-    // Both cl and $ are suffix params. When expanded, cl($) should call
-    // the macro named by cl with $ as its suffix argument.
+    // The endbox_ pattern from boxes.mp: `def endbox_(suffix cl, $) = cl($); enddef`.
+    // Both cl and $ are suffix params.
+    // Expanding cl($) must call the macro named by cl with $ as its suffix argument.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "vardef myfunc(suffix $) = message str $; enddef;\n",
@@ -501,8 +479,8 @@ fn delimited_suffix_in_def_endbox_pattern() {
 
 #[test]
 fn tertiarydef_or_in_text_param() {
-    // `or` is a tertiarydef. Using it inside a text parameter of a macro
-    // should not duplicate the closing delimiter.
+    // `or` is a tertiarydef.
+    // Using it inside a text parameter must not duplicate the closing delimiter.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "tertiarydef a or b = if a: a else: b fi enddef;\n",
@@ -548,7 +526,6 @@ fn scantokens_preserves_terminator() {
 
 #[test]
 fn expandafter_scantokens_same_as_direct() {
-    // expandafter scantokens should produce same result
     let mut interp = TestInterp::new();
     interp.run(r#"expandafter show scantokens "42";"#);
     let infos = interp.shows();
@@ -560,7 +537,7 @@ fn expandafter_scantokens_same_as_direct() {
 
 #[test]
 fn undelimited_text_macro_stops_at_endgroup() {
-    // Regression: undelimited text args must stop at endgroup as well as ';'.
+    // Regression: undelimited text args must stop at endgroup as well as ';'
     let mut interp = TestInterp::new();
     interp.run(
         "def t text x = message \"in\" enddef; \
@@ -578,8 +555,7 @@ fn undelimited_text_macro_stops_at_endgroup() {
 
 #[test]
 fn vardef_at_suffix_only_preserves_trailing_token() {
-    // Regression: for vardef with only @# suffix param, the trailing token after
-    // a macro call must still be preserved.
+    // Regression: a vardef with only an @# suffix param must preserve the trailing token
     let mut interp = TestInterp::new();
     interp.run("vardef f@# = 1 enddef; show f.x; message \"after\";");
 

@@ -1,12 +1,11 @@
-//! Font provider construction for the CLI.
+//! Font provider construction for the CLI
 
 use std::fs;
 use std::path::PathBuf;
 
 use postmeta_fonts::CompositeFontProvider;
 
-/// Build a [`CompositeFontProvider`] with embedded defaults and any
-/// custom font directories specified via `--font-dir`.
+/// Build a [`CompositeFontProvider`] with embedded defaults plus any `--font-dir` directories
 pub fn build_font_provider(
     font_dirs: &[PathBuf],
 ) -> Result<CompositeFontProvider, postmeta_fonts::FontError> {

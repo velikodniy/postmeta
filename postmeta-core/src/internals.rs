@@ -1,10 +1,8 @@
-//! Internal quantities for the `MetaPost` interpreter.
+//! Internal quantities for the `MetaPost` interpreter
 //!
-//! Internal quantities are named numeric values that control interpreter
-//! behavior (tracing, drawing parameters, etc.). They are accessed via
-//! the `InternalQuantity` command and set via `:=` or `interim`.
-//!
-//! This corresponds to `mp.web`'s `internal` array.
+//! Internal quantities are named numeric values that control interpreter behavior (tracing, drawing parameters, etc).
+//! Accessed via the `InternalQuantity` command and set via `:=` or `interim`.
+//! Corresponds to `mp.web`'s `internal` array.
 
 use postmeta_graphics::types::Scalar;
 
@@ -12,102 +10,86 @@ use postmeta_graphics::types::Scalar;
 // Well-known internal indices
 // ---------------------------------------------------------------------------
 
-/// Indices for built-in internal quantities.
+/// Indices for built-in internal quantities
 ///
-/// User-defined internals (via `newinternal`) get indices above
-/// `MAX_GIVEN_INTERNAL`.
+/// User-defined internals (via `newinternal`) get indices above `MAX_GIVEN_INTERNAL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum InternalId {
-    /// `tracingtitles`: show titles in the log.
+    /// `tracingtitles`
     TracingTitles = 1,
-    /// `tracingequations`: show each equation as solved.
+    /// `tracingequations`
     TracingEquations = 2,
-    /// `tracingcapsules`: show capsule values.
+    /// `tracingcapsules`
     TracingCapsules = 3,
-    /// `tracingchoices`: show Hobby's algorithm decisions.
+    /// `tracingchoices`: shows Hobby's algorithm decisions
     TracingChoices = 4,
-    /// `tracingspecs`: show path specifications.
+    /// `tracingspecs`
     TracingSpecs = 5,
-    /// `tracingcommands`: show each command before execution.
+    /// `tracingcommands`
     TracingCommands = 6,
-    /// `tracingrestores`: show variable restores at `endgroup`.
+    /// `tracingrestores`: shows variable restores at `endgroup`
     TracingRestores = 7,
-    /// `tracingmacros`: show macro expansions.
+    /// `tracingmacros`
     TracingMacros = 8,
-    /// `tracingoutput`: show `shipout` details.
+    /// `tracingoutput`: shows `shipout` details
     TracingOutput = 9,
-    /// `tracingstats`: show memory usage statistics.
+    /// `tracingstats`
     TracingStats = 10,
-    /// `tracinglostchars`: warn about missing characters.
+    /// `tracinglostchars`
     TracingLostChars = 11,
-    /// `tracingonline`: send tracing to terminal (vs log only).
+    /// `tracingonline`: terminal vs log-only
     TracingOnline = 12,
-    /// `year`: current year.
     Year = 13,
-    /// `month`: current month (1–12).
+    /// `month`: 1–12
     Month = 14,
-    /// `day`: current day (1–31).
+    /// `day`: 1–31
     Day = 15,
-    /// `time`: minutes since midnight.
+    /// `time`: minutes since midnight
     Time = 16,
-    /// `charcode`: character code for current figure.
     CharCode = 17,
-    /// `charext`: character extension.
     CharExt = 18,
-    /// `charwd`: character width (for TFM, largely unused).
+    /// `charwd`: for TFM, largely unused
     CharWd = 19,
-    /// `charht`: character height.
     CharHt = 20,
-    /// `chardp`: character depth.
     CharDp = 21,
-    /// `charic`: character italic correction.
     CharIc = 22,
-    /// `designsize`: TFM design size.
     DesignSize = 23,
-    /// `pausing`: pause after each line shown.
     Pausing = 24,
-    /// `showstopping`: stop after each `show`.
     ShowStopping = 25,
-    /// `fontmaking`: produce TFM output.
     FontMaking = 26,
-    /// `linejoin`: line join style (0=miter, 1=round, 2=bevel).
+    /// `linejoin`: 0=miter, 1=round, 2=bevel
     LineJoin = 27,
-    /// `linecap`: line cap style (0=butt, 1=round, 2=square).
+    /// `linecap`: 0=butt, 1=round, 2=square
     LineCap = 28,
-    /// `miterlimit`: miter limit ratio.
     MiterLimit = 29,
-    /// `warningcheck`: threshold for "value too large" warnings.
+    /// `warningcheck`: threshold for "value too large" warnings
     WarningCheck = 30,
-    /// `boundarychar`: boundary character for ligatures.
     BoundaryChar = 31,
-    /// `prologues`: PostScript prologue mode.
     Prologues = 32,
-    /// `truecorners`: use true bounding box corners.
     TrueCorners = 33,
 }
 
-/// Maximum index of built-in internals.
+/// Maximum index of built-in internals
 pub const MAX_GIVEN_INTERNAL: u16 = InternalId::TrueCorners as u16;
 
 // ---------------------------------------------------------------------------
 // Internal quantities storage
 // ---------------------------------------------------------------------------
 
-/// Storage for internal quantities.
+/// Storage for internal quantities
 ///
 /// Built-in internals occupy indices 1–`MAX_GIVEN_INTERNAL`.
 /// User-defined internals (via `newinternal`) are appended after.
 #[derive(Debug)]
 pub struct Internals {
-    /// Internal quantity values, 1-indexed (index 0 is unused).
+    /// Internal quantity values, 1-indexed (index 0 is unused)
     values: Vec<Scalar>,
-    /// Internal quantity names, 1-indexed.
+    /// Internal quantity names, 1-indexed
     names: Vec<String>,
 }
 
 impl Internals {
-    /// Create a new internals storage with all built-in quantities.
     #[must_use]
     pub fn new() -> Self {
         let base_len = (MAX_GIVEN_INTERNAL as usize) + 1;
@@ -116,7 +98,6 @@ impl Internals {
         values.reserve(16);
         names.reserve(16);
 
-        // Set defaults
         let defaults: &[(InternalId, Scalar, &str)] = &[
             (InternalId::TracingTitles, 0.0, "tracingtitles"),
             (InternalId::TracingEquations, 0.0, "tracingequations"),
@@ -164,7 +145,6 @@ impl Internals {
         Self { values, names }
     }
 
-    /// Get the value of an internal quantity by index.
     #[must_use]
     pub fn get(&self, index: u16) -> Scalar {
         let idx = index as usize;
@@ -175,13 +155,11 @@ impl Internals {
         }
     }
 
-    /// Get the value of a built-in internal quantity by enum id.
     #[must_use]
     pub fn get_id(&self, id: InternalId) -> Scalar {
         self.get(id as u16)
     }
 
-    /// Set the value of an internal quantity by index.
     pub fn set(&mut self, index: u16, value: Scalar) {
         let idx = index as usize;
         if idx < self.values.len() {
@@ -189,12 +167,10 @@ impl Internals {
         }
     }
 
-    /// Set the value of a built-in internal quantity by enum id.
     pub fn set_id(&mut self, id: InternalId, value: Scalar) {
         self.set(id as u16, value);
     }
 
-    /// Get the name of an internal quantity.
     #[must_use]
     pub fn name(&self, index: u16) -> &str {
         let idx = index as usize;
@@ -205,8 +181,7 @@ impl Internals {
         }
     }
 
-    /// Register a new user-defined internal quantity.
-    /// Returns the index of the new quantity.
+    /// Register a new user-defined internal quantity, returning its index
     #[must_use]
     pub fn new_internal(&mut self, name: &str) -> Option<u16> {
         let idx = self.values.len();
@@ -218,7 +193,7 @@ impl Internals {
         Some(result)
     }
 
-    /// Total number of internal quantities (including slot 0).
+    /// Total number of internal quantities (including slot 0)
     #[must_use]
     pub fn count(&self) -> usize {
         self.values.len()

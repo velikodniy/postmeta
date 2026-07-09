@@ -1,4 +1,4 @@
-//! The table of engine primitives: name → (command, modifier) registrations.
+//! The table of engine primitives: name → (command, modifier) registrations
 
 use super::{
     BoundsOp, Command, FiOrElseOp, IfTestOp, IterationOp, MacroDefOp, MacroSpecialOp, MessageOp,
@@ -6,22 +6,18 @@ use super::{
     ThingToAddOp, TypeNameOp, UnaryOp, WithOptionOp,
 };
 
-/// A primitive registration entry: name → (command, modifier).
+/// A primitive registration entry: name → (command, modifier)
 #[derive(Debug, Clone, Copy)]
 pub struct Primitive {
-    /// The symbolic name of the primitive.
     pub name: &'static str,
-    /// The command code.
     pub command: Command,
-    /// The modifier (operation code).
     pub modifier: u16,
 }
 
-/// All engine primitives. Registered into the symbol table at startup.
+/// All engine primitives, registered into the symbol table at startup
 ///
-/// This list corresponds to `mp.web`'s calls to the `primitive` procedure.
-/// User-visible macros like `draw`, `fill`, `fullcircle` etc. are NOT here —
-/// they are defined in `plain.mp`.
+/// Corresponds to `mp.web`'s calls to the `primitive` procedure.
+/// User-visible macros like `draw`, `fill`, `fullcircle` etc. are NOT here — they are defined in `plain.mp`.
 pub const PRIMITIVES: &[Primitive] = &[
     // -- Expandable commands --
     Primitive {

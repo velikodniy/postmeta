@@ -60,9 +60,8 @@ impl_value_extractor!(
 
 /// Convert a runtime `Value` to a list of `StoredToken`s that reconstruct it.
 ///
-/// For compound types like pairs and colors, this produces the token sequence
-/// `( x , y )` or `( r , g , b )`. For simple types, returns a single capsule
-/// or string literal token.
+/// Pairs and colors produce the token sequence `( x , y )` or `( r , g , b )`.
+/// Simple types produce a single capsule or string literal token.
 pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> TokenList {
     match val {
         Value::Pair(x, y) => {
@@ -92,12 +91,8 @@ pub(super) fn value_to_stored_tokens(val: &Value, symbols: &mut SymbolTable) -> 
             ]
         }
         Value::String(s) => vec![StoredToken::StringLit(s.to_string())],
-        // Store plain numerics as Capsule with dep = const_dep(v).
-        // Using Capsule (not StoredToken::Numeric) preserves implicit
-        // multiplication behavior: `72i` in a for-loop body correctly
-        // treats the capsule as a primary that `72` multiplies.
-        // Setting dep = Some(const_dep(v)) fixes equations like
-        // `x = <loop-var>` which silently failed with dep:None.
+        // A Capsule (not StoredToken::Numeric) preserves implicit multiplication: `72i` in a for-loop body treats the capsule as a primary that `72` multiplies.
+        // dep = const_dep(v) keeps equations like `x = <loop-var>` solvable; they silently failed with dep: None.
         Value::Numeric(v) => vec![StoredToken::Capsule(Arc::new(ExprValue {
             exp: val.clone(),
             ty: Type::Known,

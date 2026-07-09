@@ -1,8 +1,6 @@
-//! Operator dispatch.
+//! Operator dispatch
 //!
-//! Implements all nullary, unary, and binary operators at each precedence
-//! level.  This module keeps the thin dispatch `match`es; the per-domain
-//! evaluation functions live in the submodules.
+//! Thin dispatch `match`es for nullary, unary, and binary operators at each precedence level; the per-domain evaluation functions live in the submodules.
 
 mod arithmetic;
 mod paths;
@@ -48,7 +46,7 @@ impl Interpreter {
         }
     }
 
-    /// Evaluate a nullary operator, returning `(value, type)`.
+    /// Evaluate a nullary operator
     pub(super) fn eval_nullary(&mut self, op: NullaryOp) -> (Value, Type) {
         match op {
             NullaryOp::True => (Value::Boolean(true), Type::Boolean),
@@ -68,23 +66,20 @@ impl Interpreter {
         }
     }
 
-    /// Execute a unary operator, returning the result.
+    /// Execute a unary operator
     ///
-    /// Most operators are pure: they transform an input value into an output
-    /// `(Value, Type)` via [`Self::eval_unary`].  The part-extraction operators
-    /// (`xpart`, `ypart`, etc.) additionally propagate pair dependency info for
-    /// the equation solver.
+    /// Most operators are pure `(Value, Type)` transformations via [`Self::eval_unary`].
+    /// The part-extraction operators (`xpart`, `ypart`, etc.) also propagate pair dependency info for the equation solver.
     pub(super) fn do_unary(
         &mut self,
         op: UnaryOp,
         input: &Value,
         pair_dep: Option<(crate::equation::DepList, crate::equation::DepList)>,
     ) -> InterpResult<super::ExprResultValue> {
-        // Save the operand binding before clearing — part-extraction operators
-        // need it to find transform sub-part VarIds for equation solving.
+        // Save the operand binding before clearing — part-extraction operators need it to find transform sub-part VarIds for equation solving
         let operand_binding = self.lhs_tracking.last_lhs_binding.take();
 
-        // Part-extraction operators need pair_dep access — handle them here.
+        // Part-extraction operators need pair_dep access — handle them here
         match op {
             UnaryOp::XPart => {
                 return self.extract_part(input, 0, pair_dep, operand_binding.as_ref());
@@ -122,11 +117,9 @@ impl Interpreter {
         }
 
         // All remaining unary operators are pure value transformations.
-        // Access both fields through `self.state` so the borrow checker can
-        // see they are disjoint (Deref would borrow all of `self`).
+        // Access both fields through `self.state` so the borrow checker sees disjoint borrows (Deref would borrow all of `self`).
         let fonts = self.state.font_provider.as_deref();
-        // mp.web: `truecorners > 0` makes corner operators ignore
-        // setbounds regions and measure the actual contents.
+        // mp.web: `truecorners > 0` makes corner operators ignore setbounds regions and measure the actual contents
         let corners = if self
             .state
             .internals
@@ -138,10 +131,7 @@ impl Interpreter {
             Corners::HonorSetBounds
         };
         let (val, ty) = Self::eval_unary(op, input, &mut self.state.random_seed, fonts, corners)?;
-        // Synthesize const_dep for known numeric results so that dependency
-        // tracking is preserved through subsequent arithmetic (e.g.,
-        // `alpha = angle(A) - angle(B)` where both angle calls return known
-        // values that need to flow through subtraction into the equation solver).
+        // Synthesize const_dep for known numeric results so dependencies survive subsequent arithmetic (e.g. `alpha = angle(A) - angle(B)` must flow into the equation solver)
         let dep = if let Value::Numeric(v) = &val {
             Some(crate::equation::const_dep(*v))
         } else {
@@ -155,11 +145,9 @@ impl Interpreter {
         })
     }
 
-    /// Pure evaluation of a unary operator.
+    /// Pure evaluation of a unary operator
     ///
-    /// Returns the result `(Value, Type)`.  Does NOT handle part-extraction
-    /// operators (xpart, ypart, etc.) — those need pair dependency propagation
-    /// and are handled by [`Self::do_unary`] directly.
+    /// Part-extraction operators (`xpart`, `ypart`, etc.) are not handled here; they need pair dependency propagation and live in [`Self::do_unary`].
     fn eval_unary(
         op: UnaryOp,
         input: &Value,
@@ -202,16 +190,15 @@ impl Interpreter {
             UnaryOp::ColorModel => Self::extract_color_model(input),
             UnaryOp::GreyPart => Self::extract_grey_part(input),
             UnaryOp::CyanPart | UnaryOp::MagentaPart | UnaryOp::YellowPart | UnaryOp::BlackPart => {
-                // CMYK not supported — always return 0.
-                // For color values (non-picture), this is still 0.
+                // CMYK is not supported — always return 0
                 Ok((Value::Numeric(0.0), Type::Known))
             }
             UnaryOp::LLCorner | UnaryOp::LRCorner | UnaryOp::ULCorner | UnaryOp::URCorner => {
                 pictures::corner(op, input, corners)
             }
-            // TODO: Load actual font metrics (.tfm or hardcoded CMR) for accurate results.
+            // TODO: load actual font metrics (.tfm or hardcoded CMR) for accurate results
             UnaryOp::CharExists => {
-                // Stub: assume all byte-range character codes exist.
+                // Stub: assume all byte-range character codes exist
                 let code = value_to_scalar(input)?;
                 let exists = (0.0..=255.0).contains(&code) && (code - code.floor()).abs() < 0.001;
                 Ok((Value::Boolean(exists), Type::Boolean))
@@ -227,7 +214,7 @@ impl Interpreter {
             UnaryOp::TextualOp => pictures::is_textual(input),
             UnaryOp::ClippedOp => pictures::is_clipped(input),
             UnaryOp::BoundedOp => pictures::is_bounded(input),
-            // Part-extraction ops are handled in do_unary before calling this.
+            // Part-extraction ops are handled in do_unary before calling this
             _ => Err(InterpreterError::new(
                 ErrorKind::InvalidExpression,
                 format!("Unimplemented unary operator: {op:?}"),
@@ -235,7 +222,7 @@ impl Interpreter {
         }
     }
 
-    /// Execute an "X of Y" binary operator.
+    /// Execute an "X of Y" binary operator
     pub(super) fn do_primary_binary(
         op: PrimaryBinaryOp,
         first: &Value,
@@ -253,7 +240,6 @@ impl Interpreter {
         }
     }
 
-    /// Execute a secondary binary operator.
     pub(super) fn do_secondary_binary(
         op: SecondaryBinaryOp,
         left: &Value,
@@ -302,7 +288,6 @@ impl Interpreter {
         }
     }
 
-    /// Execute plus or minus on two operands.
     pub(super) fn do_plus_minus(
         op: PlusMinusOp,
         left: &Value,
@@ -311,15 +296,11 @@ impl Interpreter {
         arithmetic::plus_minus_value(op, left, right)
     }
 
-    /// Perform implicit multiplication (e.g., `3x`, `2bp`, `.5(1,2)`).
-    ///
-    /// The `factor` is the numeric value on the left; `cur_exp`/`cur_type`
-    /// hold the right operand (the result of the recursive `scan_primary`).
+    /// Perform implicit multiplication (e.g. `3x`, `2bp`, `.5(1,2)`)
     pub(super) fn do_implicit_mul(factor: &Value, right: &Value) -> InterpResult<(Value, Type)> {
         arithmetic::implicit_mul(factor, right)
     }
 
-    /// Execute a tertiary binary operator.
     pub(super) fn do_tertiary_binary(
         op: TertiaryBinaryOp,
         left: &Value,
@@ -328,7 +309,6 @@ impl Interpreter {
         arithmetic::tertiary_binary_value(op, left, right)
     }
 
-    /// Execute an expression binary operator.
     pub(super) fn do_expression_binary(
         op: ExpressionBinaryOp,
         left: &Value,

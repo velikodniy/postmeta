@@ -1,216 +1,205 @@
-//! Command codes and operation codes for `MetaPost` primitives.
+//! Command codes and operation codes for `MetaPost` primitives
 //!
 //! Every symbolic token maps to a `(Command, u16)` pair where:
-//! - `Command` determines the syntactic role (can it start an expression?
-//!   is it a statement keyword? is it an operator at some precedence level?)
-//! - The `u16` modifier further identifies the specific primitive within
-//!   that command category.
+//! - `Command` determines the syntactic role (can it start an expression? is it a statement keyword? is it an operator at some precedence level?)
+//! - The `u16` modifier further identifies the specific primitive within that command category
 //!
-//! The command code ordering mirrors `mp.web` §12 and is critical for
-//! the expression parser's precedence logic.
+//! The command code ordering mirrors `mp.web` §12 and is critical for the expression parser's precedence logic.
 
 // ---------------------------------------------------------------------------
 // Command codes
 // ---------------------------------------------------------------------------
 
-/// Syntactic command categories.
+/// Syntactic command categories
 ///
-/// The numeric values matter: the expression parser uses range checks
-/// (e.g. `min_primary_command..=max_primary_command`) to decide what can
-/// appear at each precedence level.
+/// The numeric values matter: the expression parser uses range checks (e.g. `min_primary_command..=max_primary_command`) to decide what can appear at each precedence level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
 pub enum Command {
     // -- Expandable commands (eliminated during macro expansion) --
-    /// `btex ... etex` start marker.
+    /// `btex ... etex` start marker
     StartTex = 1,
-    /// `etex` marker.
+    /// `etex` marker
     EtexMarker = 2,
-    /// `verbatimtex ... etex` — skip TeX preamble material.
+    /// `verbatimtex ... etex` — skip TeX preamble material
     VerbatimTex = 3,
-    /// `if` / `elseif` test.
+    /// `if` / `elseif` test
     IfTest = 4,
-    /// `fi` / `else` / `elseif`.
+    /// `fi` / `else` / `elseif`
     FiOrElse = 5,
-    /// `input`.
+    /// `input`
     Input = 6,
-    /// `for` / `forsuffixes` / `forever`.
+    /// `for` / `forsuffixes` / `forever`
     Iteration = 7,
-    /// Internal repeat-loop token.
+    /// Internal repeat-loop token
     RepeatLoop = 8,
-    /// `exitif`.
+    /// `exitif`
     ExitTest = 9,
-    /// `relax`.
+    /// `relax`
     Relax = 10,
-    /// `scantokens`.
+    /// `scantokens`
     ScanTokens = 11,
-    /// `expandafter`.
+    /// `expandafter`
     ExpandAfter = 12,
-    /// A defined macro being expanded.
+    /// A defined macro being expanded
     DefinedMacro = 13,
 
     // -- Statement-level commands (min_command = 14) --
-    /// `save`.
+    /// `save`
     Save = 14,
-    /// `interim`.
+    /// `interim`
     Interim = 15,
-    /// `let`.
+    /// `let`
     Let = 16,
-    /// `newinternal`.
+    /// `newinternal`
     NewInternal = 17,
-    /// `def` / `vardef` / `primarydef` / `secondarydef` / `tertiarydef`.
+    /// `def` / `vardef` / `primarydef` / `secondarydef` / `tertiarydef`
     MacroDef = 18,
-    /// `shipout`.
+    /// `shipout`
     ShipOut = 19,
-    /// `addto`.
+    /// `addto`
     AddTo = 20,
-    /// `clip` / `setbounds` (`bounds_command` in `mp.web`).
+    /// `clip` / `setbounds` (`bounds_command` in `mp.web`)
     Bounds = 21,
-    /// `outer` — marks tokens as outer (not yet enforced, but parsed).
+    /// `outer` — marks tokens as outer (not yet enforced, but parsed)
     Outer = 22,
-    /// `show` / `showtoken` / `showdependencies` / `showvariable` / `showstats`.
+    /// `show` / `showtoken` / `showdependencies` / `showvariable` / `showstats`
     Show = 24,
-    /// `batchmode` / `nonstopmode` / `scrollmode` / `errorstopmode`.
+    /// `batchmode` / `nonstopmode` / `scrollmode` / `errorstopmode`
     ModeCommand = 25,
-    /// `randomseed`.
+    /// `randomseed`
     RandomSeed = 26,
-    /// `message` / `errmessage` / `errhelp`.
+    /// `message` / `errmessage` / `errhelp`
     MessageCommand = 27,
-    /// `everyjob`.
+    /// `everyjob`
     EveryJob = 28,
-    /// `delimiters`.
+    /// `delimiters`
     Delimiters = 29,
-    /// `special`.
+    /// `special`
     Special = 30,
-    /// `write`.
+    /// `write`
     Write = 31,
 
     // -- Primary commands (can start expressions) --
-    /// Type names: `numeric`, `pair`, `path`, `pen`, `picture`, `color`,
-    /// `transform`, `string`, `boolean`.
+    /// Type names: `numeric`, `pair`, `path`, `pen`, `picture`, `color`, `transform`, `string`, `boolean`
     TypeName = 32,
-    /// A left delimiter (e.g. `(` or user-defined).
+    /// A left delimiter (e.g. `(` or user-defined)
     LeftDelimiter = 33,
-    /// `begingroup`.
+    /// `begingroup`
     BeginGroup = 34,
-    /// Nullary operators: `true`, `false`, `nullpicture`, `nullpen`,
-    /// `pencircle`, `normaldeviate`, `readstring`, `jobname`.
+    /// Nullary operators: `true`, `false`, `nullpicture`, `nullpen`, `pencircle`, `normaldeviate`, `readstring`, `jobname`
     Nullary = 35,
-    /// Unary operators: `not`, `sqrt`, `sind`, `cosd`, `floor`, `length`,
-    /// `abs`, `xpart`, `ypart`, `xxpart`, etc.
+    /// Unary operators: `not`, `sqrt`, `sind`, `cosd`, `floor`, `length`, `abs`, `xpart`, `ypart`, `xxpart`, etc
     Unary = 36,
-    /// String-specific unary: `str`.
+    /// String-specific unary: `str`
     StrOp = 37,
-    /// `cycle`.
+    /// `cycle`
     Cycle = 38,
-    /// `of`-binary operators: `point ... of`, `subpath ... of`,
-    /// `direction ... of`, `penoffset ... of`, etc.
+    /// `of`-binary operators: `point ... of`, `subpath ... of`, `direction ... of`, `penoffset ... of`, etc
     PrimaryBinary = 39,
-    /// Internal capsule (intermediate expression result).
+    /// Internal capsule (intermediate expression result)
     CapsuleToken = 40,
-    /// A string literal token.
+    /// A string literal token
     StringToken = 41,
-    /// Internal quantities: `linecap`, `linejoin`, `tracingchoices`, etc.
+    /// Internal quantities: `linecap`, `linejoin`, `tracingchoices`, etc
     InternalQuantity = 42,
-    /// An unresolved variable name (tag).
+    /// An unresolved variable name (tag)
     TagToken = 43,
-    /// A numeric literal token.
+    /// A numeric literal token
     NumericToken = 44,
 
     // -- Tertiary-level operators --
-    /// `+` / `-` (also unary minus).
+    /// `+` / `-` (also unary minus)
     PlusOrMinus = 45,
-    /// A user-defined `tertiarydef` macro.
+    /// A user-defined `tertiarydef` macro
     TertiarySecondaryMacro = 46,
-    /// Built-in tertiary binary: `++`, `+-+`.
+    /// Built-in tertiary binary: `++`, `+-+`
     TertiaryBinary = 47,
 
     // -- Expression-level operators --
-    /// `{` (left brace, for path directions).
+    /// `{` (left brace, for path directions)
     LeftBrace = 48,
-    /// `..` (path join).
+    /// `..` (path join)
     PathJoin = 49,
-    /// `&` (concatenation / path join).
+    /// `&` (concatenation / path join)
     Ampersand = 50,
-    /// A user-defined `secondarydef` macro at expression level.
+    /// A user-defined `secondarydef` macro at expression level
     ExpressionTertiaryMacro = 51,
-    /// Built-in expression binary: `intersectiontimes`.
+    /// Built-in expression binary: `intersectiontimes`
     ExpressionBinary = 52,
-    /// `=` (equation).
+    /// `=` (equation)
     Equals = 53,
 
     // -- Secondary-level operators --
-    /// `and`.
+    /// `and`
     And = 54,
-    /// A user-defined `primarydef` macro.
+    /// A user-defined `primarydef` macro
     SecondaryPrimaryMacro = 55,
-    /// `/` (slash — always secondary).
+    /// `/` (slash — always secondary)
     Slash = 56,
-    /// Built-in secondary binary: `*`, `scaled`, `shifted`, `rotated`,
-    /// `xscaled`, `yscaled`, `slanted`, `zscaled`, `transformed`,
-    /// `dotprod`.
+    /// Built-in secondary binary: `*`, `scaled`, `shifted`, `rotated`, `xscaled`, `yscaled`, `slanted`, `zscaled`, `transformed`, `dotprod`
     SecondaryBinary = 57,
 
     // -- Non-expression tokens --
-    /// Parameter type marker in macro definitions.
+    /// Parameter type marker in macro definitions
     ParamType = 58,
-    /// `controls` (in path joins).
+    /// `controls` (in path joins)
     Controls = 59,
-    /// `tension` (in path joins).
+    /// `tension` (in path joins)
     Tension = 60,
-    /// `atleast` (in tension specs).
+    /// `atleast` (in tension specs)
     AtLeast = 61,
-    /// `curl` (in path joins).
+    /// `curl` (in path joins)
     CurlCommand = 62,
-    /// Macro-definition specifiers: `#@`, `@`, `@#`, `vardef`, etc.
+    /// Macro-definition specifiers: `#@`, `@`, `@#`, `vardef`, etc
     MacroSpecial = 63,
-    /// A right delimiter (e.g. `)` or user-defined).
+    /// A right delimiter (e.g. `)` or user-defined)
     RightDelimiter = 64,
-    /// `[` (left bracket — for mediation `a[b,c]`).
+    /// `[` (left bracket — for mediation `a[b,c]`)
     LeftBracket = 65,
-    /// `]` (right bracket).
+    /// `]` (right bracket)
     RightBracket = 66,
-    /// `}` (right brace).
+    /// `}` (right brace)
     RightBrace = 67,
-    /// `withpen` / `withcolor` / `dashed`.
+    /// `withpen` / `withcolor` / `dashed`
     WithOption = 68,
-    /// `contour` / `doublepath` / `also`.
+    /// `contour` / `doublepath` / `also`
     ThingToAdd = 69,
-    /// `of`.
+    /// `of`
     OfToken = 70,
-    /// `to`.
+    /// `to`
     ToToken = 71,
-    /// `step`.
+    /// `step`
     StepToken = 72,
-    /// `until`.
+    /// `until`
     UntilToken = 73,
-    /// `within` (for `for ... within`).
+    /// `within` (for `for ... within`)
     WithinToken = 74,
-    /// `:=` (assignment).
+    /// `:=` (assignment)
     Assignment = 76,
-    /// `::` (double colon in path syntax).
+    /// `::` (double colon in path syntax)
     DoubleColon = 79,
-    /// `:` (colon).
+    /// `:` (colon)
     Colon = 80,
-    /// `,` (comma).
+    /// `,` (comma)
     Comma = 81,
-    /// `;` (semicolon — statement terminator).
+    /// `;` (semicolon — statement terminator)
     Semicolon = 82,
-    /// `endgroup`.
+    /// `endgroup`
     EndGroup = 83,
-    /// `end` / `dump`.
+    /// `end` / `dump`
     Stop = 84,
 }
 
 impl Command {
-    /// Pratt-style binding power for expression-level operators.
+    /// Pratt-style binding power for expression-level operators
     pub const BP_EXPRESSION: u8 = 10;
-    /// Pratt-style binding power for tertiary operators.
+    /// Pratt-style binding power for tertiary operators
     pub const BP_TERTIARY: u8 = 20;
-    /// Pratt-style binding power for secondary operators.
+    /// Pratt-style binding power for secondary operators
     pub const BP_SECONDARY: u8 = 30;
 
-    /// Minimum command code that survives macro expansion.
+    /// Minimum command code that survives macro expansion
     pub const MIN_COMMAND: Self = Self::Save;
 
     /// Is this a secondary-level binary operator?
@@ -231,7 +220,7 @@ impl Command {
         (self as u8) >= (Self::LeftBrace as u8) && (self as u8) <= (Self::Equals as u8)
     }
 
-    /// Return Pratt-style infix binding power for this command.
+    /// Return Pratt-style infix binding power for this command
     #[must_use]
     pub const fn infix_binding_power(self) -> Option<u8> {
         if self.is_secondary_op() {
@@ -257,12 +246,10 @@ impl Command {
         (self as u8) > (Self::Comma as u8)
     }
 
-    /// Can this command trigger implicit multiplication when preceded by
-    /// a numeric token?
+    /// Can this command trigger implicit multiplication when preceded by a numeric token?
     ///
-    /// In `mp.web` §15381: `cur_cmd >= min_primary_command` (32) and
-    /// `cur_cmd < numeric_token` (44).  This covers everything that can
-    /// start a primary expression except `+`/`-` and another number.
+    /// In `mp.web` §15381: `cur_cmd >= min_primary_command` (32) and `cur_cmd < numeric_token` (44).
+    /// Covers everything that can start a primary expression except `+`/`-` and another number.
     #[must_use]
     pub const fn can_start_implicit_mul(self) -> bool {
         let code = self as u8;
@@ -274,7 +261,7 @@ impl Command {
 // Operation codes (modifiers)
 // ---------------------------------------------------------------------------
 
-/// Operation codes for [`Command::Nullary`].
+/// Operation codes for [`Command::Nullary`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum NullaryOp {
@@ -288,7 +275,7 @@ pub enum NullaryOp {
     NormalDeviate = 37,
 }
 
-/// Operation codes for [`Command::Unary`].
+/// Operation codes for [`Command::Unary`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum UnaryOp {
@@ -357,7 +344,7 @@ pub enum UnaryOp {
     BlackPart = 97,
 }
 
-/// Operation codes for [`Command::PlusOrMinus`].
+/// Operation codes for [`Command::PlusOrMinus`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum PlusMinusOp {
@@ -365,7 +352,7 @@ pub enum PlusMinusOp {
     Minus = 90,
 }
 
-/// Operation codes for [`Command::SecondaryBinary`].
+/// Operation codes for [`Command::SecondaryBinary`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum SecondaryBinaryOp {
@@ -382,7 +369,7 @@ pub enum SecondaryBinaryOp {
     Infont = 112,
 }
 
-/// Operation codes for [`Command::TertiaryBinary`].
+/// Operation codes for [`Command::TertiaryBinary`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum TertiaryBinaryOp {
@@ -392,7 +379,7 @@ pub enum TertiaryBinaryOp {
     IntersectionTimes = 113,
 }
 
-/// Operation codes for [`Command::ExpressionBinary`].
+/// Operation codes for [`Command::ExpressionBinary`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ExpressionBinaryOp {
@@ -405,7 +392,7 @@ pub enum ExpressionBinaryOp {
     Concatenate = 103,
 }
 
-/// Operation codes for [`Command::PrimaryBinary`] ("expr X of Y").
+/// Operation codes for [`Command::PrimaryBinary`] ("expr X of Y")
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum PrimaryBinaryOp {
@@ -419,7 +406,7 @@ pub enum PrimaryBinaryOp {
     ArcTimeOf = 122,
 }
 
-/// Operation codes for [`Command::Show`].
+/// Operation codes for [`Command::Show`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ShowOp {
@@ -430,7 +417,7 @@ pub enum ShowOp {
     ShowStats = 4,
 }
 
-/// Operation codes for [`Command::ThingToAdd`].
+/// Operation codes for [`Command::ThingToAdd`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ThingToAddOp {
@@ -439,7 +426,7 @@ pub enum ThingToAddOp {
     Also = 2,
 }
 
-/// Operation codes for [`Command::WithOption`].
+/// Operation codes for [`Command::WithOption`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum WithOptionOp {
@@ -448,7 +435,7 @@ pub enum WithOptionOp {
     Dashed = 2,
 }
 
-/// Operation codes for [`Command::Bounds`].
+/// Operation codes for [`Command::Bounds`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum BoundsOp {
@@ -456,7 +443,7 @@ pub enum BoundsOp {
     SetBounds = 1,
 }
 
-/// Operation codes for [`Command::MacroDef`].
+/// Operation codes for [`Command::MacroDef`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum MacroDefOp {
@@ -467,7 +454,7 @@ pub enum MacroDefOp {
     TertiaryDef = 4,
 }
 
-/// Operation codes for [`Command::MacroSpecial`].
+/// Operation codes for [`Command::MacroSpecial`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum MacroSpecialOp {
@@ -478,7 +465,7 @@ pub enum MacroSpecialOp {
     MacroSuffix = 4,
 }
 
-/// Operation codes for [`Command::FiOrElse`].
+/// Operation codes for [`Command::FiOrElse`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum FiOrElseOp {
@@ -487,7 +474,7 @@ pub enum FiOrElseOp {
     ElseIf = 2,
 }
 
-/// Operation codes for [`Command::Iteration`].
+/// Operation codes for [`Command::Iteration`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum IterationOp {
@@ -496,7 +483,7 @@ pub enum IterationOp {
     Forever = 2,
 }
 
-/// Operation codes for [`Command::MessageCommand`].
+/// Operation codes for [`Command::MessageCommand`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum MessageOp {
@@ -505,14 +492,14 @@ pub enum MessageOp {
     ErrHelp = 2,
 }
 
-/// Operation codes for [`Command::StrOp`].
+/// Operation codes for [`Command::StrOp`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum StrOpOp {
     Str = 0,
 }
 
-/// Operation codes for [`Command::ParamType`] — macro parameter type markers.
+/// Operation codes for [`Command::ParamType`] — macro parameter type markers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum ParamTypeOp {
@@ -524,7 +511,7 @@ pub enum ParamTypeOp {
     Tertiary = 5,
 }
 
-/// Operation codes for [`Command::IfTest`].
+/// Operation codes for [`Command::IfTest`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum IfTestOp {
@@ -532,7 +519,7 @@ pub enum IfTestOp {
     ElseIf = 1,
 }
 
-/// Operation codes for [`Command::TypeName`] — which type is declared.
+/// Operation codes for [`Command::TypeName`] — which type is declared
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u16)]
 pub enum TypeNameOp {
@@ -806,13 +793,10 @@ mod tests {
         assert!(!Command::Equals.ends_statement());
     }
 
-    /// Expected classification for every [`Command`] variant.
+    /// Expected classification for every [`Command`] variant
     ///
-    /// The match is EXHAUSTIVE on purpose: adding a `Command` variant will
-    /// not compile until its classification is declared here, and the
-    /// assertions below fail if the declared classification disagrees with
-    /// the discriminant-range predicates. This is the guard against a new
-    /// variant silently landing inside an operator range.
+    /// The match is EXHAUSTIVE on purpose: adding a `Command` variant won't compile until its classification is declared here, and the assertions below fail if the declared classification disagrees with the discriminant-range predicates.
+    /// This is the guard against a new variant silently landing inside an operator range.
     #[derive(Debug, PartialEq, Clone, Copy)]
     enum Level {
         Secondary,
@@ -829,7 +813,7 @@ mod tests {
     const fn expected(cmd: Command) -> (Level, bool, bool, bool) {
         use Command as C;
         match cmd {
-            // Expandable commands: consumed by macro expansion.
+            // Expandable commands: consumed by macro expansion
             C::StartTex
             | C::EtexMarker
             | C::VerbatimTex
@@ -843,7 +827,7 @@ mod tests {
             | C::ScanTokens
             | C::ExpandAfter
             | C::DefinedMacro => (Level::None, true, false, false),
-            // Statement keywords and drawing commands.
+            // Statement keywords and drawing commands
             C::Save
             | C::Interim
             | C::Let
@@ -861,8 +845,7 @@ mod tests {
             | C::Delimiters
             | C::Special
             | C::Write => (Level::None, false, false, false),
-            // Primary starters: a numeric token before these means
-            // implicit multiplication.
+            // Primary starters: a numeric token before these means implicit multiplication
             C::TypeName
             | C::LeftDelimiter
             | C::BeginGroup
@@ -876,22 +859,22 @@ mod tests {
             | C::InternalQuantity
             | C::TagToken => (Level::None, false, false, true),
             C::NumericToken => (Level::None, false, false, false),
-            // Tertiary-level infix operators.
+            // Tertiary-level infix operators
             C::PlusOrMinus | C::TertiarySecondaryMacro | C::TertiaryBinary => {
                 (Level::Tertiary, false, false, false)
             }
-            // Expression-level infix operators.
+            // Expression-level infix operators
             C::LeftBrace
             | C::PathJoin
             | C::Ampersand
             | C::ExpressionTertiaryMacro
             | C::ExpressionBinary
             | C::Equals => (Level::Expression, false, false, false),
-            // Secondary-level infix operators.
+            // Secondary-level infix operators
             C::And | C::SecondaryPrimaryMacro | C::Slash | C::SecondaryBinary => {
                 (Level::Secondary, false, false, false)
             }
-            // Path-join modifiers, delimiters, punctuation.
+            // Path-join modifiers, delimiters, punctuation
             C::ParamType
             | C::Controls
             | C::Tension
@@ -913,13 +896,12 @@ mod tests {
             | C::DoubleColon
             | C::Colon
             | C::Comma => (Level::None, false, false, false),
-            // Statement terminators.
+            // Statement terminators
             C::Semicolon | C::EndGroup | C::Stop => (Level::None, false, true, false),
         }
     }
 
-    /// One entry per variant; keep in sync with the `expected` match (the
-    /// match's exhaustiveness is the compile-time completeness check).
+    /// One entry per variant; keep in sync with the `expected` match (the match's exhaustiveness is the compile-time completeness check)
     const ALL_COMMANDS: &[Command] = &[
         Command::StartTex,
         Command::EtexMarker,

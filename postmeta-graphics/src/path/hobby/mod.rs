@@ -1,26 +1,19 @@
 //! Hobby's spline algorithm
 //!
-//! Given a sequence of knots with optional direction, curl, and tension
-//! constraints, this computes cubic Bezier control points that produce
-//! aesthetically pleasing smooth curves.
+//! Given a sequence of knots with optional direction, curl, and tension constraints, computes cubic Bezier control points that produce aesthetically pleasing smooth curves.
 //!
 //! The algorithm is described in:
-//! - John D. Hobby, "Smooth, Easy to Compute Interpolating Splines",
-//!   *Discrete and Computational Geometry* 1 (1986), pp. 123-140.
+//! - John D. Hobby, "Smooth, Easy to Compute Interpolating Splines", *Discrete and Computational Geometry* 1 (1986), pp. 123-140.
 //! - D.E. Knuth, *The `METAFONTbook`*, Chapter 14.
-//! - The `MetaPost` source code (mp.web), sections on `make_choices` and
-//!   `set_controls`.
+//! - The `MetaPost` source code (`mp.web`), sections on `make_choices` and `set_controls`.
 //!
 //! # Overview
 //!
 //! The algorithm:
-//! 1. Decompose the path into independent segments at "breakpoints"
-//!    (knots with fully specified directions on both sides).
+//! 1. Decompose the path into independent segments at "breakpoints" (knots with fully specified directions on both sides).
 //! 2. For each segment, compute turning angles (radians) between consecutive chords.
-//! 3. Set up and solve a tridiagonal linear system for the unknown
-//!    direction angles `theta_k` (radians) at each knot.
-//! 4. Compute Bezier control points from the solved angles using the
-//!    velocity function.
+//! 3. Set up and solve a tridiagonal linear system for the unknown direction angles `theta_k` (radians) at each knot.
+//! 4. Compute Bezier control points from the solved angles using the velocity function.
 
 use crate::{
     math::normalize_angle,
@@ -31,21 +24,17 @@ use crate::{
 mod math;
 use math::{curl_ratio, set_controls_for_segment, tension_val};
 
-/// Resolve all knot constraints to explicit Bezier control points.
+/// Resolve all knot constraints to explicit Bezier control points
 ///
-/// Decomposes the path at breakpoints (knots with given directions or
-/// curls), solves a tridiagonal system for the turning angles in each
-/// sub-segment, and converts the solved angles to control-point
-/// positions via the velocity function. After this call, every
-/// `KnotDirection` in the path will be `Explicit`.
+/// Decomposes the path at breakpoints (knots with given directions or curls), solves a tridiagonal system for the turning angles in each sub-segment, and converts the solved angles to control-point positions via the velocity function.
+/// After this call, every `KnotDirection` in the path will be `Explicit`.
 pub fn make_choices(path: &mut KnotPath) {
-    // Follow mp.web: when consecutive knots are coincident, force that
-    // segment to be explicit with control points equal to the knot.
-    // This prevents zero-length chords from entering turning-angle math.
+    // mp.web: coincident consecutive knots get explicit controls equal to the
+    // knot, so zero-length chords never enter the turning-angle math
     join_consecutive_equal_knots(path);
 
     if path.knots.len() < 2 {
-        // A single knot: set controls to the knot itself.
+        // A single knot: controls are the knot itself
         if let Some(knot) = path.knots.first_mut() {
             knot.left = KnotDirection::Explicit(knot.point);
             knot.right = KnotDirection::Explicit(knot.point);
@@ -61,11 +50,9 @@ pub fn make_choices(path: &mut KnotPath) {
     }
 }
 
-/// If consecutive knots are coincident, join them explicitly.
+/// If consecutive knots are coincident, join them explicitly
 ///
-/// This mirrors mp.web's `make_choices` pre-pass:
-/// - set `right(p)` and `left(q)` to explicit controls at the knot point;
-/// - if the opposite side is still open, set it to `curl 1`.
+/// Mirrors `mp.web`'s `make_choices` pre-pass: set `right(p)` and `left(q)` to explicit controls at the knot point, and if the opposite side is still open, set it to `curl 1`.
 fn join_consecutive_equal_knots(path: &mut KnotPath) {
     let knot_count = path.knots.len();
     if knot_count < 2 {
@@ -107,20 +94,17 @@ fn join_consecutive_equal_knots(path: &mut KnotPath) {
 fn make_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
 
-    // Find the first breakpoint on the cycle: a knot where either
-    // left or right is not Open.  Following mp.web's make_choices,
-    // we iterate around the cycle looking for such a knot.
+    // First breakpoint on the cycle: a knot where either left or right is not Open
     let first_bp = (0..n).find(|&k| {
         is_breakpoint_dir(&path.knots[k].left) || is_breakpoint_dir(&path.knots[k].right)
     });
 
     if let Some(bp) = first_bp {
-        // Decompose the cycle into open segments between breakpoints
-        // and solve each independently, just like the open-path case.
+        // Decompose into open segments between breakpoints and solve each
+        // independently, just like the open-path case
         solve_cyclic_with_breakpoints(path, bp);
     } else {
-        // No breakpoints: pure smooth cycle (all Open directions).
-        solve_choices_cyclic(path);
+        solve_choices_cyclic(path); // no breakpoints: pure smooth cycle
     }
 }
 
@@ -139,8 +123,8 @@ fn make_choices_open(path: &mut KnotPath) {
 
     solve_choices_open(path);
 
-    // For open paths, the first knot's left and last knot's right
-    // are not part of any segment — set them to the knot point.
+    // The first knot's left and last knot's right are not part of any
+    // segment; set them to the knot point
     if let Some(knot) = path.knots.first_mut() {
         knot.left = KnotDirection::Explicit(knot.point);
     }
@@ -153,26 +137,22 @@ fn make_choices_open(path: &mut KnotPath) {
 // Cyclic path with breakpoints
 // ---------------------------------------------------------------------------
 
-/// Check if a knot direction is a breakpoint (non-Open, i.e., has an explicit
-/// constraint that should split the path into independent sub-segments).
+/// Check if a knot direction is a breakpoint: a non-Open constraint that should split the path into independent sub-segments
 const fn is_breakpoint_dir(dir: &KnotDirection) -> bool {
     !matches!(dir, KnotDirection::Open)
 }
 
-/// Decompose a cyclic path with breakpoints into independent open segments
-/// and solve each one.
+/// Decompose a cyclic path with breakpoints into independent open segments and solve each one
 ///
-/// Following `mp.web`'s `make_choices`, this walks around the cycle starting
-/// from the first breakpoint, collects all breakpoints, and calls
-/// `solve_open_segment` for each pair of consecutive breakpoints.
+/// Following `mp.web`'s `make_choices`, this walks around the cycle starting from the first breakpoint, collects all breakpoints, and calls `solve_open_segment` for each pair of consecutive breakpoints.
 fn solve_cyclic_with_breakpoints(path: &mut KnotPath, first_bp: usize) {
     let n = path.knots.len();
 
     // Mirror one-sided direction constraints at breakpoints so segment
-    // decomposition can use consistent endpoint boundary conditions.
+    // decomposition can use consistent endpoint boundary conditions
     mirror_one_sided_direction_constraints(path);
 
-    // Collect all breakpoints starting from `first_bp`, walking around the cycle.
+    // Collect all breakpoints starting from `first_bp`, walking around the cycle
     let mut breaks = vec![first_bp];
     for offset in 1..n {
         let k = (first_bp + offset) % n;
@@ -181,7 +161,7 @@ fn solve_cyclic_with_breakpoints(path: &mut KnotPath, first_bp: usize) {
         }
     }
 
-    // Precompute delta and dist for all n cyclic segments.
+    // Precompute delta and dist for all n cyclic segments
     let mut delta: Vec<Vec2> = Vec::with_capacity(n);
     let mut dist: Vec<Scalar> = Vec::with_capacity(n);
     for i in 0..n {
@@ -191,20 +171,18 @@ fn solve_cyclic_with_breakpoints(path: &mut KnotPath, first_bp: usize) {
         dist.push(d.length());
     }
 
-    // Solve each pair of consecutive breakpoints as a segment.
-    // The last segment wraps from the final breakpoint back to the first.
+    // Solve each pair of consecutive breakpoints as a segment
     for w in breaks.windows(2) {
         let indices = cyclic_index_range(w[0], w[1], n);
         solve_segment(path, &indices, &delta, &dist);
     }
-    // Closing segment: last breakpoint → first breakpoint (wrapping around).
+    // Closing segment: last breakpoint back to first, wrapping around
     let last_bp = breaks[breaks.len() - 1];
     let indices = cyclic_index_range(last_bp, breaks[0], n);
     solve_segment(path, &indices, &delta, &dist);
 }
 
-/// Build the sequence of knot indices from `start` to `end` going forward
-/// around a cycle of length `n`.
+/// Build the sequence of knot indices from `start` to `end` going forward around a cycle of length `n`
 fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
     let mut indices = vec![start];
     let mut k = start;
@@ -218,13 +196,11 @@ fn cyclic_index_range(start: usize, end: usize, n: usize) -> Vec<usize> {
     indices
 }
 
-/// Solve for turning angles along one sub-segment of the path.
+/// Solve for turning angles along one sub-segment of the path
 ///
-/// Sets up and forward-eliminates a tridiagonal system whose unknowns
-/// are the turning angles theta at each interior knot. Boundary
-/// conditions (given direction, curl, or open) determine the first and
-/// last rows. After back-substitution, `set_controls_for_segment` is
-/// called to convert angles to Bezier control points.
+/// Sets up and forward-eliminates a tridiagonal system whose unknowns are the turning angles theta at each interior knot.
+/// Boundary conditions (given direction, curl, or open) determine the first and last rows.
+/// After back-substitution, `set_controls_for_segment` converts angles to Bezier control points.
 #[expect(
     clippy::too_many_lines,
     reason = "tridiagonal coefficient computation with boundary conditions is a single logical unit"
@@ -236,18 +212,16 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
     }
 
     // Infer missing boundary constraints at segment endpoints from the
-    // opposite side when possible.
+    // opposite side when possible
     infer_right_from_left(path, indices[0]);
     infer_left_from_right(path, indices[seg_len - 1]);
 
-    // For two knots, use the two-knot special case.
     if seg_len == 2 {
         solve_two_knots_range(path, indices[0], indices[1], delta, dist);
         return;
     }
 
-    // Compute local turning angles and solve the tridiagonal system.
-    // Local indexing (0..seg_len) maps to global indices via `indices`.
+    // Local indexing (0..seg_len) maps to global indices via `indices`
 
     let mut psi = vec![0.0; seg_len]; // psi[0] unused
     for li in 1..(seg_len - 1) {
@@ -335,8 +309,7 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
         }
     }
 
-    // Right boundary (knot at `end`)
-    let last = seg_len - 1;
+    let last = seg_len - 1; // right boundary: knot at `end`
     let ge = indices[last];
     let ge_prev = indices[last - 1];
     let lt_end = path.knots[ge].left_tension;
@@ -358,10 +331,8 @@ fn solve_segment(path: &mut KnotPath, indices: &[usize], delta: &[Vec2], dist: &
         _ => solver.last_vv(),
     };
 
-    // Back-substitution
     let theta = solver.back_substitute(theta_last);
 
-    // Compute phi values and set control points
     let mut phi = vec![0.0; seg_len];
     for li in 1..(seg_len - 1) {
         phi[li] = -(psi[li] + theta[li]);
@@ -386,11 +357,10 @@ fn solve_choices_open(path: &mut KnotPath) {
     }
 
     // Mirror one-sided interior direction constraints at breakpoints so
-    // segment decomposition can use consistent endpoint boundary conditions.
+    // segment decomposition can use consistent endpoint boundary conditions
     mirror_one_sided_direction_constraints(path);
 
-    // Find breakpoint indices: interior knots where left OR right is constrained.
-    // A breakpoint splits the path into independent sub-segments.
+    // Breakpoint indices: interior knots where left OR right is constrained.
     // The first and last knots are always segment boundaries.
     let mut breaks = vec![0usize];
     for k in 1..(n - 1) {
@@ -401,7 +371,6 @@ fn solve_choices_open(path: &mut KnotPath) {
     breaks.push(n - 1);
     breaks.dedup();
 
-    // Precompute delta and dist for all segments
     let (delta, dist): (Vec<Vec2>, Vec<Scalar>) = (0..(n - 1))
         .map(|i| {
             let d = path.knots[i + 1].point - path.knots[i].point;
@@ -409,7 +378,6 @@ fn solve_choices_open(path: &mut KnotPath) {
         })
         .unzip();
 
-    // Solve each sub-segment independently
     for w in breaks.windows(2) {
         let indices: Vec<usize> = (w[0]..=w[1]).collect();
         solve_segment(path, &indices, &delta, &dist);
@@ -466,10 +434,10 @@ fn infer_left_from_right(path: &mut KnotPath, idx: usize) {
     }
 }
 
-/// Two-knot special case for a sub-segment range.
+/// Two-knot special case for a sub-segment range
 ///
 /// Handles the four combinations of boundary conditions at a two-knot segment.
-/// Follows mp.web's "Reduce to simple case" sections.
+/// Follows `mp.web`'s "Reduce to simple case" sections.
 fn solve_two_knots_range(
     path: &mut KnotPath,
     i: usize,
@@ -495,7 +463,7 @@ fn solve_two_knots_range(
             return;
         }
         (KnotDirection::Given(a1), KnotDirection::Curl(gamma)) => {
-            // Given start, curl end: theta from direction, phi via curl ratio.
+            // Given start, curl end: theta from direction, phi via curl ratio
             let theta = normalize_angle(*a1 - chord_angle);
             let lt_j = path.knots[j].left_tension.abs();
             let rt_i = path.knots[i].right_tension.abs();
@@ -505,7 +473,7 @@ fn solve_two_knots_range(
             return;
         }
         (KnotDirection::Curl(gamma), KnotDirection::Given(a2)) => {
-            // Curl start, given end: phi from direction, theta via curl ratio.
+            // Curl start, given end: phi from direction, theta via curl ratio
             let phi = normalize_angle(-(*a2 - chord_angle));
             let rt_i = path.knots[i].right_tension.abs();
             let lt_j = path.knots[j].left_tension.abs();
@@ -515,7 +483,7 @@ fn solve_two_knots_range(
             return;
         }
         (KnotDirection::Curl(_), KnotDirection::Curl(_)) => {
-            // Both curls: straight line (theta=phi=0).
+            // Both curls: straight line (theta=phi=0)
             set_controls_for_segment(path, i, j, full_delta, full_dist, 0.0, 0.0);
             return;
         }
@@ -529,21 +497,17 @@ fn solve_two_knots_range(
 // Cyclic path solver
 // ---------------------------------------------------------------------------
 
-/// Solve a purely cyclic path where every direction is Open.
+/// Solve a purely cyclic path where every direction is Open
 ///
-/// Uses the same mock-curvature equations as the open case, but the
-/// tridiagonal system wraps around: theta[0] = theta[n]. An extra
-/// coefficient `ww[k]` tracks the dependency on theta[0] through the
-/// forward sweep; the cyclic closure condition then determines theta[0]
-/// and standard back-substitution recovers the remaining angles.
+/// Uses the same mock-curvature equations as the open case, but the tridiagonal system wraps around: theta[0] = theta[n].
+/// An extra coefficient `ww[k]` tracks the dependency on theta[0] through the forward sweep; the cyclic closure condition then determines theta[0] and standard back-substitution recovers the remaining angles.
 fn solve_choices_cyclic(path: &mut KnotPath) {
     let n = path.knots.len();
     if n < 2 {
         return;
     }
 
-    // Compute delta vectors and distances for all n cyclic segments
-    // Chord vectors and distances for all n cyclic segments.
+    // Chord vectors and distances for all n cyclic segments
     let (delta, dist): (Vec<Vec2>, Vec<Scalar>) = (0..n)
         .map(|i| {
             let d = path.knots[(i + 1) % n].point - path.knots[i].point;
@@ -551,8 +515,8 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
         })
         .unzip();
 
-    // Turning angles: psi[k] = angle between chord k-1 and chord k.
-    // For cyclic paths, psi[0] uses delta[n-1] and delta[0].
+    // Turning angles: psi[k] = angle between chord k-1 and chord k;
+    // psi[0] uses delta[n-1] and delta[0]
     let psi: Vec<Scalar> = (0..n)
         .map(|k| delta[(k + n - 1) % n].angle_to(delta[k]))
         .collect();
@@ -563,7 +527,7 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
 
     for k in 1..=n {
         let prev = k - 1;
-        // Map array indices to knot indices (cyclic)
+        // Map array indices to knot indices, wrapping cyclically
         let knot_k = k % n;
         let knot_prev = prev % n;
         let knot_next = (k + 1) % n;
@@ -621,7 +585,6 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
         let ff = ee / denom;
         let uu_k = ff * bb;
 
-        // Compute vv[k] and ww[k]
         let psi_next = psi[knot_next];
         let acc = -psi_next * uu_k;
 
@@ -641,11 +604,9 @@ fn solve_choices_cyclic(path: &mut KnotPath) {
         solver.push_row(uu_k, vv_k, ww_k);
     }
 
-    // Cyclic closure, back-substitution, and theta[0] determination
-    // are all handled by the solver.
+    // Cyclic closure, back-substitution, and theta[0] determination are all handled by the solver
     let theta = solver.solve(n);
 
-    // Set control points for all segments
     for k in 0..n {
         let next = (k + 1) % n;
         let phi_next = -(psi[next] + theta[next]);
@@ -662,7 +623,7 @@ mod tests {
     use super::*;
     use crate::types::{EPSILON, Knot, Point};
 
-    /// Helper: create a simple path through given points with Open constraints.
+    /// Create a simple path through given points with Open constraints
     fn make_open_path(points: &[Point]) -> KnotPath {
         let knots = points.iter().map(|&p| Knot::new(p)).collect();
         KnotPath::from_knots(knots, false)
@@ -673,7 +634,7 @@ mod tests {
         KnotPath::from_knots(knots, true)
     }
 
-    /// After `make_choices`, all directions should be Explicit.
+    /// After `make_choices`, all directions should be Explicit
     fn assert_all_explicit(path: &KnotPath) {
         for (i, k) in path.knots.iter().enumerate() {
             assert!(
@@ -835,7 +796,6 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // First control point should be above the start (direction up)
         if let KnotDirection::Explicit(cp) = path.knots[0].right {
             assert!(cp.y > 0.0, "cp1 should be above start: {cp:?}");
         }
@@ -843,7 +803,6 @@ mod tests {
 
     #[test]
     fn test_tension_high() {
-        // High tension should produce controls closer to the knots
         let mut path1 = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 10.0)]);
         make_choices(&mut path1);
 
@@ -864,7 +823,6 @@ mod tests {
         let mut path2 = KnotPath::from_knots(vec![k0, k1], false);
         make_choices(&mut path2);
 
-        // Higher tension: control points closer to the on-curve points
         if let (KnotDirection::Explicit(cp1_normal), KnotDirection::Explicit(cp1_tight)) =
             (path1.knots[0].right, path2.knots[0].right)
         {
@@ -879,8 +837,8 @@ mod tests {
 
     #[test]
     fn test_curl_breakpoints_produce_straight_lines() {
-        // A--B--C in MetaPost expands to A{curl 1}..{curl 1}B{curl 1}..{curl 1}C
-        // This should produce straight line segments.
+        // A--B--C expands to A{curl 1}..{curl 1}B{curl 1}..{curl 1}C, producing
+        // straight line segments
         let a = Point::new(0.0, 0.0);
         let b = Point::new(28.34645, 0.0); // 1cm
         let c = Point::new(0.0, 28.34645);
@@ -899,7 +857,7 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // Segment A--B: control points should lie on the line from A to B (y=0)
+        // Segment A--B: control points lie on the line from A to B (y=0)
         if let KnotDirection::Explicit(cp) = path.knots[0].right {
             assert!(cp.y.abs() < 0.01, "A--B right cp should be on y=0: {cp:?}");
             assert!(cp.x > 0.0 && cp.x < 28.35, "A--B right cp.x: {cp:?}");
@@ -908,10 +866,9 @@ mod tests {
             assert!(cp.y.abs() < 0.01, "A--B left cp should be on y=0: {cp:?}");
         }
 
-        // Segment B--C: control points should lie on the line from B to C
+        // Segment B--C: control points lie on the line from B(28.35, 0) to
+        // C(0, 28.35), i.e. x + y = 28.35
         if let KnotDirection::Explicit(cp) = path.knots[1].right {
-            // Line from B(28.35, 0) to C(0, 28.35)
-            // On this line, x + y = 28.35 (approximately)
             let sum = cp.x + cp.y;
             assert!(
                 (sum - 28.34645).abs() < 0.5,
@@ -922,8 +879,8 @@ mod tests {
 
     #[test]
     fn test_cyclic_curl_breakpoints_produce_straight_lines() {
-        // A--B--C--cycle in MetaPost: every knot has curl(1) on both sides.
-        // The cyclic solver should decompose into straight-line segments.
+        // A--B--C--cycle: every knot has curl(1) on both sides, so the cyclic
+        // solver decomposes into straight-line segments
         let a = Point::new(0.0, 0.0);
         let b = Point::new(28.34645, 0.0); // 1cm
         let c = Point::new(0.0, 28.34645);
@@ -981,7 +938,7 @@ mod tests {
     // Non-unit tension tests
     // -----------------------------------------------------------------------
 
-    /// Helper: extract explicit control point.
+    /// Extract an explicit right control point, panicking otherwise
     fn right_cp(path: &KnotPath, k: usize) -> Point {
         match path.knots[k].right {
             KnotDirection::Explicit(p) => p,
@@ -998,8 +955,8 @@ mod tests {
 
     #[test]
     fn test_tension_2_shortens_handles() {
-        // Straight line with tension 2 vs tension 1.
-        // Higher tension → control points closer to knots.
+        // Straight line with tension 2 vs tension 1: higher tension should
+        // pull control points closer to the knots
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = 2.0;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
@@ -1020,7 +977,7 @@ mod tests {
 
     #[test]
     fn test_tension_075_lengthens_handles() {
-        // Minimum tension (0.75) should produce longer handles than default (1.0).
+        // Minimum tension (0.75) should produce longer handles than default (1.0)
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = 0.75;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
@@ -1041,7 +998,7 @@ mod tests {
 
     #[test]
     fn test_asymmetric_tension() {
-        // tension 1 and 3: right handle normal length, left handle short.
+        // tension 1 and 3: right handle normal length, left handle short
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = 1.0;
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
@@ -1061,7 +1018,6 @@ mod tests {
 
     #[test]
     fn test_three_knots_with_tension_2() {
-        // Three-knot open path with all tensions = 2.
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = 2.0;
         let mut k1 = Knot::new(Point::new(5.0, 5.0));
@@ -1073,7 +1029,6 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // The curve should still pass through the middle knot exactly.
         let bp = path.clone().into_bezier_path();
         let mid = bp.point_at(1.0);
         assert!(
@@ -1081,9 +1036,9 @@ mod tests {
             "middle knot not hit: {mid:?}"
         );
 
-        // With higher tension, the curve should be tighter (closer to straight lines
-        // between knots). Check that the midpoint of segment 0 is closer to the
-        // chord midpoint than with default tension.
+        // Higher tension should keep the curve tighter (closer to straight
+        // lines between knots): segment 0's midpoint should stay close to
+        // the chord midpoint
         let seg0_mid = bp.point_at(0.5);
         let chord_mid = Point::new(2.5, 2.5);
         let dev = (seg0_mid - chord_mid).length();
@@ -1095,7 +1050,6 @@ mod tests {
 
     #[test]
     fn test_cyclic_with_tension_2() {
-        // Cyclic triangle with all tensions = 2.
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.left_tension = 2.0;
         k0.right_tension = 2.0;
@@ -1109,7 +1063,7 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // All handles should be shorter than with default tension.
+        // All handles should be shorter than with default tension
         let mut default = make_cyclic_path(&[
             Point::new(0.0, 0.0),
             Point::new(10.0, 0.0),
@@ -1129,9 +1083,9 @@ mod tests {
 
     #[test]
     fn test_curl_2_at_endpoints() {
-        // curl 2 should produce a more "curled" start than curl 1.
-        // With curl > 1, theta[0] increases, so the first control point
-        // deviates more from the chord direction.
+        // curl 2 should produce a more "curled" start than curl 1: with curl
+        // > 1, theta[0] increases, so the first control point deviates more
+        // from the chord direction
         let mut k0_c2 = Knot::new(Point::new(0.0, 0.0));
         k0_c2.right = KnotDirection::Curl(2.0);
         let mut k1_c2 = Knot::new(Point::new(5.0, 5.0));
@@ -1150,7 +1104,6 @@ mod tests {
         ]);
         make_choices(&mut path_c1);
 
-        // The first segment's right control point should differ between curl 2 and curl 1.
         let cp_c2 = right_cp(&path_c2, 0);
         let cp_c1 = right_cp(&path_c1, 0);
         let diff = (cp_c2 - cp_c1).length();
@@ -1162,9 +1115,9 @@ mod tests {
 
     #[test]
     fn test_at_least_tension_stores_negative() {
-        // "tension atleast 1" is stored as negative tension.
-        // With a straight line (theta=phi=0), at_least should have no effect
-        // because the bounding triangle condition is trivially satisfied.
+        // "tension atleast 1" is stored as negative tension; with a straight
+        // line (theta=phi=0), at_least has no effect because the bounding
+        // triangle condition is trivially satisfied
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = -1.0; // atleast 1
         let mut k1 = Knot::new(Point::new(10.0, 0.0));
@@ -1173,7 +1126,7 @@ mod tests {
         make_choices(&mut path_al);
         assert_all_explicit(&path_al);
 
-        // Should be identical to normal tension 1 for a straight line.
+        // Should be identical to normal tension 1 for a straight line
         let mut path_n = make_open_path(&[Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         make_choices(&mut path_n);
 
@@ -1187,8 +1140,8 @@ mod tests {
 
     #[test]
     fn test_three_knot_asymmetric_tension_open() {
-        // Three-knot path with different tensions on each side of the middle knot.
-        // This exercises the asymmetric scaling code in the forward sweep.
+        // Different tensions on each side of the middle knot exercise the
+        // asymmetric scaling code in the forward sweep
         let mut k0 = Knot::new(Point::new(0.0, 0.0));
         k0.right_tension = 1.0;
         let mut k1 = Knot::new(Point::new(5.0, 5.0));
@@ -1200,7 +1153,7 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // The second segment's handles should be shorter due to high tension.
+        // The second segment's handles should be shorter due to high tension
         let d_seg1 = (right_cp(&path, 1) - path.knots[1].point).length();
         let d_seg0 = (right_cp(&path, 0) - path.knots[0].point).length();
         assert!(
@@ -1212,8 +1165,8 @@ mod tests {
 
     #[test]
     fn test_cyclic_symmetry_preserved() {
-        // A regular polygon path should produce symmetric control points.
-        // Regular triangle: the handle lengths at all three knots should be equal.
+        // A regular triangle should produce symmetric control points: handle
+        // lengths at all three knots should be equal
         let r = 10.0;
         let points: Vec<Point> = (0..3)
             .map(|i| {
@@ -1229,7 +1182,6 @@ mod tests {
             .map(|k| (right_cp(&path, k) - path.knots[k].point).length())
             .collect();
 
-        // All three handle lengths should be approximately equal.
         for i in 1..3 {
             assert!(
                 (lengths[i] - lengths[0]).abs() < 0.01,
@@ -1238,10 +1190,9 @@ mod tests {
         }
     }
 
-    /// Regression: curl boundary denominator must use `(1 - ff*uu)`, not
-    /// `(1 + ff*uu)`. The sign error produced asymmetric curves when both
-    /// endpoints had curl boundaries.
+    /// Regression: curl boundary denominator must use `(1 - ff*uu)`, not `(1 + ff*uu)`
     ///
+    /// The sign error produced asymmetric curves when both endpoints had curl boundaries.
     /// `MetaPost` reference output verified with `mpost` version 2.11:
     ///   (0,0)..controls (-19.4835,-0.59496) and (-19.4835,28.9414)
     ///    ..(0,28.34645)..controls (15.4556,27.87448) and (12.89085,0.47195)
@@ -1260,7 +1211,7 @@ mod tests {
         make_choices(&mut path);
         assert_all_explicit(&path);
 
-        // Verify control points match MetaPost's output (tolerance ~0.01)
+        // Control points must match MetaPost's output (tolerance ~0.01)
         let tol = 0.01;
 
         let rcp0 = right_cp(&path, 0);
@@ -1279,7 +1230,7 @@ mod tests {
         assert!((lcp3.x - 47.82996).abs() < tol, "seg2 lcp.x: {}", lcp3.x);
         assert!((lcp3.y - 28.9414).abs() < tol, "seg2 lcp.y: {}", lcp3.y);
 
-        // Segments 0 and 2 should be symmetric: equal handle lengths
+        // Segments 0 and 2 are symmetric: equal handle lengths
         let d0 = (rcp0 - path.knots[0].point).length();
         let d2 = (rcp2 - path.knots[2].point).length();
         assert!(
@@ -1288,7 +1239,7 @@ mod tests {
         );
     }
 
-    /// Helper to assert a control point matches `MetaPost` reference (tolerance 0.01).
+    /// Assert a control point matches `MetaPost` reference (tolerance 0.01)
     fn assert_cp(label: &str, actual: Point, ex: f64, ey: f64) {
         let tol = 0.01;
         assert!(
@@ -1303,7 +1254,7 @@ mod tests {
     // MetaPost-validated regression tests (mpost 2.11)
     // -------------------------------------------------------------------
 
-    /// Test 1: Symmetric 4-knot cyclic path (square).
+    /// Symmetric 4-knot cyclic path (square)
     /// Verified against: (0,0)..(100,0)..(100,100)..(0,100)..cycle
     #[test]
     fn test_mpost_cyclic_square() {
@@ -1333,7 +1284,7 @@ mod tests {
         assert_cp("s3 lcp", left_cp(&path, 0), -27.61424, 27.61424);
     }
 
-    /// Test 2: Asymmetric 5-knot cyclic path (tests cyclic closure order).
+    /// Asymmetric 5-knot cyclic path (tests cyclic closure order)
     /// Verified against: (0,0)..(50,30)..(100,0)..(80,70)..(20,80)..cycle
     #[test]
     fn test_mpost_cyclic_asymmetric() {
@@ -1367,7 +1318,7 @@ mod tests {
         assert_cp("s4 lcp", left_cp(&path, 0), -35.95712, 0.79576);
     }
 
-    /// Test 3: Two-knot Given+Curl path.
+    /// Two-knot Given+Curl path
     /// Verified against: (0,0){dir 45}..(100,0)
     #[test]
     fn test_mpost_given_curl() {
@@ -1385,7 +1336,7 @@ mod tests {
         assert_cp("lcp", left_cp(&path, 1), 72.38576, 27.61424);
     }
 
-    /// Test 4: Two-knot Curl+Given path.
+    /// Two-knot Curl+Given path
     /// Verified against: (0,0)..{dir 135}(100,0)
     #[test]
     fn test_mpost_curl_given() {
@@ -1403,7 +1354,7 @@ mod tests {
         assert_cp("lcp", left_cp(&path, 1), 260.94757, -160.94757);
     }
 
-    /// Test 5: Two-knot Given+Curl with non-default curl value.
+    /// Two-knot Given+Curl with non-default curl value
     /// Verified against: (0,0){dir 60}..{curl 2}(100,50)
     #[test]
     fn test_mpost_given_curl2() {
@@ -1421,7 +1372,7 @@ mod tests {
         assert_cp("lcp", left_cp(&path, 1), 60.40417, 60.77927);
     }
 
-    /// Test 6: Two-knot Given+Given path.
+    /// Two-knot Given+Given path
     /// Verified against: (0,0){dir 30}..{dir 150}(100,0)
     #[test]
     fn test_mpost_given_given() {
@@ -1439,7 +1390,7 @@ mod tests {
         assert_cp("lcp", left_cp(&path, 1), 197.65642, -56.3818);
     }
 
-    /// Test 7: Two-knot path with tension 0.75.
+    /// Two-knot path with tension 0.75
     /// Verified against: (0,0) .. tension 0.75 .. (100,0)
     #[test]
     fn test_mpost_tension_075() {
@@ -1457,7 +1408,7 @@ mod tests {
         assert_cp("lcp", left_cp(&path, 1), 55.55556, 0.0);
     }
 
-    /// Test 8: 3-knot path with direction constraints.
+    /// 3-knot path with direction constraints
     /// Verified against: (0,0){dir 45}..(100,50)..{dir -30}(200,0)
     #[test]
     fn test_mpost_3knot_directions() {
@@ -1479,7 +1430,7 @@ mod tests {
         assert_cp("s1 lcp", left_cp(&path, 2), 167.19278, 18.9412);
     }
 
-    /// Regression: tlhiv example 38 (`--` then `..`) must match `MetaPost`.
+    /// Regression: tlhiv example 38 (`--` then `..`) must match `MetaPost`
     ///
     /// `MetaPost` reference:
     /// (0,0)..controls (0,9.44882) and (0,18.89763)..(0,28.34645)
@@ -1510,7 +1461,7 @@ mod tests {
         assert_cp("s2 lcp", left_cp(&path, 3), 38.37733, 21.55983);
     }
 
-    /// Regression: two-knot open cycle must use consistent 180-degree turn sign.
+    /// Regression: two-knot open cycle must use consistent 180-degree turn sign
     ///
     /// `MetaPost` reference for `(0,0)..(1cm,1cm)..cycle`:
     /// (0,0)..controls (18.89763,-18.89763) and (47.24408,9.44882)
@@ -1535,7 +1486,7 @@ mod tests {
         assert_cp("s1 lcp", left_cp(&path, 0), -18.89763, 18.89763);
     }
 
-    /// Regression: cyclic two-knot path with right-side directions on both knots.
+    /// Regression: cyclic two-knot path with right-side directions on both knots
     ///
     /// `MetaPost` reference for `(0,0){up}..(2cm,0){up}..cycle`:
     /// (0,0)..controls (0,37.79527) and (56.6929,-37.79527)
@@ -1560,9 +1511,9 @@ mod tests {
         assert_cp("s1 lcp", left_cp(&path, 0), 0.0, -37.79527);
     }
 
-    /// Regression: explicit controls must act as cyclic breakpoints.
+    /// Regression: explicit controls must act as cyclic breakpoints
     ///
-    /// This matches the arrowhead path from plain.mp example 17:
+    /// This matches the arrowhead path from `plain.mp` example 17:
     /// (3.69557,1.53079)..controls (2.46371,1.02052) and (1.23186,0.51027)
     ///  ..(0,0)..controls (1.23186,-0.51027) and (2.46371,-1.02052)
     ///  ..(3.69557,-1.53079)..controls (3.69557,-0.51027) and (3.69557,0.51027)
@@ -1599,7 +1550,7 @@ mod tests {
         let b = Point::new(1.0, 0.0);
         let c = Point::new(0.5, 1.0);
 
-        // Last knot repeats the first knot geometrically.
+        // Last knot repeats the first knot geometrically
         let mut path = KnotPath::from_knots(
             vec![Knot::new(a), Knot::new(b), Knot::new(c), Knot::new(a)],
             true,
@@ -1607,10 +1558,10 @@ mod tests {
 
         make_choices(&mut path);
 
-        // Keep all knots (reference behavior is to join explicitly, not drop).
+        // Keep all knots (reference behavior is to join explicitly, not drop)
         assert_eq!(path.knots.len(), 4);
 
-        // Closing zero-length segment must be explicit at both ends.
+        // Closing zero-length segment must be explicit at both ends
         assert_eq!(path.knots[3].right, KnotDirection::Explicit(a));
         assert_eq!(path.knots[0].left, KnotDirection::Explicit(a));
 

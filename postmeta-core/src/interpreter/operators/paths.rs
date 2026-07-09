@@ -1,4 +1,4 @@
-//! Path and pen operator evaluation.
+//! Path and pen operator evaluation
 
 use std::sync::Arc;
 
@@ -97,8 +97,7 @@ pub(super) fn subpath_of(first: &Value, second: &Value) -> InterpResult<(Value, 
 pub(super) fn pen_offset_of(first: &Value, second: &Value) -> InterpResult<(Value, Type)> {
     let (dx, dy) = value_to_pair(first)?;
     let p = value_to_pen(second)?;
-    // Degenerate pens (e.g. nullpen) have no support point;
-    // MetaPost treats their offset as the origin.
+    // Degenerate pens (e.g. nullpen) have no support point; MetaPost treats their offset as the origin
     let pt = p.offset(Vec2::new(dx, dy)).unwrap_or(Point::ZERO);
     Ok((Value::Pair(pt.x, pt.y), Type::PairType))
 }

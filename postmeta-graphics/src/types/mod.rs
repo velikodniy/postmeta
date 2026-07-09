@@ -1,4 +1,4 @@
-//! Core types shared across the `PostMeta` system.
+//! Core types shared across the `PostMeta` system
 
 mod geometry;
 mod knot;
@@ -13,7 +13,7 @@ pub use style::{Color, DashPattern, LineCap, LineJoin};
 pub(crate) use tolerances::{ARC_MAX_DEPTH, ARC_TOL, INTERSECT_TOL};
 pub use tolerances::{EPSILON, NEAR_ZERO};
 
-// Re-export types whose definitions live in their own top-level modules.
+// Re-export types whose definitions live in their own top-level modules
 pub use crate::pen::Pen;
 pub use crate::picture::Picture;
 pub use crate::transform::Transform;

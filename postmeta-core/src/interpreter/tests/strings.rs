@@ -1,4 +1,4 @@
-//! String literals, operators, `str`, `substring`, and comparisons.
+//! String literals, operators, `str`, `substring`, and comparisons
 
 use super::helpers::TestInterp;
 
@@ -109,7 +109,6 @@ fn str_operator_collects_subscript_suffix() {
 
 #[test]
 fn substring_of_basic() {
-    // substring (1,3) of "hello" = "el"
     let mut interp = TestInterp::new();
     interp.run(r#"show substring (1,3) of "hello";"#);
     let msg = interp.first_show();
@@ -118,7 +117,6 @@ fn substring_of_basic() {
 
 #[test]
 fn substring_of_full_range() {
-    // substring (0,5) of "hello" = "hello"
     let mut interp = TestInterp::new();
     interp.run(r#"show substring (0,5) of "hello";"#);
     let msg = interp.first_show();
@@ -127,11 +125,9 @@ fn substring_of_full_range() {
 
 #[test]
 fn substring_of_empty() {
-    // substring (2,2) of "hello" = ""
     let mut interp = TestInterp::new();
     interp.run(r#"show substring (2,2) of "hello";"#);
     let msg = interp.first_show();
-    // Empty string shows as ""
     assert!(
         msg.contains("\"\"") || msg.contains(">>  ") || msg.ends_with(">> "),
         "expected empty string in: {msg}"
@@ -140,7 +136,7 @@ fn substring_of_empty() {
 
 #[test]
 fn substring_of_utf8_is_char_boundary_safe() {
-    // Regression: substring used byte slicing and could panic on UTF-8.
+    // Regression: substring used byte slicing and could panic on UTF-8
     let mut interp = TestInterp::new();
     interp.run("show substring (1,2) of \"a😊b\";");
     let msg = interp.first_show();
@@ -201,8 +197,7 @@ fn string_comparison_false() {
 
 #[test]
 fn str_fractional_subscript_matches_variable_identity() {
-    // The str operator and variable-key formatting share one subscript
-    // formatter: fractional subscripts keep their decimals.
+    // The str operator and variable-key formatting share one subscript formatter
     let mut interp = TestInterp::new();
     interp.run("numeric a[]; show str a[0.5];");
     assert!(

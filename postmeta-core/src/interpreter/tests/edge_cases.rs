@@ -1,4 +1,4 @@
-//! Scanner/parser edge cases, error recovery, and interpreter internals.
+//! Scanner/parser edge cases, error recovery, and interpreter internals
 
 use crate::command::Command;
 use crate::interpreter::{ExprResultValue, Interpreter};
@@ -35,12 +35,9 @@ fn delimiters_pair() {
 fn back_input_rescans_token() {
     let mut interp = Interpreter::new();
     interp.state.input.push_source("+ 3;");
-    // Read "+"
     interp.get_next();
     assert_eq!(interp.cur.command, Command::PlusOrMinus);
-    // Push it back
     interp.back_input();
-    // Read again — should get "+" again
     interp.get_next();
     assert_eq!(interp.cur.command, Command::PlusOrMinus);
 }
@@ -48,16 +45,14 @@ fn back_input_rescans_token() {
 #[test]
 fn back_expr_capsule_roundtrip() {
     let mut interp = Interpreter::new();
-    // Push source first (it goes on the bottom of the stack)
+    // Push source first (bottom of stack); the capsule pushed later reads first
     interp.state.input.push_source(";");
-    // Set up a capsule with a pair value and push it back
     interp.back_expr_value(ExprResultValue {
         exp: Value::Pair(5.0, 10.0),
         ty: Type::PairType,
         dep: None,
         pair_dep: None,
     });
-    // Now get_x_next reads from the capsule token list (top of stack)
     interp.get_x_next();
     assert_eq!(interp.cur.command, Command::CapsuleToken);
     let result = interp.scan_primary().unwrap();
@@ -98,7 +93,6 @@ fn expr_value_capsule_roundtrip_preserves_dependency_state() {
 
 #[test]
 fn back_expr_numeric_in_expression() {
-    // Push a numeric capsule and verify it can participate in arithmetic
     let mut interp = Interpreter::new();
     // Push source first (bottom of stack)
     interp.state.input.push_source("+ 3;");
@@ -111,16 +105,13 @@ fn back_expr_numeric_in_expression() {
     });
     interp.get_x_next();
     let result = interp.scan_expression(EqualsMode::Relation).unwrap();
-    // Should evaluate to 7 + 3 = 10
     assert_eq!(result.exp, Value::Numeric(10.0));
 }
 
 #[test]
 fn error_recovery_skips_to_semicolon() {
-    // Statement with unexpected comma should skip to ; and continue
     let mut interp = TestInterp::new();
     interp.run(",,,; show 1;");
-    // Should have errors for the commas but still process "show 1"
     let show_msgs: Vec<_> = interp
         .interp
         .state
@@ -202,13 +193,9 @@ fn scanner_invalid_character_is_reported() {
     );
 }
 
-// Input source push/pop ordering
-
 #[test]
 fn nested_source_levels_lifo_order() {
-    // Verify that multiple push_source calls work in LIFO order
     let mut interp = Interpreter::new();
-    // Push two source levels manually, then run the top-level source
     interp.state.input.push_source("show 2;");
     interp.state.input.push_source("show 1;");
     interp.get_x_next();
@@ -223,13 +210,12 @@ fn nested_source_levels_lifo_order() {
         .map(|e| e.message.clone())
         .collect();
     assert_eq!(infos.len(), 2, "expected 2 shows, got: {infos:?}");
-    // LIFO: "show 1" runs first (top of stack), then "show 2"
     assert!(infos[0].contains("1"), "first should be 1: {}", infos[0]);
     assert!(infos[1].contains("2"), "second should be 2: {}", infos[1]);
 }
 
-// scan_expression is currently pub; this test works from inside the
-// crate and will survive a visibility narrowing to pub(crate).
+// scan_expression is currently pub.
+// This test runs inside the crate, so it survives a narrowing to pub(crate).
 
 #[test]
 fn scan_expression_internal_usage() {
@@ -293,7 +279,6 @@ fn reported_errors_carry_source_spans() {
         span.end > span.start,
         "span should be non-degenerate: {span:?}"
     );
-    // The span must point inside the source text.
     assert!(
         span.end <= "show 1 / 0;".len(),
         "span out of range: {span:?}"
@@ -311,7 +296,6 @@ fn division_by_zero_reports_error_and_continues() {
             .any(|e| e.message.contains("Division by zero")),
         "expected division-by-zero diagnostic"
     );
-    // Execution continues past the error.
     assert!(interp.shows().last().is_some_and(|m| m.contains('4')));
 }
 

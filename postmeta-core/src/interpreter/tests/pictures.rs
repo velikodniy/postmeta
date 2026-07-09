@@ -1,4 +1,4 @@
-//! Pictures: addto/clip, part extraction, btex/infont, dashes.
+//! Pictures: addto/clip, part extraction, btex/infont, dashes
 
 use crate::types::Value;
 
@@ -57,7 +57,6 @@ fn textpart_returns_empty_for_non_text_picture() {
     let mut interp = TestInterp::new();
     interp.run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show textpart p;");
     let msg = interp.first_show();
-    // Empty string shows as ""
     assert!(msg.contains("\"\""), "expected empty string in: {msg}");
 }
 
@@ -66,7 +65,6 @@ fn pathpart_extracts_path_from_fill() {
     let mut interp = TestInterp::new();
     interp.run("picture p; addto p contour ((0,0)..(1,0)..(1,1)..cycle); show pathpart p;");
     let msg = interp.first_show();
-    // Should show a path, not an error
     assert!(
         !msg.contains("Unimplemented"),
         "pathpart should not error: {msg}"
@@ -124,7 +122,6 @@ fn dashpattern_basic() {
         show dashpattern(on 3 off 3);
     "#,
     );
-    // Should produce a picture, not a "Cannot transform" error
     let errors = interp.errors();
     for e in &errors {
         eprintln!("  dashpattern error: {}", e.message);
@@ -134,8 +131,7 @@ fn dashpattern_basic() {
 
 #[test]
 fn dashed_line_produces_dash_pattern() {
-    // Verify that `dashed dashpattern(...)` applies stroke-dasharray to the
-    // output picture and doesn't leak intermediate strokes.
+    // `dashed dashpattern(...)` must apply stroke-dasharray without leaking intermediate strokes
     let mut interp = TestInterp::new();
     interp.run(
         r#"
@@ -167,7 +163,6 @@ fn dashed_line_produces_dash_pattern() {
 
     interp.assert_no_errors();
 
-    // The picture should have exactly one Stroke object (the dashed line).
     let objects = interp.current_picture().objects();
     assert_eq!(
         objects.len(),
@@ -179,7 +174,6 @@ fn dashed_line_produces_dash_pattern() {
 
     if let postmeta_graphics::types::GraphicsObject::Stroke(ref stroke) = objects[0] {
         let dash = stroke.dash.as_ref().expect("expected dash pattern");
-        // on 2, off 3 → dashes = [2.0, 3.0]
         assert_eq!(dash.dashes.len(), 2, "dashes: {:?}", dash.dashes);
         assert!((dash.dashes[0] - 2.0).abs() < 0.01, "on={}", dash.dashes[0]);
         assert!(
@@ -194,8 +188,8 @@ fn dashed_line_produces_dash_pattern() {
 
 #[test]
 fn dashed_withdots_uses_leading_offset() {
-    // `dashpattern(off 2.5 on 0 off 2.5)` should produce one zero-length
-    // dash every 5 units, offset by 2.5 from the path start.
+    // `dashpattern(off 2.5 on 0 off 2.5)` produces one zero-length dash every 5 units,
+    // offset by 2.5 from the path start
     let mut interp = TestInterp::new();
     interp.run(
         r#"
@@ -251,7 +245,7 @@ fn dashed_withdots_uses_leading_offset() {
 
 #[test]
 fn btex_etex_produces_picture() {
-    // btex ... etex should produce a picture capsule (not a string).
+    // btex...etex produces a picture capsule, not a string
     let mut interp = TestInterp::new();
     interp.run(r#"picture p; p = btex Hello World etex; show p;"#);
     let msg = interp.first_show();
@@ -263,7 +257,6 @@ fn btex_etex_produces_picture() {
 
 #[test]
 fn btex_etex_picture_is_transformable() {
-    // btex...etex result can be shifted without error, since it's a picture.
     let mut interp = TestInterp::new();
     interp.run("picture p; p = btex test etex shifted (10,20);");
     let errors: Vec<_> = interp
@@ -282,8 +275,7 @@ fn btex_etex_picture_is_transformable() {
 
 #[test]
 fn btex_etex_draw_shifted_no_error() {
-    // `draw btex...etex shifted z` — the pattern from examples 203-207.
-    // Should work with plain.mp loaded (addto currentpicture).
+    // `draw btex...etex shifted z` — the pattern from examples 203-207
     let mut interp = TestInterp::with_plain_mp();
     interp.run("input plain; beginfig(1); draw btex Q etex shifted (5,5); endfig; end;");
     let errors: Vec<_> = interp
@@ -306,12 +298,9 @@ fn btex_etex_draw_shifted_no_error() {
 
 #[test]
 fn infont_produces_picture() {
-    // "abc" infont "cmr10" should produce a picture
     let mut interp = TestInterp::new();
     interp.run(r#"picture p; p = "abc" infont "cmr10"; show p;"#);
-    // The show output should indicate a picture value
     let msg = interp.first_show();
-    // A picture show typically shows the type or contents
     assert!(
         !msg.contains("error"),
         "infont should not produce an error: {msg}"
@@ -320,17 +309,14 @@ fn infont_produces_picture() {
 
 #[test]
 fn infont_text_has_bbox() {
-    // Corner operators on an infont picture should give non-zero bbox
     let mut interp = TestInterp::new();
     interp.run(r#"picture p; p = "Hello" infont "cmr10"; show lrcorner p;"#);
     let msg = interp.first_show();
-    // lrcorner should have positive x and negative y (descender)
     assert!(msg.contains(','), "expected a pair in: {msg}");
 }
 
 #[test]
 fn corner_operators_on_picture() {
-    // Test all four corners on a simple filled picture
     let mut interp = TestInterp::new();
     interp.run("picture p; p = \"test\" infont \"cmr10\"; show llcorner p; show urcorner p;");
     let infos = interp.shows();
@@ -339,7 +325,6 @@ fn corner_operators_on_picture() {
 
 #[test]
 fn corner_operators_on_path() {
-    // Corner operators should work on paths too
     let mut interp = TestInterp::new();
     interp.run("path p; p = (0,0)..(10,20)..(30,5); show llcorner p; show urcorner p;");
     let infos = interp.shows();
@@ -479,10 +464,8 @@ fn clip_picture_target_accepts_symbolic_suffixes() {
 
 #[test]
 fn verbatimtex_is_skipped() {
-    // verbatimtex ... etex should be silently skipped without errors.
     let mut interp = TestInterp::new();
     interp.run(r#"verbatimtex \documentstyle{article} \begin{document} etex show 42;"#);
-    // The `show 42` after etex should execute normally.
     assert!(
         interp
             .interp
@@ -492,7 +475,6 @@ fn verbatimtex_is_skipped() {
             .any(|e| e.message.contains("42")),
         "show 42 should produce output after verbatimtex block"
     );
-    // No errors about unexpected tokens from the TeX content.
     interp.assert_no_errors();
 }
 
@@ -502,8 +484,7 @@ fn verbatimtex_is_skipped() {
 
 #[test]
 fn for_within_iterates_picture_components() {
-    // Build a picture with two strokes, iterate with `for ... within`.
-    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -526,8 +507,7 @@ fn for_within_iterates_picture_components() {
 
 #[test]
 fn for_within_extracts_pathpart() {
-    // Iterate and extract pathpart from each component.
-    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -550,7 +530,6 @@ fn for_within_extracts_pathpart() {
 
 #[test]
 fn for_within_empty_picture() {
-    // Iterating over an empty picture should execute zero iterations.
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -575,8 +554,7 @@ fn for_within_empty_picture() {
 
 #[test]
 fn xxpart_of_text_picture() {
-    // xxpart of a btex picture should return the xx component of the text transform.
-    // For default btex output, the transform is identity, so xxpart = 1.
+    // For default btex output, the transform is identity, so xxpart = 1
     let mut interp = TestInterp::new();
     interp.run("picture p; p = btex X etex; show xxpart p;");
     assert!(
@@ -592,8 +570,7 @@ fn xxpart_of_text_picture() {
 
 #[test]
 fn colormodel_of_stroke() {
-    // colormodel of an RGB stroked picture should return 5.
-    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -613,8 +590,7 @@ fn colormodel_of_stroke() {
 
 #[test]
 fn redpart_of_picture_component() {
-    // redpart of a picture component should extract the red channel.
-    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -634,7 +610,7 @@ fn redpart_of_picture_component() {
 
 #[test]
 fn stroked_filled_textual_predicates() {
-    // Use `..` (primitive path join) instead of `--` (plain.mp macro).
+    // Use `..` (primitive path join) instead of `--` (plain.mp macro)
     let mut interp = TestInterp::new();
     interp.run(
         "picture pic; pic := nullpicture;
@@ -646,7 +622,6 @@ fn stroked_filled_textual_predicates() {
                exitif true;
              endfor",
     );
-    // stroked should be true, filled/textual should be false.
     let msgs: Vec<_> = interp
         .interp
         .state
@@ -658,7 +633,6 @@ fn stroked_filled_textual_predicates() {
         msgs.iter().any(|m| m.contains("true")),
         "stroked should be true: {msgs:?}"
     );
-    // The two false results
     let false_count = msgs.iter().filter(|m| m.contains("false")).count();
     assert_eq!(
         false_count, 2,

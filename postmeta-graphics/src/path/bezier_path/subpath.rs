@@ -1,18 +1,15 @@
-//! Subpath extraction and reversal for [`BezierPath`].
+//! Subpath extraction and reversal for [`BezierPath`]
 
 use super::numeric::time_to_seg_frac;
 use super::{BezierPath, SegmentControls};
 use crate::types::{EPSILON, Point, Scalar, index_to_scalar, scalar_to_index};
 
 impl BezierPath {
-    /// Extract a subpath from time `t1` to time `t2`.
+    /// Extract a subpath from time `t1` to time `t2`
     ///
-    /// The first and last segments are split at their fractional times
-    /// using de Casteljau subdivision; intermediate segments are copied
-    /// wholesale. For cyclic paths, times may wrap around (e.g.,
-    /// `subpath(3.5, 1.5)` on a 4-segment cycle follows the long way
-    /// around). If `t1 > t2`, the result is computed forward and then
-    /// reversed.
+    /// The first and last segments are split at their fractional times using de Casteljau subdivision; intermediate segments are copied wholesale.
+    /// For cyclic paths, times may wrap around (e.g. `subpath(3.5, 1.5)` on a 4-segment cycle follows the long way around).
+    /// If `t1 > t2`, the result is computed forward and then reversed.
     #[must_use]
     pub fn subpath(&self, t1: Scalar, t2: Scalar) -> Self {
         if self.points.is_empty() {
@@ -24,7 +21,7 @@ impl BezierPath {
             return Self::from_parts(vec![self.points[0]], vec![], false);
         }
 
-        // Handle reversed direction: swap, compute, reverse result.
+        // Reversed direction: swap, compute, reverse result
         let (a, b, reversed) = if t1 <= t2 {
             (t1, t2, false)
         } else {
@@ -33,7 +30,7 @@ impl BezierPath {
 
         let n_f = index_to_scalar(n);
 
-        // Normalize following MetaPost's chop_path.
+        // Normalize following MetaPost's chop_path
         let (a, b) = if self.is_cyclic {
             let shift = a.div_euclid(n_f) * n_f;
             (a - shift, b - shift)
@@ -45,12 +42,12 @@ impl BezierPath {
         if reversed { result.reverse() } else { result }
     }
 
-    /// Core subpath extraction with `0 <= a` and `a <= b`.
+    /// Core subpath extraction with `0 <= a` and `a <= b`
     ///
     /// For cyclic paths `b` may exceed `n` (indicating wrap-around).
     fn subpath_normalized(&self, start: Scalar, end: Scalar, num_segs: usize) -> Self {
         let (seg1, frac1) = time_to_seg_frac(start, num_segs);
-        // For end we decompose manually since it can exceed num_segs for cyclic paths.
+        // Decompose `end` manually since it can exceed num_segs for cyclic paths
         let seg2_raw = scalar_to_index(end).min(if self.is_cyclic {
             usize::MAX
         } else {
@@ -59,14 +56,13 @@ impl BezierPath {
         let frac2 = end - index_to_scalar(seg2_raw);
 
         if seg1 == seg2_raw && frac2 > frac1 {
-            // Both endpoints in the same segment
             return self.subpath_single_segment(seg1, frac1, frac2);
         }
 
         let mut points = Vec::new();
         let mut controls = Vec::new();
 
-        // Start knot from splitting first segment
+        // Start knot from splitting the first segment
         let seg1_wrapped = seg1 % num_segs;
         let cubic_first = self.segment(seg1_wrapped);
         let (_, right_part) = cubic_first.split(frac1);
@@ -106,7 +102,7 @@ impl BezierPath {
         Self::from_parts(points, controls, false)
     }
 
-    /// Extract a subpath where both endpoints lie in the same segment.
+    /// Extract a subpath where both endpoints lie in the same segment
     fn subpath_single_segment(&self, seg: usize, frac1: Scalar, frac2: Scalar) -> Self {
         let cubic = self.segment(seg);
         let (_, right) = cubic.split(frac1);
@@ -128,12 +124,10 @@ impl BezierPath {
         )
     }
 
-    /// Reverse the traversal direction of the path.
+    /// Reverse the traversal direction of the path
     ///
-    /// Each segment's post/pre control handles are swapped. For cyclic
-    /// paths, `MetaPost` convention keeps knot 0 as the start: the order
-    /// `0,1,...,n-1` becomes `0,n-1,...,1`, preserving the cyclic start
-    /// knot identity.
+    /// Each segment's post/pre control handles are swapped.
+    /// For cyclic paths, `MetaPost` convention keeps knot 0 as the start: the order `0,1,...,n-1` becomes `0,n-1,...,1`, preserving the cyclic start knot identity.
     #[must_use]
     pub fn reverse(&self) -> Self {
         if self.points.is_empty() {
@@ -141,9 +135,8 @@ impl BezierPath {
         }
 
         if self.is_cyclic {
-            // MetaPost-style reverse for cycles keeps the same start knot.
-            // Original: 0 -> 1 -> 2 -> ... -> n-1 -> 0
-            // Reversed: 0 -> n-1 -> n-2 -> ... -> 1 -> 0
+            // MetaPost-style reverse for cycles keeps the same start knot:
+            // original 0 -> 1 -> ... -> n-1 -> 0 becomes 0 -> n-1 -> ... -> 1 -> 0.
             let n = self.points.len();
             let mut points = Vec::with_capacity(n);
             let mut controls = Vec::with_capacity(n);
@@ -153,30 +146,9 @@ impl BezierPath {
                 points.push(self.points[i]);
             }
 
-            // The original segment i connects point[i] -> point[(i+1)%n]
-            // with controls[i] = { post, pre }.
-            // In the reversed path, the segment from point[0] to point[n-1]
-            // (which was the original segment n-1 -> 0) needs its controls
-            // swapped.
-            //
-            // Reversed segment j goes from reversed_points[j] to
-            // reversed_points[(j+1)%n].
-            // reversed_points[0] = original[0]
-            // reversed_points[1] = original[n-1]
-            // reversed_points[2] = original[n-2]
-            // ...
-            // reversed_points[k] = original[(n-k) % n] for k >= 1, and
-            //                       original[0] for k == 0.
-            //
-            // Reversed segment 0: original[0] -> original[n-1]
-            //   This is the reverse of original segment (n-1): original[n-1] -> original[0]
-            //   Original controls[n-1] = { post, pre }
-            //   Reversed: { post: pre, pre: post } (swap)
-            //
-            // Reversed segment j (1 <= j < n): original[(n-j) % n] -> original[(n-j-1) % n]
-            //   This is the reverse of original segment (n-j-1): original[n-j-1] -> original[n-j]
-            //   Original controls[n-j-1] = { post, pre }
-            //   Reversed: { post: pre, pre: post }
+            // reversed_points[k] = original[(n-k) % n], so reversed segment j
+            // (points[j] -> points[(j+1)%n]) is the reverse of original segment
+            // (n-j-1), whose controls swap post <-> pre.
 
             // Segment 0: reverse of original segment (n-1)
             let orig_seg = n - 1;
@@ -197,7 +169,7 @@ impl BezierPath {
             return Self::from_parts(points, controls, true);
         }
 
-        // Open path: simply reverse everything, swapping post/pre.
+        // Open path: reverse everything, swapping post/pre
         let points: Vec<Point> = self.points.iter().rev().copied().collect();
         let controls: Vec<SegmentControls> = self
             .controls
@@ -312,9 +284,8 @@ mod tests {
     fn reverse_open_swaps_controls() {
         let bp = test_helpers::line();
         let rev = bp.reverse();
-        // The original controls were post=10/3, pre=20/3
-        // After reverse, the single segment goes 10 -> 0
-        // with post=20/3 (was pre), pre=10/3 (was post)
+        // Original controls were post=10/3, pre=20/3; after reverse the
+        // single segment goes 10 -> 0 with post/pre swapped
         let ctrl = rev.segment_controls(0);
         assert!((ctrl.post.x - 20.0 / 3.0).abs() < EPSILON);
         assert!((ctrl.pre.x - 10.0 / 3.0).abs() < EPSILON);
@@ -356,7 +327,6 @@ mod tests {
 
     #[test]
     fn reverse_involution() {
-        // Reversing twice should give back the original
         let bp = test_helpers::line();
         let rev2 = bp.reverse().reverse();
         assert_eq!(rev2.num_knots(), bp.num_knots());
@@ -384,7 +354,6 @@ mod tests {
                 bp.knot_point(i)
             );
         }
-        // Also check controls
         for i in 0..bp.num_segments() {
             let orig = bp.segment_controls(i);
             let rev2c = rev2.segment_controls(i);
@@ -400,12 +369,11 @@ mod tests {
 
     #[test]
     fn subpath_cyclic_negative_time_wraps() {
-        // subpath(-0.5, 0.5) on a cyclic path must produce the same points
-        // as the equivalent wrapped range: point_at(t) for t in [-0.5, 0.5]
-        // equals point_at(t + n) for the cyclic path.
+        // subpath(-0.5, 0.5) must match point_at(t) for t in [-0.5, 0.5],
+        // which wraps to point_at(t + n) on a cyclic path
         let path = crate::test_helpers::square();
         let sub = path.subpath(-0.5, 0.5);
-        // The range crosses one knot boundary: two partial segments.
+        // The range crosses one knot boundary: two partial segments
         assert_eq!(sub.num_segments(), 2);
         let start = sub.point_at(0.0);
         let expected_start = path.point_at(-0.5);

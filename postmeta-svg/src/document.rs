@@ -5,10 +5,9 @@ use svg::node::element::{ClipPath, Definitions, Group, Symbol};
 use crate::options::RenderOptions;
 use crate::util::fmt_scalar;
 
-/// Build the final SVG [`Document`] from rendered content and defs.
+/// Build the final SVG [`Document`] from rendered content and defs
 ///
-/// The `viewBox` is computed by negating the Y range from the `MetaPost`
-/// bounding box: SVG `min_y = -bb.max_y`, SVG `max_y = -bb.min_y`.
+/// The `viewBox` Y range is the negated `MetaPost` range: SVG `min_y = -bb.max_y`, `max_y = -bb.min_y`.
 pub fn build_document(
     bb: &BoundingBox,
     opts: &RenderOptions,

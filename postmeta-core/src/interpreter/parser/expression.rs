@@ -1,4 +1,4 @@
-//! Expression parser — Pratt-style with three binding power levels.
+//! Expression parser — Pratt-style with three binding power levels
 //!
 //! The parser uses a single Pratt loop ([`Interpreter::scan_infix_bp`]) with:
 //! - `scan_primary` as the nud (prefix/atom) handler
@@ -26,17 +26,11 @@ use crate::interpreter::EqualsMode;
 use crate::interpreter::helpers::{value_to_bool, value_to_scalar};
 use crate::interpreter::{ExprResultValue, Interpreter, LhsBinding};
 
-/// Format a numeric subscript into a variable name string.
+/// Format a numeric subscript into a variable name string
 ///
-/// `MetaPost` supports fractional subscripts (e.g., `A[0.08]`). We need a
-/// canonical string representation so that two evaluations of the same
-/// numeric value always produce the same key. Integer values are formatted
-/// without decimals (e.g., `[1]`) for backward compatibility; fractional
-/// values use Rust's shortest round-trip representation (e.g., `[0.08]`).
-///
-/// This is the ONLY subscript formatter: variable identity and the `str`
-/// operator both go through it, so a subscript always round-trips to the
-/// same key/text.
+/// `MetaPost` allows fractional subscripts (e.g. `A[0.08]`), so equal numeric values must always format to the same canonical key.
+/// Integers format without decimals (`[1]`); fractions use Rust's shortest round-trip representation (`[0.08]`).
+/// This is the ONLY subscript formatter: variable identity and the `str` operator both go through it, so a subscript always round-trips to the same key/text.
 fn write_subscript_key(name: &mut String, v: f64) {
     let rounded = v.round();
     if (v - rounded).abs() < 1e-10 {
@@ -50,17 +44,15 @@ fn write_subscript_key(name: &mut String, v: f64) {
     }
 }
 
-/// Result from an infix (led) handler — either continue the Pratt loop
-/// or break out of it.
+/// Result from an infix (led) handler — continue the Pratt loop or break out of it
 enum InfixAction {
-    /// The operator was consumed; continue looking for more infix ops.
     Continue(ExprResultValue),
-    /// The operator signals a mode switch or end of expression; stop the loop.
+    /// The operator signals a mode switch or end of expression; stop the loop
     Break(ExprResultValue),
 }
 
 impl Interpreter {
-    /// Parse and evaluate a primary expression, returning the result.
+    /// Parse and evaluate a primary expression
     #[allow(clippy::too_many_lines)]
     pub(in crate::interpreter) fn scan_primary(&mut self) -> InterpResult<ExprResultValue> {
         let primary = match self.cur.command {
@@ -109,7 +101,7 @@ impl Interpreter {
                 };
                 self.get_x_next();
                 let operand_result = self.scan_primary()?;
-                // known/unknown need the operand's type, not its value.
+                // known/unknown need the operand's type, not its value
                 if op == UnaryOp::KnownOp || op == UnaryOp::UnknownOp {
                     let ty = operand_result.ty;
                     let is_known = (ty as u8) < (Type::Dependent as u8);
@@ -121,9 +113,8 @@ impl Interpreter {
                     self.lhs_tracking.last_lhs_binding = None;
                     ExprResultValue::plain(Value::Boolean(result))
                 } else {
-                    // `bad_unary` reports a diagnostic but keeps the
-                    // operand unchanged. We catch type errors
-                    // here so they don't abort the whole expression.
+                    // `bad_unary` reports a diagnostic but keeps the operand unchanged.
+                    // Catch type errors here so they don't abort the whole expression.
                     match self.do_unary(op, &operand_result.exp, operand_result.pair_dep.clone()) {
                         Ok(r) => r,
                         Err(e) => {
@@ -137,7 +128,6 @@ impl Interpreter {
             }
 
             Command::PlusOrMinus => {
-                // Unary plus or minus
                 let is_minus =
                     PlusMinusOp::from_modifier(self.cur.modifier) == Some(PlusMinusOp::Minus);
                 self.get_x_next();
@@ -153,18 +143,14 @@ impl Interpreter {
             Command::BeginGroup => {
                 self.state.scope_manager.begin_group(&mut self.state.macros);
                 self.get_x_next();
-                // Execute statements until endgroup
                 while self.cur.command != Command::EndGroup && self.cur.command != Command::Stop {
                     self.do_statement()?;
                 }
-                // Restore scope — but preserve cur_exp/cur_type/cur_dep from
-                // the last expression in the group (the group's return value).
+                // Restore scope but preserve the last expression's result as the group's return value
                 self.do_endgroup();
                 self.get_x_next();
                 self.lhs_tracking.last_lhs_binding = None;
-                // Intentionally keep cur_dep: the group result's dependency
-                // info must survive so that unknown numerics (e.g. from
-                // `whatever`) can participate in equations after the group.
+                // Keep cur_dep: unknown numerics (e.g. from `whatever`) must stay usable in equations after the group
                 self.take_cur_result()
             }
 
@@ -173,18 +159,16 @@ impl Interpreter {
             Command::InternalQuantity => {
                 let idx = self.cur.modifier;
                 let v = self.state.internals.get(idx);
-                // Track for assignment LHS
                 self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Internal { idx });
                 self.get_x_next();
                 ExprResultValue::numeric_known(v)
             }
 
             Command::PrimaryBinary => {
-                // "expr X of Y" pattern
+                // "X of Y" pattern
                 let op = self.cur.modifier;
                 self.get_x_next();
                 let first_result = self.scan_expression(EqualsMode::Relation)?;
-                // Expect "of"
                 if self.cur.command != Command::OfToken {
                     return Err(InterpreterError::new(
                         ErrorKind::MissingToken,
@@ -213,7 +197,7 @@ impl Interpreter {
             }
 
             Command::StrOp => {
-                // `str` <suffix> — converts suffix to string
+                // `str` takes a raw suffix, not an expression
                 self.get_x_next();
                 let name = self.scan_str_suffix()?;
                 let val = Value::String(Arc::from(name.as_str()));
@@ -227,8 +211,7 @@ impl Interpreter {
                         .capsule
                         .take()
                         .map_or_else(ExprResultValue::vacuous, |arc_payload| {
-                            // Try to unwrap the Arc to avoid cloning
-                            // (O(1) when refcount is 1).
+                            // Unwrap the Arc to avoid cloning when the refcount is 1
                             match Arc::try_unwrap(arc_payload) {
                                 Ok(payload) => payload,
                                 Err(arc) => arc.as_ref().clone(),
@@ -240,7 +223,7 @@ impl Interpreter {
             }
 
             Command::TypeName => {
-                // Type name as unary operator — type test.
+                // A type name applied as a unary operator is a type test
                 let op = TypeNameOp::from_modifier(self.cur.modifier);
                 self.get_x_next();
                 let primary_result = self.scan_primary()?;
@@ -262,18 +245,16 @@ impl Interpreter {
             }
 
             _ => {
-                // Missing primary — set to vacuous
                 self.lhs_tracking.last_lhs_binding = None;
                 self.report_error(ErrorKind::MissingToken, "Missing primary expression");
                 ExprResultValue::vacuous()
             }
         };
 
-        // Check for mediation: a[b,c] = (1-a)*b + a*c
         self.scan_mediation(primary)
     }
 
-    /// Handle the `NumericToken` primary: literal, fraction, implicit multiplication.
+    /// Handle the `NumericToken` primary: literal, fraction, implicit multiplication
     fn scan_primary_numeric(&mut self) -> InterpResult<ExprResultValue> {
         let v = if let crate::token::TokenKind::Numeric(v) = self.cur.token.kind {
             v
@@ -284,7 +265,7 @@ impl Interpreter {
         self.lhs_tracking.last_lhs_binding = None;
         self.get_x_next();
 
-        // Check for fraction: 3/4 as a primary
+        // A fraction like 3/4 binds as a primary
         if self.cur.command == Command::Slash {
             self.get_x_next();
             if let crate::token::TokenKind::Numeric(denom) = self.cur.token.kind {
@@ -299,8 +280,7 @@ impl Interpreter {
                 }
                 self.get_x_next();
             } else {
-                // Not a fraction — restore `/` for the secondary
-                // level to handle as division (mp.web §15371-15374).
+                // Not a fraction — restore `/` for the secondary level to handle as division (mp.web §15371-15374)
                 self.back_input();
                 self.cur.command = Command::Slash;
                 self.cur.modifier = crate::command::SecondaryBinaryOp::Over as u16;
@@ -308,7 +288,7 @@ impl Interpreter {
             }
         }
 
-        // Implicit multiplication: `3x`, `2bp`, `.5(1,2)`, etc.
+        // Implicit multiplication: `3x`, `2bp`, `.5(1,2)`
         if self.cur.command.can_start_implicit_mul() {
             let factor_val = result
                 .dep
@@ -338,14 +318,13 @@ impl Interpreter {
         Ok(result)
     }
 
-    /// Handle delimited primary: `(expr)`, `(x,y)`, `(r,g,b)`.
+    /// Handle delimited primary: `(expr)`, `(x,y)`, `(r,g,b)`
     fn scan_primary_delimited(&mut self) -> InterpResult<ExprResultValue> {
         let expected_delimiter = self.cur.modifier;
         self.get_x_next();
         let first_result = self.scan_expression(EqualsMode::Relation)?;
 
         let result = if self.cur.command == Command::Comma {
-            // Pair or color
             let first = first_result.exp;
             let first_dep = first_result.dep;
             let second_dep_backup = first_result.pair_dep;
@@ -403,11 +382,9 @@ impl Interpreter {
                 }
             }
         } else {
-            // Single expression in parens
             first_result
         };
 
-        // Expect closing delimiter
         if self.cur.command == Command::RightDelimiter && self.cur.modifier == expected_delimiter {
             self.get_x_next();
         } else {
@@ -421,7 +398,7 @@ impl Interpreter {
         Ok(result)
     }
 
-    /// Check for and evaluate mediation: `a[b,c] = (1-a)*b + a*c`.
+    /// Check for and evaluate mediation: `a[b,c] = (1-a)*b + a*c`
     #[allow(clippy::too_many_lines)]
     fn scan_mediation(&mut self, primary: ExprResultValue) -> InterpResult<ExprResultValue> {
         if self.cur.command != Command::LeftBracket {
@@ -573,25 +550,22 @@ impl Interpreter {
         Ok(result)
     }
 
+    /// Scan a variable reference: root tag plus collected suffix parts
     fn scan_tag_token(&mut self) -> InterpResult<ExprResultValue> {
-        // Variable reference — scan suffix parts to form compound name.
         let root_sym = self.cur.sym;
 
-        // Defer String allocation: only build the name string when suffixes
-        // are found. For root-only variables (the common case in tight loops),
-        // resolve_variable uses lookup_by_sym which avoids string hashing.
+        // Defer String allocation: only build the name string when suffixes are found.
+        // For root-only variables (the common case), resolution goes by symbol and avoids string hashing.
         let mut name: Option<String> = None;
         let mut suffix_segs: Vec<SuffixSegment> = Vec::new();
 
-        // Check early if this is a standalone vardef macro.
         let is_root_vardef = root_sym
             .and_then(|symbol| self.state.macros.get(symbol))
             .is_some_and(|info| info.is_vardef);
 
         self.get_x_next();
 
-        // Suffix loop: collect symbolic suffixes, numeric subscripts,
-        // and bracketed subscript expressions `[expr]`.
+        // Suffix loop: collect symbolic suffixes, numeric subscripts, and bracketed subscript expressions `[expr]`
         loop {
             if !is_root_vardef
                 && (self.cur.command == Command::TagToken
@@ -612,10 +586,9 @@ impl Interpreter {
                 }
                 self.get_x_next();
             } else if !is_root_vardef && self.cur.command == Command::LeftBracket {
-                self.get_x_next(); // skip `[`
+                self.get_x_next();
                 let subscript_result = self.scan_expression(EqualsMode::Relation)?;
                 if self.cur.command == Command::RightBracket {
-                    // Subscript: var[expr]
                     let subscript = match &subscript_result.exp {
                         Value::Numeric(v) => *v,
                         _ => 0.0,
@@ -625,10 +598,7 @@ impl Interpreter {
                     suffix_segs.push(SuffixSegment::Subscript);
                     self.get_x_next();
                 } else {
-                    // Not a subscript — put the expression and
-                    // the current token back, then restore `[`
-                    // as the current command so the mediation
-                    // check after variable resolution can see it.
+                    // Not a subscript — push the expression and current token back, then restore `[` so the mediation check after variable resolution can see it
                     use crate::input::StoredToken;
                     let result = subscript_result;
                     let mut tl = vec![StoredToken::Capsule(Arc::new(result))];
@@ -662,16 +632,15 @@ impl Interpreter {
         }
 
         if let Some(ref name_str) = name {
-            // Suffixed variable — must use string-based lookup.
+            // Suffixed variable — must use string-based lookup
             Ok(self.resolve_variable(root_sym, name_str, &suffix_segs))
         } else {
-            // Root-only variable — use resolve_variable_root which avoids
-            // String allocation when the sym cache hits.
+            // Root-only — resolve_variable_root avoids String allocation when the sym cache hits
             Ok(self.resolve_variable_root(root_sym))
         }
     }
 
-    /// Get the root variable name from a symbol, allocating a `String`.
+    /// Get the root variable name from a symbol, allocating a `String`
     fn cur_root_name(&self, sym: Option<SymbolId>) -> String {
         sym.map_or_else(String::new, |s| self.state.symbols.name(s).to_owned())
     }
@@ -699,7 +668,7 @@ impl Interpreter {
                 self.get_x_next();
                 first = false;
             } else if self.cur.command == Command::LeftBracket {
-                self.get_x_next(); // skip `[`
+                self.get_x_next();
                 let subscript_result = self.scan_expression(EqualsMode::Relation)?;
                 let subscript = match subscript_result.exp {
                     Value::Numeric(v) => v,
@@ -725,7 +694,7 @@ impl Interpreter {
     // Pratt parser loop
     // =====================================================================
 
-    /// Parse the RHS of an infix operator at one binding power level higher.
+    /// Parse the RHS of an infix operator at one binding power level higher
     fn scan_rhs(&mut self, cmd: Command) -> InterpResult<ExprResultValue> {
         let Some(bp) = cmd.infix_binding_power() else {
             return Err(InterpreterError::new(
@@ -736,8 +705,7 @@ impl Interpreter {
         self.scan_infix_bp(bp + 1, false)
     }
 
-    /// Core Pratt loop: parse primary, then consume infix operators while
-    /// their binding power meets the minimum.
+    /// Core Pratt loop: parse a primary, then consume infix operators while their binding power meets the minimum
     fn scan_infix_bp(
         &mut self,
         min_bp: u8,
@@ -756,19 +724,17 @@ impl Interpreter {
         Ok(accum)
     }
 
-    /// Parse and evaluate a secondary expression, returning the result.
+    /// Parse and evaluate a secondary expression
     pub(in crate::interpreter) fn scan_secondary(&mut self) -> InterpResult<ExprResultValue> {
         self.scan_infix_bp(Command::BP_SECONDARY, false)
     }
 
-    /// Parse and evaluate a tertiary expression, returning the result.
+    /// Parse and evaluate a tertiary expression
     pub(in crate::interpreter) fn scan_tertiary(&mut self) -> InterpResult<ExprResultValue> {
         self.scan_infix_bp(Command::BP_TERTIARY, false)
     }
 
-    /// Parse and evaluate an expression, returning the result.
-    ///
-    /// Handles expression-level binary operators and path construction.
+    /// Parse and evaluate a full expression; `equals_mode` decides whether `=` is an equation delimiter or a comparison
     pub(crate) fn scan_expression(
         &mut self,
         equals_mode: EqualsMode,
@@ -780,7 +746,7 @@ impl Interpreter {
     // Unified infix (led) handler
     // =====================================================================
 
-    /// Single led dispatch for all infix operators.
+    /// Single led dispatch for all infix operators
     #[allow(clippy::too_many_lines)]
     fn scan_infix_led(
         &mut self,
@@ -916,12 +882,12 @@ impl Interpreter {
 
             // ----- Expression level: =, <, >, path join, &, ... -----
             Command::Equals if equals_is_equation => {
-                // In statement context, `=` is an equation/assignment — stop.
+                // In statement context, `=` is an equation/assignment — stop
                 Ok(InfixAction::Break(left))
             }
 
             Command::Equals => {
-                // In expression context, `=` is equality comparison.
+                // In expression context, `=` is an equality comparison
                 let left_val = left.exp;
                 self.get_x_next();
                 let right = self.scan_rhs(cmd)?;
@@ -949,9 +915,7 @@ impl Interpreter {
             // ----- Path construction and & -----
             Command::PathJoin | Command::LeftBrace => {
                 let result = self.scan_path_construction(left)?;
-                // Continue (not Break) so expression-level operators like
-                // `cutbefore`/`cutafter` (tertiarydef macros) that follow
-                // the path are picked up by the Pratt loop.
+                // Continue (not Break) so trailing expression-level operators like `cutbefore`/`cutafter` (tertiarydef macros) are picked up by the Pratt loop
                 Ok(InfixAction::Continue(result))
             }
 
@@ -960,7 +924,6 @@ impl Interpreter {
                     let result = self.scan_path_construction(left)?;
                     Ok(InfixAction::Continue(result))
                 } else {
-                    // String concatenation
                     let left_val = left.exp;
                     self.get_x_next();
                     let right = self.scan_rhs(cmd)?;

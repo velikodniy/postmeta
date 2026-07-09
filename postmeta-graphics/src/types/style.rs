@@ -1,4 +1,4 @@
-//! Styling types: colors, line caps, line joins, and dash patterns.
+//! Styling types: colors, line caps, line joins, and dash patterns
 
 use super::geometry::Scalar;
 
@@ -6,7 +6,7 @@ use super::geometry::Scalar;
 // Color
 // ---------------------------------------------------------------------------
 
-/// RGB color with components in [0, 1].
+/// RGB color with components in [0, 1]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Color {
     pub r: Scalar,
@@ -36,7 +36,7 @@ impl Color {
 // LineCap / LineJoin
 // ---------------------------------------------------------------------------
 
-/// Stroke line-cap styles.
+/// Stroke line-cap styles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineCap {
     Butt = 0,
@@ -45,7 +45,6 @@ pub enum LineCap {
     Square = 2,
 }
 
-/// Convert a `Scalar` to a `LineCap` by interpreting it as an integer code.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "linecap/linejoin values are small integers (0, 1, 2)"
@@ -60,7 +59,7 @@ impl From<Scalar> for LineCap {
     }
 }
 
-/// Stroke line-join styles.
+/// Stroke line-join styles
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum LineJoin {
     Miter = 0,
@@ -87,12 +86,12 @@ impl From<Scalar> for LineJoin {
 // DashPattern
 // ---------------------------------------------------------------------------
 
-/// A dash pattern: alternating on/off lengths with an offset.
+/// A dash pattern: alternating on/off lengths with an offset
 #[derive(Debug, Clone, PartialEq)]
 pub struct DashPattern {
-    /// Alternating on, off, on, off, ... lengths.
+    /// Alternating on, off, on, off, ... lengths
     pub dashes: Vec<Scalar>,
-    /// Starting offset into the pattern.
+    /// Starting offset into the pattern
     pub offset: Scalar,
 }
 

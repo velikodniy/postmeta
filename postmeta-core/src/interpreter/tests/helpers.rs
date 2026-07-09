@@ -1,4 +1,4 @@
-//! Shared fixtures and the [`TestInterp`] harness for interpreter tests.
+//! Shared fixtures and the [`TestInterp`] helper for interpreter tests
 
 use postmeta_graphics::types::Picture;
 
@@ -6,7 +6,7 @@ use crate::error::{InterpreterError, Severity};
 use crate::filesystem::FileSystem;
 use crate::interpreter::Interpreter;
 
-/// Filesystem fixture that serves `lib/plain.mp` from the workspace root.
+/// Filesystem fixture that serves the workspace copy of `plain.mp`
 pub struct PlainMpFs;
 
 pub fn read_plain_mp() -> Option<String> {
@@ -31,8 +31,7 @@ impl FileSystem for PlainMpFs {
 
 /// Thin wrapper around [`Interpreter`] that removes test boilerplate.
 ///
-/// The inner interpreter is exposed as a public field so irregular tests
-/// can still reach interpreter state directly (`t.interp.state...`).
+/// The inner interpreter is a public field so irregular tests can reach state directly.
 pub struct TestInterp {
     pub interp: Interpreter,
 }
@@ -44,21 +43,19 @@ impl TestInterp {
         }
     }
 
-    /// Create an interpreter with the [`PlainMpFs`] fixture installed,
-    /// so `input plain;` works.
+    /// Create an interpreter with [`PlainMpFs`] installed so `input plain;` works
     pub fn with_plain_mp() -> Self {
         let mut t = Self::new();
         t.interp.set_filesystem(Box::new(PlainMpFs));
         t
     }
 
-    /// Run source through the interpreter, panicking on a hard failure.
+    /// Run source through the interpreter, panicking on a hard failure
     pub fn run(&mut self, src: &str) {
         self.interp.run(src).unwrap();
     }
 
-    /// All `show`/`message` output (diagnostics with `Severity::Info`),
-    /// in order of emission.
+    /// All `show`/`message` output (`Severity::Info` diagnostics) in emission order
     pub fn shows(&self) -> Vec<&str> {
         self.interp
             .state
@@ -69,7 +66,7 @@ impl TestInterp {
             .collect()
     }
 
-    /// The first `show`/`message` output; panics if there is none.
+    /// The first `show`/`message` output; panics if there is none
     pub fn first_show(&self) -> &str {
         self.interp
             .state
@@ -87,7 +84,7 @@ impl TestInterp {
             )
     }
 
-    /// All diagnostics with `Severity::Error`.
+    /// All diagnostics with `Severity::Error`
     pub fn errors(&self) -> Vec<&InterpreterError> {
         self.interp
             .state
@@ -97,18 +94,18 @@ impl TestInterp {
             .collect()
     }
 
-    /// Assert that no `Severity::Error` diagnostics were produced.
+    /// Assert that no `Severity::Error` diagnostics were produced
     pub fn assert_no_errors(&self) {
         let errors = self.errors();
         assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     }
 
-    /// Pictures shipped out via `shipout`/`endfig`.
+    /// Pictures shipped out via `shipout`/`endfig`
     pub fn output(&self) -> &[Picture] {
         self.interp.output()
     }
 
-    /// The picture currently being drawn (`currentpicture`).
+    /// The picture currently being drawn (`currentpicture`)
     pub fn current_picture(&self) -> &Picture {
         self.interp.current_picture()
     }

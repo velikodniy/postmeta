@@ -1,4 +1,4 @@
-//! `PostMeta` CLI — run `MetaPost` programs and output SVG.
+//! `PostMeta` CLI — run `MetaPost` programs and output SVG
 
 mod app;
 mod args;

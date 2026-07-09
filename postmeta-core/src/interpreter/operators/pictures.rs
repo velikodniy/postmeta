@@ -1,4 +1,4 @@
-//! Picture inspection: part extraction, corners, and type predicates.
+//! Picture inspection: part extraction, corners, and type predicates
 
 use std::sync::Arc;
 
@@ -15,18 +15,10 @@ use crate::types::{Type, Value};
 use crate::variables::VarValue;
 
 impl Interpreter {
-    /// Extract a part from a pair or transform.
+    /// Extract a part from a pair or transform
     ///
-    /// When the operand has a pair dependency list (i.e. the pair variable
-    /// is not fully known), the extracted component's dependency is
-    /// propagated to the returned result's `dep` and to
-    /// `last_lhs_binding` so that it can participate in linear equation
-    /// solving (e.g. `xpart A = 0`).
-    ///
-    /// For transform variables, `operand_binding` carries the variable
-    /// binding from before the unary operator cleared it, allowing us to
-    /// look up the sub-part `VarId` for equation solving (e.g.
-    /// `xxpart T = 1`).
+    /// When the operand has a pair dependency list (the pair variable is not fully known), the extracted component's dependency is propagated to the result's `dep` and to `last_lhs_binding` so it can participate in linear equation solving (e.g. `xpart A = 0`).
+    /// For transform variables, `operand_binding` carries the variable binding from before the unary operator cleared it, letting us look up the sub-part `VarId` for equation solving (e.g. `xxpart T = 1`).
     #[allow(clippy::too_many_lines)]
     pub(super) fn extract_part(
         &mut self,
@@ -47,11 +39,11 @@ impl Interpreter {
                         ));
                     }
                 };
-                // Propagate the component's dependency so equations work.
+                // Propagate the component's dependency so equations work
                 if let Some((dx, dy)) = pair_dep {
                     let dep = if part == 0 { dx } else { dy };
                     if crate::equation::is_constant(&dep) {
-                        // Fully known component — no dependency to track.
+                        // Fully known component — no dependency to track
                         Ok(ExprResultValue {
                             exp: Value::Numeric(v),
                             ty: Type::Known,
@@ -59,7 +51,7 @@ impl Interpreter {
                             pair_dep: None,
                         })
                     } else {
-                        // Extract the primary VarId from the dep for LHS binding.
+                        // Extract the primary VarId from the dep for LHS binding
                         let primary_var = dep.iter().find_map(|t| t.var_id);
                         if let Some(vid) = primary_var {
                             self.lhs_tracking.last_lhs_binding = Some(LhsBinding::Variable {
@@ -93,9 +85,7 @@ impl Interpreter {
                         ));
                     }
                 };
-                // If the operand was a transform variable, look up the
-                // sub-part VarId so the result can participate in equation
-                // solving (e.g. `xxpart T = 1`).
+                // If the operand was a transform variable, look up the sub-part VarId so the result can participate in equation solving (e.g. `xxpart T = 1`)
                 if let Some(LhsBinding::Variable { id, .. }) = operand_binding {
                     if let VarValue::Transform {
                         tx,
@@ -142,8 +132,7 @@ impl Interpreter {
                 Ok(ExprResultValue::numeric_known(v))
             }
             Value::Picture(pic) => {
-                // For pictures, extract the transform part of the first text object.
-                // Non-text objects return 0 (matching MetaPost behavior).
+                // For pictures, extract the transform part of the first text object; non-text objects return 0
                 let v = match pic.first() {
                     Some(GraphicsObject::Text(t)) => match part {
                         0 => t.transform.tx,
@@ -165,7 +154,7 @@ impl Interpreter {
         }
     }
 
-    /// Extract a color part, returning `(Value::Numeric, Type::Known)`.
+    /// Extract a color part, returning `(Value::Numeric, Type::Known)`
     pub(super) fn extract_color_part(val: &Value, part: usize) -> InterpResult<(Value, Type)> {
         match val {
             Value::Color(c) => {
@@ -183,7 +172,7 @@ impl Interpreter {
                 Ok((Value::Numeric(v), Type::Known))
             }
             Value::Picture(pic) => {
-                // Extract color from the first graphical object that has color.
+                // Extract color from the first graphical object that has color
                 let color = match pic.first() {
                     Some(GraphicsObject::Fill(f)) => Some(&f.color),
                     Some(GraphicsObject::Stroke(s)) => Some(&s.color),
@@ -205,11 +194,9 @@ impl Interpreter {
         }
     }
 
-    /// Return the color model of a picture component or color value.
+    /// Return the color model of a picture component or color value: 1 (no color), 3 (greyscale), 5 (RGB), or 7 (CMYK)
     ///
-    /// Returns 1 (no color), 3 (greyscale), 5 (RGB), or 7 (CMYK).
-    /// Since we only support RGB, fills/strokes return 5 and text
-    /// defaults to 5 as well. Objects without explicit color return 1.
+    /// Since only RGB is supported, fills/strokes/text all return 5; objects without explicit color return 1.
     #[allow(clippy::unnecessary_wraps)]
     pub(super) fn extract_color_model(val: &Value) -> InterpResult<(Value, Type)> {
         let model = match val {
@@ -225,10 +212,7 @@ impl Interpreter {
         Ok((Value::Numeric(model), Type::Known))
     }
 
-    /// Return the grey part of a picture component or color value.
-    ///
-    /// Since we only support RGB, this returns 0 for everything
-    /// (greyscale is not a separate color model in our implementation).
+    /// Return the grey part of a picture component or color value — always 0 since RGB is the only supported color model
     #[allow(clippy::unnecessary_wraps)]
     pub(super) const fn extract_grey_part(val: &Value) -> InterpResult<(Value, Type)> {
         let _ = val;
@@ -236,7 +220,7 @@ impl Interpreter {
     }
 }
 
-/// Evaluate a corner operator (`llcorner`, `lrcorner`, `ulcorner`, `urcorner`).
+/// Evaluate a corner operator (`llcorner`, `lrcorner`, `ulcorner`, `urcorner`)
 pub(super) fn corner(op: UnaryOp, input: &Value, corners: Corners) -> InterpResult<(Value, Type)> {
     let bb = match input {
         Value::Picture(pic) => BoundingBox::of_picture(pic, corners),
@@ -281,7 +265,7 @@ pub(super) fn corner(op: UnaryOp, input: &Value, corners: Corners) -> InterpResu
     Ok((Value::Pair(px, py), Type::PairType))
 }
 
-// Picture part extraction operators.
+// Picture part extraction operators
 
 pub(super) fn text_part(input: &Value) -> InterpResult<(Value, Type)> {
     let pic = value_to_picture(input)?;
@@ -337,8 +321,7 @@ pub(super) fn dash_part(input: &Value) -> InterpResult<(Value, Type)> {
     let pic = value_to_picture(input)?;
     let dash_pic = match pic.first() {
         Some(GraphicsObject::Stroke(s)) => {
-            // TODO: convert DashPattern back to a picture representation.
-            // For now return empty picture (matches MetaPost's nullpicture).
+            // TODO: convert DashPattern back to a picture representation; for now return empty picture (matches MetaPost's nullpicture)
             let _ = &s.dash;
             Picture::new()
         }
@@ -347,7 +330,7 @@ pub(super) fn dash_part(input: &Value) -> InterpResult<(Value, Type)> {
     Ok((Value::Picture(dash_pic), Type::Picture))
 }
 
-// Picture type tests: check first object in the picture.
+// Picture type tests: check first object in the picture
 
 pub(super) fn is_filled(input: &Value) -> InterpResult<(Value, Type)> {
     let pic = value_to_picture(input)?;

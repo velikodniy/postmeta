@@ -1,4 +1,4 @@
-//! Composite font provider: embedded defaults + custom overrides.
+//! Composite font provider: embedded defaults + custom overrides
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -7,18 +7,18 @@ use crate::data::FontData;
 use crate::error::FontError;
 use crate::provider::FontProvider;
 
-/// Font provider that checks custom fonts first, then falls back to embedded.
+/// Font provider that checks custom fonts first, then falls back to embedded
 ///
-/// Font name lookup is case-insensitive: names are normalized to lowercase.
+/// Lookup is case-insensitive; names are normalized to lowercase.
 pub struct CompositeFontProvider {
-    /// Embedded fonts (populated from the alias table at construction).
+    /// Embedded fonts, populated from the alias table at construction
     embedded: HashMap<String, FontData>,
-    /// User-provided fonts (loaded from files via [`Self::load_font`]).
+    /// User-provided fonts, registered via [`Self::load_font`]
     custom: HashMap<String, FontData>,
 }
 
 impl CompositeFontProvider {
-    /// Create a provider with embedded defaults only.
+    /// Create a provider with embedded defaults only
     ///
     /// # Errors
     ///
@@ -35,10 +35,9 @@ impl CompositeFontProvider {
         })
     }
 
-    /// Load a custom font from bytes, registered under the given name.
+    /// Load a custom font from bytes, registered under the given name
     ///
-    /// The name is normalized to lowercase for matching. If a font with
-    /// the same name already exists in the custom set, it is replaced.
+    /// The name is lowercased for matching; an existing custom font with the same name is replaced.
     ///
     /// # Errors
     ///
@@ -94,8 +93,7 @@ mod tests {
             .font("cmr10")
             .expect("cmr10 after override")
             .units_per_em();
-        // Both NewCM fonts have the same upem, but the FontData instance
-        // should be different (custom takes priority).
+        // Both NewCM fonts share the same upem, so this only checks lookup still succeeds after the override
         assert_eq!(embedded_upem, custom_upem);
     }
 

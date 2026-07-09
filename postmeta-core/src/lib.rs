@@ -1,4 +1,4 @@
-//! `MetaPost` language parser and interpreter.
+//! `MetaPost` language parser and interpreter
 
 #![cfg_attr(
     test,

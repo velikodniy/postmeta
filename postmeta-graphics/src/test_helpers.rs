@@ -1,9 +1,9 @@
-//! Shared test helpers for constructing common `BezierPath` shapes.
+//! Shared test helpers for constructing common `BezierPath` shapes
 
 use crate::path::{BezierPath, SegmentControls};
 use crate::types::Point;
 
-/// Build an open line `BezierPath` from (0,0) to (10,0).
+/// Build an open line `BezierPath` from (0,0) to (10,0)
 pub fn line() -> BezierPath {
     BezierPath::from_parts(
         vec![Point::ZERO, Point::new(10.0, 0.0)],
@@ -15,7 +15,7 @@ pub fn line() -> BezierPath {
     )
 }
 
-/// Build a cyclic triangle `BezierPath` with straight-line controls.
+/// Build a cyclic triangle `BezierPath` with straight-line controls
 pub fn triangle() -> BezierPath {
     let pts = [
         Point::new(0.0, 0.0),
@@ -34,7 +34,7 @@ pub fn triangle() -> BezierPath {
     BezierPath::from_parts(pts.to_vec(), controls, true)
 }
 
-/// Build a 10x10 cyclic square `BezierPath` with straight-line controls.
+/// Build a 10x10 cyclic square `BezierPath` with straight-line controls
 pub fn square() -> BezierPath {
     let pts = [
         Point::new(0.0, 0.0),

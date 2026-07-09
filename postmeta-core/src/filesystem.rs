@@ -1,18 +1,13 @@
-//! Filesystem abstraction for WASM compatibility.
+//! Filesystem abstraction for WASM compatibility
 //!
-//! The `MetaPost` interpreter needs to read files (for `input` commands),
-//! but must not access the filesystem directly for WASM compatibility.
-//! This trait abstracts file reading so that different implementations
-//! can be provided:
-//! - `OsFileSystem` in the CLI crate (reads from disk)
-//! - A virtual filesystem for WASM (files provided in-memory)
+//! The interpreter reads files for `input` but must not touch the OS filesystem directly.
+//! Implementations: `OsFileSystem` in the CLI crate (disk) and an in-memory virtual filesystem for WASM.
 
-/// A filesystem abstraction for reading source files.
+/// A filesystem abstraction for reading source files
 ///
-/// Implementations must resolve file names (possibly adding `.mp` extension)
-/// and return file contents as strings.
+/// Implementations resolve file names (possibly appending `.mp`) and return contents as strings.
 pub trait FileSystem {
-    /// Read a file by name, returning its contents.
+    /// Read a file by name, returning its contents
     ///
     /// The implementation should:
     /// 1. Try the exact filename first
@@ -22,12 +17,14 @@ pub trait FileSystem {
     /// Returns `None` if the file cannot be found.
     fn read_file(&self, name: &str) -> Option<String>;
 
-    /// Read a single line from an opened file. Returns `None` at EOF or if unsupported.
+    /// Read a single line from an opened file
+    ///
+    /// Returns `None` at EOF or if unsupported.
     fn read_line(&mut self, _name: &str) -> Option<String> {
         None
     }
 
-    /// Write a string to a file, opening or appending to it.
+    /// Write a string to a file, opening or appending to it
     ///
     /// # Errors
     /// Returns an error if the underlying filesystem fails to write the data.
@@ -36,9 +33,9 @@ pub trait FileSystem {
     }
 }
 
-/// A no-op filesystem that never finds any files.
+/// A no-op filesystem that never finds any files
 ///
-/// Used as the default when no filesystem is configured (e.g., in tests).
+/// The default when no filesystem is configured (e.g. in tests).
 pub struct NullFileSystem;
 
 impl FileSystem for NullFileSystem {

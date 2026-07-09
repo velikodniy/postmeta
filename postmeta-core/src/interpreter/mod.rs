@@ -1,9 +1,7 @@
 //! The `MetaPost` interpreter.
 //!
-//! This is the central module that ties together the scanner, symbol table,
-//! expression parser, equation solver, and statement executor. It implements
-//! `MetaPost`'s direct-interpretation model: expressions are evaluated as
-//! they are parsed, with no intermediate AST.
+//! Ties together the scanner, symbol table, expression parser, equation solver, and statement executor.
+//! Implements `MetaPost`'s direct-interpretation model: expressions are evaluated as they are parsed, with no intermediate AST.
 //!
 //! # Expression hierarchy
 //!
@@ -49,20 +47,18 @@ use runtime::scope::ScopeManager;
 // Current expression state
 // ---------------------------------------------------------------------------
 
-/// Interpreter-facing alias for the shared expression payload.
+/// Interpreter-facing alias for the shared expression payload
 pub(super) type ExprResultValue = crate::expr_value::ExprValue;
 
 /// How `=` is interpreted while scanning an expression.
 ///
-/// Statement contexts scan their expression with [`EqualsMode::Equation`] so
-/// that a top-level `=` delimits an equation; everywhere else `=` is the
-/// relational operator. Mirrors `mp.web`'s `var_flag = assignment` mechanism,
-/// but as an explicit parameter instead of mutable interpreter state.
+/// Statement contexts scan with [`EqualsMode::Equation`] so a top-level `=` delimits an equation; everywhere else `=` is the relational operator.
+/// Mirrors `mp.web`'s `var_flag = assignment` mechanism, but as an explicit parameter instead of mutable interpreter state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EqualsMode {
-    /// A top-level `=` ends the expression (equation delimiter).
+    /// A top-level `=` ends the expression (equation delimiter)
     Equation,
-    /// `=` is the equality comparison operator.
+    /// `=` is the equality comparison operator
     Relation,
 }
 
@@ -88,11 +84,9 @@ pub(super) enum LhsBinding {
 
 /// Tracks the latest bindable LHS expression context.
 ///
-/// This state is threaded through expression parsing so statements can
-/// distinguish equations/assignments to variables, internals, and compound
-/// parts.
+/// Threaded through expression parsing so statements can distinguish equations/assignments to variables, internals, and compound parts.
 pub(super) struct LhsTracking {
-    /// Binding for expression forms that can be equation left-hand sides.
+    /// Binding for expression forms that can be equation left-hand sides
     pub last_lhs_binding: Option<LhsBinding>,
 }
 
@@ -106,38 +100,30 @@ impl LhsTracking {
 
 /// Long-lived interpreter machine state.
 ///
-/// This groups the mutable subsystems that represent the `MetaPost` "world":
-/// symbol/variable tables, input stack, internals, macro table, and drawing
-/// output buffers. The parser/expression front-end state stays on
-/// [`Interpreter`] (`cur`, `cur_expr`, `lhs_tracking`).
+/// Groups the mutable subsystems of the `MetaPost` "world": symbol/variable tables, input stack, internals, macro table, and drawing output buffers.
+/// The parser/expression front-end state stays on [`Interpreter`] (`cur`, `cur_expr`, `lhs_tracking`).
 pub struct MachineState {
-    /// Filesystem for `input` commands.
+    /// Filesystem for `input` commands
     fs: Box<dyn FileSystem>,
-    /// Font provider for text metrics (optional; falls back to heuristics).
+    /// Font provider for text metrics (optional; falls back to heuristics)
     font_provider: Option<Arc<dyn FontProvider>>,
-    /// Symbol table (names → command codes).
+    /// Symbol table (names → command codes)
     pub symbols: SymbolTable,
-    /// Variable storage.
     pub variables: Variables,
-    /// Variable type trie — tracks declared variable structure.
+    /// Tracks declared variable structure
     pub var_trie: VarTrie,
-    /// Internal quantities.
     pub internals: Internals,
-    /// Token input system.
     pub input: InputSystem,
-    /// Scope transaction manager for `begingroup`/`save`/`endgroup`.
+    /// Scope transaction manager for `begingroup`/`save`/`endgroup`
     scope_manager: ScopeManager,
-    /// Picture output/runtime drawing state.
+    /// Picture output/runtime drawing state
     picture_manager: PictureManager,
-    /// Defined macros and their save/restore runtime stack.
+    /// Defined macros and their save/restore runtime stack
     macros: MacroTable,
-    /// Random seed.
     pub random_seed: u64,
-    /// Error list.
     pub errors: Vec<InterpreterError>,
-    /// Job name.
     pub job_name: String,
-    /// Next delimiter id for `delimiters` command (0 is reserved for `()`).
+    /// Next delimiter id for the `delimiters` command (0 is reserved for `()`)
     next_delimiter_id: u16,
 }
 
@@ -147,24 +133,21 @@ pub struct MachineState {
 
 /// The `MetaPost` interpreter.
 pub struct Interpreter {
-    /// Long-lived machine state.
     state: MachineState,
-    /// Stashed expression result for group return values and `get_x_next` protection.
+    /// Stashed expression result for group return values and `get_x_next` protection
     cur_expr: ExprResultValue,
-    /// Current resolved token (set by `get_next`).
+    /// Current resolved token (set by `get_next`)
     cur: ResolvedToken,
-    /// Latest bindable left-hand-side context.
     lhs_tracking: LhsTracking,
-    /// Conditional and loop control state (if-stack, loop exit flag, pending body).
+    /// Conditional and loop control state (if-stack, loop exit flag, pending body)
     control_flow: ControlFlow,
-    /// Span of the first token of the statement being executed, for
-    /// diagnostics. Degenerate (zero-length) for tokens produced by macro
-    /// expansion.
+    /// Span of the first token of the statement being executed, for diagnostics.
+    /// Degenerate (zero-length) for tokens produced by macro expansion.
     statement_span: crate::token::Span,
 }
 
 impl Interpreter {
-    /// Create a new interpreter.
+    /// Create a new interpreter
     #[must_use]
     pub fn new() -> Self {
         let mut symbols = SymbolTable::new();
@@ -222,15 +205,15 @@ impl Interpreter {
         }
     }
 
-    /// Set the filesystem for `input` commands.
+    /// Set the filesystem for `input` commands
     pub fn set_filesystem(&mut self, fs: Box<dyn FileSystem>) {
         self.state.fs = fs;
     }
 
     /// Set the font provider for text metrics and glyph data.
     ///
-    /// When set, operators like `infont` and `fontsize` use real OpenType
-    /// metrics.  When `None`, the interpreter falls back to heuristics.
+    /// When set, operators like `infont` and `fontsize` use real OpenType metrics.
+    /// When `None`, the interpreter falls back to heuristics.
     pub fn set_font_provider(&mut self, provider: Arc<dyn FontProvider>) {
         self.state.font_provider = Some(provider);
     }
@@ -239,7 +222,7 @@ impl Interpreter {
     // Token access
     // =======================================================================
 
-    /// Get the next token (raw, no expansion).
+    /// Get the next token (raw, no expansion)
     fn get_next(&mut self) {
         self.cur = self.state.input.next_raw_token(&mut self.state.symbols);
         for scan_error in self.state.input.take_scan_errors() {
@@ -255,13 +238,10 @@ impl Interpreter {
 
     /// Get the next token, expanding macros and conditionals.
     ///
-    /// This is `get_x_next` from `mp.web`: it calls `get_next` and then
-    /// expands any expandable commands until a non-expandable one is found.
+    /// This is `get_x_next` from `mp.web`: expandable commands are expanded until a non-expandable one is found.
     fn get_x_next(&mut self) {
-        // Expansion is token-oriented; it should not overwrite the current
-        // expression value that the parser may already have computed.
-        // Use take+restore instead of clone to avoid deep-copying expensive
-        // values (paths, pictures, dep lists).
+        // Expansion is token-oriented and must not overwrite the expression value the parser may already have computed.
+        // Take+restore instead of clone avoids deep-copying paths, pictures, and dep lists.
         let saved = std::mem::replace(&mut self.cur_expr, ExprResultValue::vacuous());
         self.get_next();
         self.expand_current();
@@ -270,21 +250,15 @@ impl Interpreter {
 
     /// Push the current token back into the input stream.
     ///
-    /// After calling this, the next `get_next()` or `get_x_next()` will
-    /// return the same token again. This is `mp.web`'s `back_input`.
+    /// The next `get_next()` or `get_x_next()` returns the same token again.
+    /// This is `mp.web`'s `back_input`.
     pub(super) fn back_input(&mut self) {
         let cur = self.cur.clone();
         self.state.input.back_input(cur);
     }
 
-    /// Push the current expression back into the input as a capsule token.
-    ///
-    /// The current `cur_exp`/`cur_type` are stashed into a capsule and
-    /// placed on the input stream. The next token read will be a
-    /// `CapsuleToken` carrying that value. This is `mp.web`'s `back_expr`.
     /// Push an expression result back into the input as a capsule token.
     ///
-    /// The value is stashed into a capsule and placed on the input stream.
     /// The next token read will be a `CapsuleToken` carrying that value.
     /// This is `mp.web`'s `back_expr`.
     pub(super) fn back_expr_value(&mut self, result: ExprResultValue) {
@@ -293,7 +267,6 @@ impl Interpreter {
             .back_expr(result.exp, result.ty, result.dep, result.pair_dep);
     }
 
-    /// Store the current token into a token list.
     fn store_current_token(&self, list: &mut TokenList) {
         use crate::input::StoredToken;
 
@@ -352,8 +325,7 @@ impl Interpreter {
         self.cur.sym.map(|id| self.state.symbols.name(id))
     }
 
-    /// Allocate the component variables of a compound type and register
-    /// their suffixed names (`p.x`, `c.r`, `T.txx`, ...).
+    /// Allocate a compound type's component variables and register their suffixed names (`p.x`, `c.r`, `T.txx`, ...).
     ///
     /// Returns `None` if `ty` is not a compound type.
     fn alloc_compound_value(&mut self, name: &str, ty: Type) -> Option<VarValue> {
@@ -390,7 +362,7 @@ impl Interpreter {
         }
     }
 
-    /// Negate the current expression (unary minus).
+    /// Negate an expression value (unary minus)
     fn negate_value(&mut self, mut result: ExprResultValue) -> ExprResultValue {
         fn negate_binding(binding: &LhsBinding) -> Option<LhsBinding> {
             match binding {
@@ -484,11 +456,11 @@ impl Interpreter {
         self.state.variables.set(var_id, val);
     }
 
-    /// Fast path for root-only variable references. Avoids String allocation
-    /// entirely when the sym cache hits.
+    /// Fast path for root-only variable references.
+    /// Avoids string allocation when the sym cache hits.
     fn resolve_variable_root(&mut self, sym: Option<SymbolId>) -> ExprResultValue {
         let var_id = if let Some(s) = sym {
-            // Try the sym cache first — no string allocation needed on hit.
+            // Try the sym cache first — no string allocation needed on hit
             let idx = s.raw() as usize;
             let cached = if idx < self.state.variables.sym_cache.len() {
                 let c = self.state.variables.sym_cache[idx];
@@ -503,17 +475,16 @@ impl Interpreter {
             if let Some(id) = cached {
                 id
             } else {
-                // Cache miss — need the name string for HashMap lookup.
+                // Cache miss — need the name string for HashMap lookup
                 let name = self.state.symbols.name(s).to_owned();
                 self.state.variables.lookup_by_sym(s, &name)
             }
         } else {
-            // No symbol — shouldn't happen for tag tokens, but handle gracefully.
+            // No symbol — shouldn't happen for tag tokens, but handle gracefully
             self.state.variables.lookup("")
         };
-        // For root-only lookups, initialize_declared_variable needs the name
-        // only when creating compound sub-parts (pair.x, pair.y, etc.).
-        // Check if initialization is needed before allocating the name.
+        // initialize_declared_variable needs the name only when creating compound sub-parts (pair.x, pair.y, etc.).
+        // Check whether initialization is needed before allocating the name.
         let needs_init = matches!(
             self.state.variables.get(var_id),
             VarValue::Undefined
@@ -532,7 +503,7 @@ impl Interpreter {
         self.resolve_var_id(var_id)
     }
 
-    /// Resolve a variable name to its value, returning the result.
+    /// Resolve a variable name to its value
     fn resolve_variable(
         &mut self,
         sym: Option<SymbolId>,
@@ -562,8 +533,7 @@ impl Interpreter {
     /// Borrows the variable storage to avoid cloning until actually needed.
     fn resolve_var_id(&mut self, var_id: VarId) -> ExprResultValue {
         // Match on a borrow first to extract Copy data without cloning.
-        // Only clone for variants that need owned data (Known with heap values,
-        // Dependent with DepList).
+        // Only clone variants that need owned data (Known with heap values, Dependent with a DepList).
         match self.state.variables.get(var_id) {
             VarValue::NumericVar(NumericState::Known(v)) | VarValue::Known(Value::Numeric(v)) => {
                 ExprResultValue::numeric_known(*v)
@@ -589,7 +559,7 @@ impl Interpreter {
                 }
             }
             VarValue::Known(v) => {
-                // Path, Pen, Picture, String, etc. — must clone.
+                // Path, Pen, Picture, String, etc. — must clone
                 let v = v.clone();
                 let ty = v.ty();
                 ExprResultValue {
@@ -643,7 +613,7 @@ impl Interpreter {
     // Error handling
     // =======================================================================
 
-    /// Record a non-fatal error.
+    /// Record a non-fatal error
     fn report_error(&mut self, kind: ErrorKind, message: impl Into<String>) {
         let msg = message.into();
         let mut err = InterpreterError::new(kind, msg);
@@ -653,8 +623,7 @@ impl Interpreter {
         self.state.errors.push(err);
     }
 
-    /// The most specific non-degenerate source span for a diagnostic:
-    /// the current token's span, falling back to the statement's start.
+    /// The most specific non-degenerate source span for a diagnostic: the current token's span, falling back to the statement's start.
     /// `None` when both are degenerate (e.g. deep inside macro expansion).
     fn best_error_span(&self) -> Option<crate::token::Span> {
         let cur = self.cur.token.span;
@@ -665,7 +634,7 @@ impl Interpreter {
         (stmt.end > stmt.start).then_some(stmt)
     }
 
-    /// Record an informational diagnostic.
+    /// Record an informational diagnostic
     fn report_info(&mut self, message: impl Into<String>) {
         self.state.errors.push(
             InterpreterError::new(ErrorKind::Internal, message.into())
@@ -700,36 +669,36 @@ impl Interpreter {
         Ok(())
     }
 
-    /// Get the output pictures.
+    /// Get the output pictures
     #[must_use]
     pub fn output(&self) -> &[Picture] {
         self.state.picture_manager.output()
     }
 
-    /// Get interpreter diagnostics collected during execution.
+    /// Get interpreter diagnostics collected during execution
     #[must_use]
     pub fn diagnostics(&self) -> &[InterpreterError] {
         &self.state.errors
     }
 
-    /// Get the current job name used for output file naming.
+    /// Get the current job name used for output file naming
     #[must_use]
     pub fn job_name(&self) -> &str {
         &self.state.job_name
     }
 
-    /// Set the current job name used for output file naming.
+    /// Set the current job name used for output file naming
     pub fn set_job_name(&mut self, job_name: impl Into<String>) {
         self.state.job_name = job_name.into();
     }
 
-    /// Get internal quantity storage.
+    /// Get internal quantity storage
     #[must_use]
     pub const fn internals(&self) -> &Internals {
         &self.state.internals
     }
 
-    /// Get the current picture being built.
+    /// Get the current picture being built
     #[must_use]
     pub const fn current_picture(&self) -> &Picture {
         self.state.picture_manager.current_picture()

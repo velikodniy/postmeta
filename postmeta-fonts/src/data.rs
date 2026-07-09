@@ -1,4 +1,4 @@
-//! Font data wrapper around `ttf-parser`.
+//! Font data wrapper around `ttf-parser`
 
 use std::sync::Arc;
 
@@ -6,30 +6,27 @@ use crate::error::FontError;
 use crate::metrics::TextMetrics;
 use crate::outline::OutlineSink;
 
-/// Parsed font data.
+/// Parsed font data
 ///
-/// Stores owned font bytes and cached global metrics. Creates a
-/// `ttf_parser::Face` on demand for individual queries — parsing is
-/// sub-microsecond (no allocation, just header validation and offset
-/// table construction).
+/// Owns the font bytes and caches global metrics.
+/// A `ttf_parser::Face` is created on demand per query; parsing is sub-microsecond header validation with no allocation.
 #[derive(Clone)]
 pub struct FontData {
     bytes: Arc<[u8]>,
-    /// Font units per em (design coordinate space).
+    /// Font units per em (design coordinate space)
     units_per_em: u16,
-    /// Global ascender in design units (positive).
+    /// Global ascender in design units (positive)
     ascender: i16,
-    /// Global descender in design units (negative).
+    /// Global descender in design units (negative)
     descender: i16,
 }
 
 impl FontData {
-    /// Parse font data from an owned byte buffer.
+    /// Parse font data from an owned byte buffer
     ///
     /// # Errors
     ///
-    /// Returns [`FontError::ParseError`] if the data is not a valid
-    /// OpenType/TrueType font.
+    /// Returns [`FontError::ParseError`] if the data is not a valid OpenType/TrueType font.
     pub fn from_bytes(bytes: Arc<[u8]>) -> Result<Self, FontError> {
         let face =
             ttf_parser::Face::parse(&bytes, 0).map_err(|e| FontError::ParseError(e.to_string()))?;
@@ -41,62 +38,52 @@ impl FontData {
         })
     }
 
-    /// Parse font data from a static byte slice (for embedded fonts).
+    /// Parse font data from a static byte slice (for embedded fonts)
     ///
     /// # Errors
     ///
-    /// Returns [`FontError::ParseError`] if the data is not a valid
-    /// OpenType/TrueType font.
+    /// Returns [`FontError::ParseError`] if the data is not a valid OpenType/TrueType font.
     pub fn from_static(bytes: &'static [u8]) -> Result<Self, FontError> {
         Self::from_bytes(Arc::from(bytes))
     }
 
-    /// Create a temporary `Face` reference for queries.
+    /// Create a temporary `Face` for queries
     fn face(&self) -> ttf_parser::Face<'_> {
-        // Safety of unwrap rationale: bytes were validated in from_bytes.
-        // However, we avoid unwrap per project rules — re-parse and
-        // return a default-ish face is not possible, so we use expect
-        // only in this internal helper that is guaranteed to succeed
-        // because the bytes were validated at construction time.
-        //
-        // We still avoid `expect` — instead, use a let-else with a
-        // fallback that cannot actually be reached.
         #[expect(clippy::expect_used, reason = "bytes were validated at construction")]
         ttf_parser::Face::parse(&self.bytes, 0).expect("font bytes validated at construction")
     }
 
-    /// Font units per em (design coordinate space).
+    /// Font units per em (design coordinate space)
     #[must_use]
     pub const fn units_per_em(&self) -> u16 {
         self.units_per_em
     }
 
-    /// Scale factor from design units to points at the given font size.
+    /// Scale factor from design units to points at the given font size
     #[must_use]
     pub fn scale(&self, font_size: f64) -> f64 {
         font_size / f64::from(self.units_per_em)
     }
 
-    /// Whether a character has a glyph in this font.
+    /// Whether a character has a glyph in this font
     #[must_use]
     pub fn has_glyph(&self, ch: char) -> bool {
         self.face().glyph_index(ch).is_some()
     }
 
-    /// Map a character to its glyph ID. Returns `None` if not in the cmap.
+    /// Map a character to its glyph ID, or `None` if not in the cmap
     #[must_use]
     pub fn glyph_id(&self, ch: char) -> Option<u16> {
         self.face().glyph_index(ch).map(|g| g.0)
     }
 
-    /// Horizontal advance width for a glyph, in design units.
+    /// Horizontal advance width for a glyph, in design units
     #[must_use]
     pub fn advance_width(&self, glyph_id: u16) -> Option<u16> {
         self.face().glyph_hor_advance(ttf_parser::GlyphId(glyph_id))
     }
 
-    /// Kerning adjustment between two glyphs, in design units.
-    /// Negative values mean tighter spacing.
+    /// Kerning adjustment between two glyphs in design units; negative means tighter
     #[must_use]
     pub fn kern(&self, left: u16, right: u16) -> i16 {
         self.face()
@@ -110,7 +97,7 @@ impl FontData {
             .unwrap_or(0)
     }
 
-    /// Compute aggregate metrics for a text string at a given font size.
+    /// Compute aggregate metrics for a text string at a given font size
     #[must_use]
     pub fn text_metrics(&self, text: &str, font_size: f64) -> TextMetrics {
         let face = self.face();
@@ -125,17 +112,14 @@ impl FontData {
                 continue;
             };
 
-            // Kerning with previous glyph
             if let Some(prev) = prev_gid {
                 width = f64::from(self.kern(prev, gid.0)).mul_add(scale, width);
             }
 
-            // Advance width
             if let Some(adv) = face.glyph_hor_advance(gid) {
                 width = f64::from(adv).mul_add(scale, width);
             }
 
-            // Per-glyph vertical extents from bounding box
             if let Some(bb) = face.glyph_bounding_box(gid) {
                 max_ascender = max_ascender.max(bb.y_max);
                 max_descender = max_descender.min(bb.y_min);
@@ -144,7 +128,7 @@ impl FontData {
             prev_gid = Some(gid.0);
         }
 
-        // Fall back to global ascender/descender if no per-glyph data
+        // A zero extent means no per-glyph data; fall back to the global values
         if max_ascender == 0 {
             max_ascender = self.ascender;
         }
@@ -159,10 +143,10 @@ impl FontData {
         }
     }
 
-    /// Extract the outline of a glyph into the given sink.
+    /// Extract the outline of a glyph into the given sink
     ///
     /// Coordinates are pre-scaled from design units to the given font size.
-    /// Returns `false` if the glyph has no outline (e.g., space character).
+    /// Returns `false` if the glyph has no outline (e.g. a space).
     pub fn outline(&self, glyph_id: u16, font_size: f64, sink: &mut dyn OutlineSink) -> bool {
         let face = self.face();
         let scale = self.scale(font_size);
@@ -172,7 +156,7 @@ impl FontData {
     }
 }
 
-/// Adapter from [`OutlineSink`] to `ttf_parser::OutlineBuilder`.
+/// Bridges `ttf_parser::OutlineBuilder` callbacks to an [`OutlineSink`], applying the scale factor
 struct OutlineAdapter<'a> {
     sink: &'a mut dyn OutlineSink,
     scale: f64,

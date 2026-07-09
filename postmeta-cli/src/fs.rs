@@ -1,4 +1,4 @@
-//! Filesystem access: disk-backed [`FileSystem`] and source reading.
+//! Filesystem access: disk-backed [`FileSystem`] and source reading
 
 use std::collections::HashMap;
 use std::fs;
@@ -9,14 +9,12 @@ use postmeta_core::filesystem::FileSystem;
 
 use crate::args::Cli;
 
-/// Filesystem implementation that reads from disk.
+/// Filesystem implementation that reads from disk
 ///
-/// Searches in configured directories, trying the exact name first,
-/// then appending `.mp` if not found.
+/// Searches configured directories, trying the exact name first, then `.mp` appended.
 pub struct OsFileSystem {
-    /// Directories to search for input files.
     search_dirs: Vec<PathBuf>,
-    /// Open file readers for `readfrom`.
+    /// Open file readers for `readfrom`
     read_files: HashMap<String, std::io::Lines<BufReader<fs::File>>>,
 }
 
@@ -70,17 +68,14 @@ impl FileSystem for OsFileSystem {
                 self.read_files
                     .insert(name.to_owned(), BufReader::new(f).lines());
             } else {
-                return None; // Cannot open file
+                return None;
             }
         }
 
         let lines = self.read_files.get_mut(name)?;
         match lines.next() {
             Some(Ok(line)) => Some(line),
-            _ => {
-                // EOF or error
-                Some("\0".to_string())
-            }
+            _ => Some("\0".to_string()),
         }
     }
 
@@ -93,7 +88,7 @@ impl FileSystem for OsFileSystem {
     }
 }
 
-/// Read the program source from `--eval` or the input file.
+/// Read the program source from `--eval` or the input file
 ///
 /// Prints an error to stderr and returns `None` if no source is available.
 pub fn read_source(cli: &Cli) -> Option<String> {

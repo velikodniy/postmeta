@@ -1,4 +1,4 @@
-//! Linear equation solving, dependencies, and `whatever`-style systems.
+//! Linear equation solving, dependencies, and `whatever`-style systems
 
 use crate::interpreter::Interpreter;
 
@@ -53,7 +53,7 @@ fn mediation_preserves_pair_endpoint_dependencies() {
 #[test]
 fn chained_equation() {
     let mut interp = TestInterp::new();
-    // Chained equation with unary-minus LHS: right = -left = (1,0)
+    // Chained equation with a unary-minus LHS
     interp.run("pair right,left; right=-left=(1,0); show right; show left;");
     assert!(
         interp
@@ -170,8 +170,7 @@ fn pair_equation_preserves_dep_when_length_minus_unknown() {
 
 #[test]
 fn vardef_expr_param_preserves_pair_deps() {
-    // Regression: passing an unknown pair through a vardef expr parameter
-    // must preserve equation deps so the solver can determine the variable.
+    // Regression: vardef expr parameters must preserve equation deps for unknown pairs
     let mut interp = TestInterp::new();
     interp.run(
         "vardef assign(expr m, v) = m = v enddef;
@@ -189,8 +188,6 @@ fn vardef_expr_param_preserves_pair_deps() {
 
 #[test]
 fn vardef_expr_param_preserves_numeric_deps() {
-    // Passing an unknown numeric through a vardef expr parameter must
-    // preserve its dependency so the equation solver can determine it.
     let mut interp = TestInterp::new();
     interp.run(
         "vardef assign(expr m, v) = m = v enddef;
@@ -208,8 +205,7 @@ fn vardef_expr_param_preserves_numeric_deps() {
 
 #[test]
 fn vardef_expr_param_chained_pair_equations() {
-    // Regression for example 177: a system of linear pair equations where
-    // all unknowns pass through vardef expr parameters.
+    // Regression for example 177: all unknowns pass through vardef expr parameters.
     //   bar(A, P0, P4, B)  =>  A = 1/3*P0 + 1/3*P4 + 1/3*B
     //   bar(B, A,  P1, C)  =>  B = 1/3*A  + 1/3*P1 + 1/3*C
     //   bar(C, B,  P2, P3) =>  C = 1/3*B  + 1/3*P2 + 1/3*P3
@@ -226,11 +222,8 @@ fn vardef_expr_param_chained_pair_equations() {
 
     interp.assert_no_errors();
 
-    // Verify that all three pairs are known (not (0,0) placeholders).
     let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show messages, got: {infos:?}");
-    // None of the solved pairs should be (0,0) — that would indicate
-    // deps were lost and the solver couldn't determine the variables.
     for info in &infos {
         assert!(
             !info.contains("(0,0)"),
@@ -241,7 +234,7 @@ fn vardef_expr_param_chained_pair_equations() {
 
 #[test]
 fn def_expr_param_preserves_pair_deps() {
-    // Same as the vardef test, but with `def` (no group scope).
+    // Same as the vardef test, but with `def` (no group scope)
     let mut interp = TestInterp::new();
     interp.run(
         "def assign(expr m, v) = m = v enddef;
@@ -259,7 +252,6 @@ fn def_expr_param_preserves_pair_deps() {
 
 #[test]
 fn undelimited_expr_param_preserves_pair_deps() {
-    // Undelimited primary/expr params also need dep preservation.
     let mut interp = TestInterp::new();
     interp.run(
         "def assign(expr m) primary v = m = v enddef;
@@ -400,7 +392,7 @@ fn whatever_perpendicular_bisectors_solve_circumcenter() {
 
 #[test]
 fn collective_pair_subscript_works_in_for_sum_expression() {
-    // Regression from examples 133/134: summing A[i] must stay pair arithmetic.
+    // Regression from examples 133/134: summing A[i] must stay pair arithmetic
     let mut interp = Interpreter::new();
     let result = interp.run(concat!(
         "numeric n; n := 3;\n",
@@ -412,12 +404,9 @@ fn collective_pair_subscript_works_in_for_sum_expression() {
     assert!(result.is_ok(), "expected run to succeed, got: {result:?}");
 }
 
-// Equation solving with transitive dependencies
-
 #[test]
 fn nonlinear_equation_does_not_assign_bindable_lhs() {
-    // Regression: nonlinear equations like `z = x*y` must not silently
-    // degrade into assignment (`z := 0`) when dependency tracking is absent.
+    // Regression: nonlinear equations like `z = x*y` must not silently degrade into `z := 0`
     let mut interp = TestInterp::new();
     interp.run("numeric x, y, z; z = x*y;");
 
@@ -446,7 +435,6 @@ fn nonlinear_equation_does_not_assign_bindable_lhs() {
 
 #[test]
 fn transitive_equations_solve_correctly() {
-    // x + y = 5; y + z = 7; x = 1 => y = 4, z = 3
     let mut interp = TestInterp::new();
     interp.run("numeric x, y, z; x + y = 5; y + z = 7; x = 1; show y; show z;");
     let infos = interp.shows();
@@ -461,13 +449,12 @@ fn transitive_equations_solve_correctly() {
 }
 
 // -----------------------------------------------------------------------
-// Regression tests for recent parser/interpreter bugs
+// Parser/interpreter regressions
 // -----------------------------------------------------------------------
 
 #[test]
 fn implicit_mul_scales_pair_dependencies() {
-    // Regression: implicit multiplication (3z) must scale pair dependencies,
-    // not just the computed placeholder value.
+    // Regression: implicit multiplication (3z) must scale pair deps, not just the placeholder value
     let mut interp = TestInterp::new();
     interp.run("pair z; 3z = (6,9); show z;");
 
@@ -520,13 +507,8 @@ fn nonlinear_equation_without_bindable_lhs_reports_error() {
     );
 }
 
-// -----------------------------------------------------------------------
-// Regression: numeric equations inside for-loops must work.
-//
-// For-loop variables stored as capsules previously had dep:None, causing
-// the equation solver to silently skip `x = <loop-var>`.  Now capsules
-// carry dep = const_dep(v) so equations resolve correctly.
-// -----------------------------------------------------------------------
+// Regression: for-loop capsules had dep None, so the solver silently skipped `x = <loop-var>`.
+// Capsules now carry dep = const_dep(v).
 
 #[test]
 fn for_loop_numeric_equation() {
@@ -548,8 +530,7 @@ fn for_loop_numeric_equation() {
 }
 
 // ---------------------------------------------------------------------------
-// Compound-type pins (pair/color/transform behavior guarded before the
-// component-generic equation refactor)
+// Compound-type pins (pair/color/transform) guarded before the equation refactor
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -596,7 +577,7 @@ fn transform_equation_with_known_rhs_solves() {
     interp
         .run("input plain; transform T; T = identity shifted (1, 2); show xpart T; show yxpart T;");
     interp.assert_no_errors();
-    // First show is plain.mp's preload banner; take the last two.
+    // First show is plain.mp's preload banner; take the last two
     let shows = interp.shows();
     let [xpart, yxpart] = shows[shows.len() - 2..] else {
         panic!("expected two shows, got {shows:?}");
@@ -622,7 +603,7 @@ fn pair_inconsistent_equation_reports_residual_per_component() {
             .any(|e| e.message.contains("Inconsistent") && e.message.contains("(y)")),
         "missing y-component inconsistency: {errors:?}"
     );
-    // First value wins; the second equation is rejected.
+    // First value wins; the second equation is rejected
     assert!(interp.first_show().contains("(1,2)"));
 }
 
@@ -637,8 +618,8 @@ fn equation_chain_equates_all_lhs_to_final_rhs() {
 
 #[test]
 fn color_ring_equation_links_components() {
-    // Regression: `a = b` with both colors unknown used to yield (0,0,0)
-    // silently; component-wise solving links the component variables.
+    // Regression: `a = b` with both colors unknown silently yielded (0,0,0).
+    // Component-wise solving links the component variables.
     let mut interp = TestInterp::new();
     interp.run("color a, b; a = b; b = (0.1, 0.2, 0.3); show a;");
     interp.assert_no_errors();
@@ -651,8 +632,7 @@ fn color_ring_equation_links_components() {
 
 #[test]
 fn transform_ring_equation_links_components() {
-    // Regression: `S = T` with both transforms unknown used to yield an
-    // all-zero transform silently.
+    // Regression: `S = T` with both transforms unknown silently yielded an all-zero transform
     let mut interp = TestInterp::with_plain_mp();
     interp.run(
         "input plain; transform S, T; S = T; T = identity scaled 2; \
@@ -669,7 +649,7 @@ fn transform_ring_equation_links_components() {
 
 #[test]
 fn negated_compound_variable_equation() {
-    // `-a = b` must negate a's component dependencies.
+    // `-a = b` must negate a's component dependencies
     let mut interp = TestInterp::new();
     interp.run("color a, b; -a = b; b = (0.1, 0.2, 0.3); show a;");
     interp.assert_no_errors();

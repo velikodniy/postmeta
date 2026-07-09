@@ -1,4 +1,4 @@
-//! Path knot types: direction constraints and knot definitions.
+//! Path knot types: direction constraints and knot definitions
 
 use super::geometry::{Point, Scalar};
 
@@ -6,19 +6,18 @@ use super::geometry::{Point, Scalar};
 // KnotDirection — direction constraint at a path knot
 // ---------------------------------------------------------------------------
 
-/// Direction/control constraint for one side of a path knot.
+/// Direction/control constraint for one side of a path knot
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum KnotDirection {
-    /// Control point has been explicitly computed as a Bezier handle.
+    /// Control point has been explicitly computed as a Bezier handle
     Explicit(Point),
-    /// A specific direction angle in **radians**.
+    /// A specific direction angle in **radians**
     ///
-    /// Note: degrees are used externally, but angles are converted to
-    /// radians at parse time. All internal computations use radians.
+    /// Degrees are used externally; angles are converted to radians at parse time.
     Given(Scalar),
-    /// Curl parameter (default 1.0 at open-path endpoints).
+    /// Curl parameter (default 1.0 at open-path endpoints)
     Curl(Scalar),
-    /// Let the algorithm choose the direction.
+    /// Let the algorithm choose the direction
     #[default]
     Open,
 }
@@ -27,26 +26,23 @@ pub enum KnotDirection {
 // Knot
 // ---------------------------------------------------------------------------
 
-/// A single knot in a path.
-///
-/// Each knot has a point plus left (incoming) and right (outgoing)
-/// direction constraints and tension values.
+/// A single knot in a path
 #[derive(Debug, Clone, PartialEq)]
 pub struct Knot {
-    /// The on-curve point.
+    /// The on-curve point
     pub point: Point,
-    /// Incoming (left) direction constraint.
+    /// Incoming (left) direction constraint
     pub left: KnotDirection,
-    /// Outgoing (right) direction constraint.
+    /// Outgoing (right) direction constraint
     pub right: KnotDirection,
-    /// Tension on the incoming side (default 1.0; negative = "at least").
+    /// Tension on the incoming side (default 1.0; negative = "at least")
     pub left_tension: Scalar,
-    /// Tension on the outgoing side (default 1.0; negative = "at least").
+    /// Tension on the outgoing side (default 1.0; negative = "at least")
     pub right_tension: Scalar,
 }
 
 impl Knot {
-    /// Create a new knot at the given point with default (open) constraints.
+    /// Create a new knot at the given point with default (open) constraints
     #[must_use]
     pub const fn new(point: Point) -> Self {
         Self {
@@ -58,7 +54,7 @@ impl Knot {
         }
     }
 
-    /// Create a knot with explicit Bezier control points already computed.
+    /// Create a knot with explicit Bezier control points
     #[must_use]
     pub const fn with_controls(point: Point, left_cp: Point, right_cp: Point) -> Self {
         Self {

@@ -1,4 +1,4 @@
-//! `MetaPost` mathematical primitives.
+//! `MetaPost` mathematical primitives
 //!
 //! These correspond to the built-in numeric operators in the `MetaPost` engine:
 //! `sind`, `cosd`, `sqrt`, `mexp`, `mlog`, `angle`, `floor`,
@@ -7,16 +7,13 @@
 
 use crate::types::{Point, Scalar};
 
-/// `MetaPost`'s `mexp`: `mexp(x) = 2^(x/256)`.
-///
-/// `MetaPost`'s internal exponential function. The base is `2^(1/256)`.
-/// It maps 0 → 1, 256 → 2, 512 → 4, etc.
+/// `MetaPost`'s `mexp`: `mexp(x) = 2^(x/256)`, mapping 0 → 1, 256 → 2, 512 → 4
 #[must_use]
 pub fn mexp(x: Scalar) -> Scalar {
     (x / 256.0 * core::f64::consts::LN_2).exp()
 }
 
-/// `MetaPost`'s `mlog`: inverse of `mexp`, so `mlog(x) = 256 * log2(x)`.
+/// `MetaPost`'s `mlog`: inverse of `mexp`, so `mlog(x) = 256 * log2(x)`
 ///
 /// Returns 0 for non-positive input (`MetaPost` would error).
 #[must_use]
@@ -27,7 +24,7 @@ pub fn mlog(x: Scalar) -> Scalar {
     256.0 * x.log2()
 }
 
-/// Pythagorean subtraction: `a +-+ b = sqrt(a² - b²)`.
+/// Pythagorean subtraction: `a +-+ b = sqrt(a² - b²)`
 ///
 /// Returns 0 if `a² < b²`.
 #[must_use]
@@ -36,15 +33,16 @@ pub fn pyth_sub(a: Scalar, b: Scalar) -> Scalar {
     if sq <= 0.0 { 0.0 } else { sq.sqrt() }
 }
 
-/// Uniform random deviate in [0, x).
+/// Uniform random deviate in [0, x)
 ///
-/// Uses a simple xorshift for reproducibility. The `seed` is mutated.
+/// Uses a simple xorshift for reproducibility.
+/// The `seed` is mutated.
 #[expect(
     clippy::cast_precision_loss,
     reason = "precision loss is acceptable for a pseudo-random number generator"
 )]
 pub fn uniform_deviate(x: Scalar, seed: &mut u64) -> Scalar {
-    // Ensure seed is never zero (xorshift has a fixed point at 0).
+    // Ensure seed is never zero (xorshift has a fixed point at 0)
     if *seed == 0 {
         *seed = 1;
     }
@@ -55,21 +53,21 @@ pub fn uniform_deviate(x: Scalar, seed: &mut u64) -> Scalar {
     frac * x
 }
 
-/// Normal deviate (Gaussian, mean 0, standard deviation 1).
+/// Normal deviate (Gaussian, mean 0, standard deviation 1)
 ///
-/// Uses the Box-Muller transform. The `seed` is mutated.
+/// Uses the Box-Muller transform.
+/// The `seed` is mutated.
 pub fn normal_deviate(seed: &mut u64) -> Scalar {
     let u1 = uniform_deviate(1.0, seed).max(1e-30);
     let u2 = uniform_deviate(1.0, seed);
     (-2.0 * u1.ln()).sqrt() * (2.0 * core::f64::consts::PI * u2).cos()
 }
 
-/// Reduce an angle to the range (-π, π].
+/// Reduce an angle to the range (-π, π]
 #[must_use]
 pub fn normalize_angle(a: Scalar) -> Scalar {
-    // Normalize to [0, 2π).
+    // rem_euclid yields [0, 2π); shift the upper half down
     let normalized = a.rem_euclid(std::f64::consts::TAU);
-    // Shift to [-π, π].
     if normalized > std::f64::consts::PI {
         normalized - std::f64::consts::TAU
     } else {
@@ -81,18 +79,15 @@ pub fn normalize_angle(a: Scalar) -> Scalar {
 // Convex hull
 // ---------------------------------------------------------------------------
 
-/// Compute the convex hull of a set of points using Andrew's monotone chain.
+/// Compute the convex hull of a set of points using Andrew's monotone chain
 ///
-/// Points are sorted by x (then y), and the lower and upper hulls are
-/// built in a single left-to-right / right-to-left sweep, yielding the
-/// vertices in counter-clockwise order in O(n log n) time.
+/// Points are sorted by x (then y) and the lower and upper hulls are built in one sweep, yielding vertices in counter-clockwise order in O(n log n) time.
 #[must_use]
 pub fn convex_hull(points: &[Point]) -> Vec<Point> {
     if points.len() < 3 {
         return points.to_vec();
     }
 
-    // Andrew's monotone chain algorithm
     let mut sorted: Vec<Point> = points.to_vec();
     sorted.sort_by(|a, b| a.x.total_cmp(&b.x).then(a.y.total_cmp(&b.y)));
 
@@ -120,7 +115,7 @@ pub fn convex_hull(points: &[Point]) -> Vec<Point> {
     hull
 }
 
-/// 2D cross product of vectors OA and OB.
+/// 2D cross product of vectors OA and OB
 fn cross(o: Point, a: Point, b: Point) -> Scalar {
     (a - o).cross(b - o)
 }
@@ -140,11 +135,8 @@ mod tests {
 
     #[test]
     fn test_mexp_mlog() {
-        // mexp(0) = 1
         assert!((mexp(0.0) - 1.0).abs() < EPSILON);
-        // mexp(256) = 2
         assert!((mexp(256.0) - 2.0).abs() < EPSILON);
-        // mexp(512) = 4
         assert!((mexp(512.0) - 4.0).abs() < EPSILON);
     }
 
@@ -166,7 +158,6 @@ mod tests {
     fn test_pyth_sub() {
         assert!((pyth_sub(5.0, 3.0) - 4.0).abs() < EPSILON);
         assert!((pyth_sub(5.0, 4.0) - 3.0).abs() < EPSILON);
-        // When a < b, returns 0
         assert_eq!(pyth_sub(3.0, 5.0), 0.0);
     }
 
@@ -185,7 +176,6 @@ mod tests {
         let n = 10_000;
         let sum: Scalar = (0..n).map(|_| normal_deviate(&mut seed)).sum();
         let mean = sum / Scalar::from(n);
-        // Mean should be close to 0
         assert!(mean.abs() < 0.1, "mean too far from 0: {mean}");
     }
 

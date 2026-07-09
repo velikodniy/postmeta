@@ -1,9 +1,7 @@
-//! Font loading, metrics, and glyph outline extraction for `PostMeta`.
+//! Font loading, metrics, and glyph outline extraction for `PostMeta`
 //!
-//! This crate wraps `ttf-parser` to provide OpenType font support.
-//! It is intentionally independent of `postmeta-graphics` — all types
-//! are plain `f64`/`u16` values. Bridging to `PostMeta`'s graphics types
-//! happens in the consuming crates (`postmeta-core`, `postmeta-svg`).
+//! Wraps `ttf-parser` for OpenType support.
+//! Intentionally independent of `postmeta-graphics`: all types are plain `f64`/`u16`, and consuming crates bridge to graphics types.
 
 pub mod composite;
 pub mod data;

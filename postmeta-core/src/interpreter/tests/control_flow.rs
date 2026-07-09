@@ -1,4 +1,4 @@
-//! Conditionals and loops: if/elseif, for, forever/exitif, forsuffixes.
+//! Conditionals and loops: if/elseif, for, forever/exitif, forsuffixes
 
 use super::helpers::TestInterp;
 
@@ -21,7 +21,6 @@ fn eval_if_false_else() {
 #[test]
 fn eval_if_false_no_else() {
     let mut interp = TestInterp::new();
-    // `if false: show 1; fi; show 2;` — only show 2 should execute
     interp.run("if false: show 1; fi; show 2;");
     assert_eq!(
         interp.shows().len(),
@@ -68,10 +67,8 @@ fn eval_for_loop() {
 
 #[test]
 fn eval_for_loop_step() {
-    // Accumulate sum inside a for loop
     let mut interp = TestInterp::new();
     interp.run("numeric s; s := 0; for i = 1, 2, 3: s := s + i; endfor; show s;");
-    // s should be 1+2+3 = 6
     let msg = interp.first_show();
     assert!(msg.contains("6"), "expected 6 in: {msg}");
 }
@@ -123,9 +120,8 @@ fn exitif_outside_loop_does_not_leak_into_future_forever() {
 
 #[test]
 fn exitif_in_for_step_until_stops_loop() {
-    // `exitif` inside a `for step until` loop must stop iteration.
-    // Regression: previously, `for` pre-pushed all iterations so `exitif`
-    // had no loop frame to set the exit flag on.
+    // Regression: `for` pre-pushed all iterations.
+    // `exitif` then had no loop frame to set the exit flag on.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "numeric t;\n",
@@ -142,8 +138,8 @@ fn exitif_in_for_step_until_stops_loop() {
 
 #[test]
 fn nested_forever_loops_keep_outer_replay_state() {
-    // Regression: nested `forever` loops used a single pending body slot,
-    // so an inner loop could clobber outer replay state.
+    // Regression: nested `forever` loops shared one pending body slot.
+    // An inner loop could clobber outer replay state.
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "numeric nouter; nouter := 0;\n",
@@ -160,8 +156,7 @@ fn nested_forever_loops_keep_outer_replay_state() {
 
 #[test]
 fn nested_forever_exitif_equals_is_comparison() {
-    // Regression: `exitif i = 2` inside expansion context must be parsed
-    // as a boolean comparison, not statement equation semantics.
+    // Regression: `exitif i = 2` must parse `=` as comparison, not equation
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "numeric nouter, i;\n",
@@ -191,7 +186,6 @@ fn nested_forever_exitif_equals_is_comparison() {
 #[test]
 fn for_step_until() {
     let mut interp = TestInterp::new();
-    // Sum 1 through 5
     interp.run("numeric s; s := 0; for k=1 step 1 until 5: s := s + k; endfor; show s;");
     let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
@@ -200,7 +194,6 @@ fn for_step_until() {
 #[test]
 fn for_step_until_by_two() {
     let mut interp = TestInterp::new();
-    // Sum 0, 2, 4, 6, 8, 10 = 30
     interp.run("numeric s; s := 0; for k=0 step 2 until 10: s := s + k; endfor; show s;");
     let msg = interp.first_show();
     assert!(msg.contains("30"), "expected 30 in: {msg}");
@@ -209,7 +202,6 @@ fn for_step_until_by_two() {
 #[test]
 fn for_step_until_negative() {
     let mut interp = TestInterp::new();
-    // Count down: 5, 4, 3, 2, 1 = 15
     interp.run("numeric s; s := 0; for k=5 step -1 until 1: s := s + k; endfor; show s;");
     let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
@@ -218,7 +210,7 @@ fn for_step_until_negative() {
 #[test]
 fn for_step_until_accepts_assignment_syntax() {
     let mut interp = TestInterp::new();
-    // MetaPost allows both `for k=...` and `for k:=...`.
+    // MetaPost allows both `for k=...` and `for k:=...`
     interp.run("numeric s; s := 0; for k:=1 step 1 until 5: s := s + k; endfor; show s;");
     let msg = interp.first_show();
     assert!(msg.contains("15"), "expected 15 in: {msg}");
@@ -230,7 +222,6 @@ fn for_step_until_accepts_assignment_syntax() {
 
 #[test]
 fn for_as_expression_sum() {
-    // `for i=1,2,3: i + endfor 0` should evaluate to 6
     let mut interp = TestInterp::new();
     interp.run("show for i=1,2,3: i + endfor 0;");
     let msg = interp.first_show();
@@ -239,8 +230,7 @@ fn for_as_expression_sum() {
 
 #[test]
 fn nested_for_substitutes_outer_loop_variable() {
-    // Regression: outer `for` variables must substitute inside nested
-    // loop bodies (example 132 relies on this).
+    // Regression from example 132: outer loop variables must substitute in nested loop bodies
     let mut interp = TestInterp::new();
     interp.run("for i=1 step 1 until 2: for j=1 step 1 until 2: show i; endfor; endfor;");
 
@@ -255,8 +245,6 @@ fn nested_for_substitutes_outer_loop_variable() {
 
 #[test]
 fn nested_for_same_name_shadows_outer_loop_variable() {
-    // Guardrail: if an inner loop reuses the same variable name, it
-    // should shadow the outer loop variable.
     let mut interp = TestInterp::new();
     interp.run("for i=1 step 1 until 2: for i=10 step 1 until 11: show i; endfor; endfor;");
 
@@ -271,7 +259,6 @@ fn nested_for_same_name_shadows_outer_loop_variable() {
 
 #[test]
 fn forsuffixes_iterates_suffixes() {
-    // forsuffixes should iterate over suffix values
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "numeric a.x, a.y, a.z;\n",
@@ -290,8 +277,6 @@ fn forsuffixes_iterates_suffixes() {
 
 #[test]
 fn for_loop_implicit_multiplication() {
-    // `for i=0 step 1 until 2: show 72i; endfor`
-    // should produce 0, 72, 144 via implicit multiplication 72*i
     let mut interp = TestInterp::new();
     interp.run("for i=0 step 1 until 2: show 72i; endfor;");
     let infos = interp.shows();
@@ -305,7 +290,6 @@ fn for_loop_implicit_multiplication() {
 
 #[test]
 fn for_step_until_zero_step_no_hang() {
-    // Zero step should produce no iterations (avoids infinite loop)
     let mut interp = TestInterp::new();
     interp.run("for i=1 step 0 until 5: show i; endfor;");
     let infos = interp.shows();
@@ -314,7 +298,6 @@ fn for_step_until_zero_step_no_hang() {
 
 #[test]
 fn for_step_until_inclusive_endpoint() {
-    // `for i=0 step 1 until 3` should include i=3
     let mut interp = TestInterp::new();
     interp.run("for i=0 step 1 until 3: show i; endfor;");
     let infos = interp.shows();
@@ -327,7 +310,6 @@ fn for_step_until_inclusive_endpoint() {
 
 #[test]
 fn for_step_until_negative_direction() {
-    // `for i=3 step -1 until 1` should produce 3,2,1
     let mut interp = TestInterp::new();
     interp.run("for i=3 step -1 until 1: show i; endfor;");
     let infos = interp.shows();
@@ -340,7 +322,7 @@ fn for_step_until_negative_direction() {
 
 #[test]
 fn for_step_until_fractional_inclusive() {
-    // `for i=0 step 0.1 until 0.3` should include 0.3 (within tolerance)
+    // The 0.3 endpoint must be included despite floating-point step accumulation
     let mut interp = TestInterp::new();
     interp.run("for i=0 step 0.1 until 0.3: show i; endfor;");
     let infos = interp.shows();
@@ -353,7 +335,6 @@ fn for_step_until_fractional_inclusive() {
 
 #[test]
 fn for_step_until_wrong_direction_no_iterations() {
-    // `for i=1 step -1 until 5` goes the wrong way: should produce no iterations
     let mut interp = TestInterp::new();
     interp.run("for i=1 step -1 until 5: show i; endfor;");
     let infos = interp.shows();

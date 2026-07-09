@@ -1,9 +1,8 @@
 use postmeta_fonts::OutlineSink;
 
-/// Collects glyph outline commands into an SVG `d` attribute string.
+/// Collects glyph outline commands into an SVG `d` attribute string
 ///
-/// Coordinates are in font design units (Y-up), matching the `<symbol>`
-/// coordinate space. The per-glyph `<use>` element applies scaling.
+/// Coordinates stay in font design units (Y-up) to match the `<symbol>` space; the per-glyph `<use>` element applies the scaling.
 pub struct SvgOutlineSink {
     d: String,
     precision: usize,

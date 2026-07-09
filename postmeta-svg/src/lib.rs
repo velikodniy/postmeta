@@ -1,4 +1,4 @@
-//! SVG renderer for `PostMeta` pictures.
+//! SVG renderer for `PostMeta` pictures
 //!
 //! Converts a [`Picture`] into an SVG [`Document`] using the `svg` crate.
 
@@ -20,35 +20,31 @@ use svg::Document;
 
 pub use options::{RenderOptions, TextMode};
 
-/// Render a [`Picture`] to an SVG [`Document`].
+/// Render a [`Picture`] to an SVG [`Document`]
 ///
-/// Uses default options and no font provider (text is rendered as raw
-/// `<text>` elements).
+/// Uses default options and no font provider, so text becomes raw `<text>` elements.
 #[must_use]
 pub fn render(picture: &Picture) -> Document {
     render_with_options(picture, &RenderOptions::default())
 }
 
-/// Render a [`Picture`] to an SVG string.
+/// Render a [`Picture`] to an SVG string
 #[must_use]
 pub fn render_to_string(picture: &Picture) -> String {
     render(picture).to_string()
 }
 
-/// Render a [`Picture`] to an SVG [`Document`] with custom options.
+/// Render a [`Picture`] to an SVG [`Document`] with custom options
 ///
-/// Backward-compatible: no font provider, text rendered as `<text>`.
+/// No font provider is used, so text becomes raw `<text>` elements.
 #[must_use]
 pub fn render_with_options(picture: &Picture, opts: &RenderOptions) -> Document {
     render_with_fonts(picture, opts, None)
 }
 
-/// Render a [`Picture`] to an SVG [`Document`] with custom options and
-/// an optional font provider.
+/// Render a [`Picture`] to an SVG [`Document`] with custom options and an optional font provider
 ///
-/// This is the primary entry point when font-aware rendering is desired.
-/// Pass `None` for the font provider to get the same behavior as
-/// [`render_with_options`].
+/// This is the primary entry point for font-aware rendering; passing `None` behaves like [`render_with_options`].
 #[must_use]
 pub fn render_with_fonts(
     picture: &Picture,

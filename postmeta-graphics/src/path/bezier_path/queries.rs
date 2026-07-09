@@ -1,19 +1,18 @@
-//! Path query operations on [`BezierPath`]: point/direction evaluation,
-//! arc length, turning number, and control-point access at a time.
+//! Path query operations on [`BezierPath`]: point/direction evaluation, arc length, turning number, and control-point access at a time
 
 use super::BezierPath;
 use super::numeric::{bernstein_eval, bisect_arc_length, find_bernstein_roots, time_to_seg_frac};
 use crate::types::{EPSILON, Point, Scalar, Vec2, index_to_scalar};
 
-/// Number of subdivision steps per cubic segment for turning number.
+/// Number of subdivision steps per cubic segment for turning number
 const TURNING_STEPS: usize = 64;
 const TURNING_STEPS_F: Scalar = 64.0;
 
 impl BezierPath {
-    /// Get the point at time `t` on the path.
+    /// Get the point at time `t` on the path
     ///
-    /// `t` ranges from 0 to `num_segments()`. Integer values correspond
-    /// to knot points. Fractional values interpolate along the cubic segment.
+    /// `t` ranges from 0 to `num_segments()`.
+    /// Integer values correspond to knot points; fractional values interpolate along the cubic segment.
     #[must_use]
     pub fn point_at(&self, t: Scalar) -> Point {
         if self.points.is_empty() {
@@ -26,7 +25,7 @@ impl BezierPath {
         self.segment(seg).point_at(frac)
     }
 
-    /// Get the tangent direction at time `t` on the path.
+    /// Get the tangent direction at time `t` on the path
     #[must_use]
     pub fn direction_at(&self, t: Scalar) -> Vec2 {
         if self.points.is_empty() {
@@ -39,17 +38,15 @@ impl BezierPath {
         self.segment(seg).direction_at(frac)
     }
 
-    /// Find the first time at which the tangent matches a given direction.
+    /// Find the first time at which the tangent matches a given direction
     ///
-    /// The tangent derivative of each cubic segment is a degree-2 Bernstein
-    /// polynomial. Rotating so that `dir` maps to the positive x-axis
-    /// reduces the problem to finding roots of the y-component, which is
-    /// solved via the quadratic formula. Returns `None` if no match exists.
+    /// The tangent derivative of each cubic segment is a degree-2 Bernstein polynomial.
+    /// Rotating so that `dir` maps to the positive x-axis reduces the problem to finding roots of the y-component, solved via the quadratic formula.
+    /// Returns `None` if no match exists.
     #[must_use]
     pub fn direction_time(&self, dir: Vec2) -> Option<Scalar> {
-        // Zero direction matches immediately.
         if dir.x.abs() < EPSILON && dir.y.abs() < EPSILON {
-            return Some(0.0);
+            return Some(0.0); // zero direction matches immediately
         }
 
         let n = self.num_segments();
@@ -57,7 +54,7 @@ impl BezierPath {
             return None;
         }
 
-        // Normalize direction for rotation.
+        // Normalize direction for rotation
         let len = dir.x.hypot(dir.y);
         let (dx, dy) = (dir.x / len, dir.y / len);
 
@@ -78,12 +75,12 @@ impl BezierPath {
             let rx2 = d2.x.mul_add(dx, d2.y * dy);
             let rx3 = d3.x.mul_add(dx, d3.y * dy);
 
-            // Check t=0: if tangent is zero or matches direction
+            // t=0: tangent is zero or already matches direction
             if ry1.abs() < EPSILON && rx1 >= -EPSILON {
                 return Some(index_to_scalar(i));
             }
 
-            // Find roots of B(ry1, ry2, ry3; t) = 0 in [0,1].
+            // Find roots of B(ry1, ry2, ry3; t) = 0 in [0,1]
             for t in find_bernstein_roots(ry1, ry2, ry3) {
                 if (0.0..=1.0).contains(&t) {
                     let rx = bernstein_eval(rx1, rx2, rx3, t);
@@ -97,18 +94,16 @@ impl BezierPath {
         None
     }
 
-    /// Total arc length of the path.
+    /// Total arc length of the path
     #[must_use]
     pub fn arc_length(&self) -> Scalar {
         self.segments().map(|s| s.arc_length()).sum()
     }
 
-    /// Find the time parameter at which the cumulative arc length from the
-    /// start of the path equals `target`.
+    /// Find the time parameter at which the cumulative arc length from the start of the path equals `target`
     ///
-    /// Returns a MetaPost-style time (integer part = segment index, fractional
-    /// part = position within that segment). If `target` exceeds the total arc
-    /// length, returns `num_segments()`. If `target <= 0`, returns 0.
+    /// Returns a `MetaPost`-style time (integer part = segment index, fractional part = position within that segment).
+    /// If `target` exceeds the total arc length, returns `num_segments()`; if `target <= 0`, returns 0.
     #[must_use]
     pub fn arc_time(&self, target: Scalar) -> Scalar {
         let n = self.num_segments();
@@ -130,16 +125,13 @@ impl BezierPath {
             remaining -= seg_len;
         }
 
-        // Target exceeds total arc length.
-        index_to_scalar(n)
+        index_to_scalar(n) // target exceeds total arc length
     }
 
-    /// Compute the turning number (winding count) of a cyclic path.
+    /// Compute the turning number (winding count) of a cyclic path
     ///
-    /// Accumulates the total signed angular change of the tangent vector
-    /// around the curve and divides by 2*pi. Returns +1 for
-    /// counterclockwise simple closed curves, -1 for clockwise, and 0
-    /// for non-cyclic or degenerate paths.
+    /// Accumulates the total signed angular change of the tangent vector around the curve and divides by 2*pi.
+    /// Returns +1 for counterclockwise simple closed curves, -1 for clockwise, and 0 for non-cyclic or degenerate paths.
     #[must_use]
     pub fn turning_number(&self) -> Scalar {
         if !self.is_cyclic || self.points.len() < 2 {
@@ -153,11 +145,10 @@ impl BezierPath {
 
         let mut total_angle: Scalar = 0.0;
 
-        // Get initial direction from the first segment.
         let first_seg = self.segment(0);
         let mut prev_dir = first_seg.direction_at(0.0);
 
-        // If the direction is zero (degenerate), try a small offset.
+        // Degenerate zero direction: try a small offset
         if prev_dir.x.abs() < EPSILON && prev_dir.y.abs() < EPSILON {
             prev_dir = first_seg.direction_at(1e-6);
         }
@@ -183,7 +174,7 @@ impl BezierPath {
         (total_angle / (2.0 * std::f64::consts::PI)).round()
     }
 
-    /// Get the precontrol (incoming control) point at time `t`.
+    /// Get the precontrol (incoming control) point at time `t`
     ///
     /// For integer times, returns the precontrol of that knot.
     /// For fractional times, splits the segment and returns the inserted precontrol.
@@ -199,11 +190,11 @@ impl BezierPath {
         let (seg, frac) = time_to_seg_frac(t, n);
 
         if frac.abs() < EPSILON {
-            // At a knot point — return the precontrol of that knot.
+            // At a knot point: return its precontrol
             if !self.is_cyclic && seg == 0 {
                 return self.points[0];
             }
-            // The precontrol of knot `seg` is the `pre` of the preceding segment.
+            // The precontrol of knot `seg` is the `pre` of the preceding segment
             let prev_seg = if seg == 0 { n - 1 } else { seg - 1 };
             self.controls[prev_seg].pre
         } else {
@@ -213,7 +204,7 @@ impl BezierPath {
         }
     }
 
-    /// Get the postcontrol (outgoing control) point at time `t`.
+    /// Get the postcontrol (outgoing control) point at time `t`
     ///
     /// For integer times, returns the postcontrol of that knot.
     /// For fractional times, splits the segment and returns the inserted postcontrol.
@@ -229,7 +220,7 @@ impl BezierPath {
         let (seg, frac) = time_to_seg_frac(t, n);
 
         if frac.abs() < EPSILON {
-            // At a knot point — return the postcontrol of that knot.
+            // At a knot point: return its postcontrol
             let knot_idx = seg % self.points.len();
             if !self.is_cyclic && knot_idx == self.points.len() - 1 {
                 return self.points[knot_idx];
@@ -253,7 +244,7 @@ mod tests {
     use super::*;
     use crate::test_helpers;
 
-    /// Helper: build a cyclic square `BezierPath` with straight-line controls.
+    /// Build a cyclic square `BezierPath` with straight-line controls
     fn make_square_bezier() -> BezierPath {
         let pts = [
             Point::new(0.0, 0.0),
@@ -443,11 +434,11 @@ mod tests {
     fn precontrol_at_open_endpoints() {
         let bp = test_helpers::line();
 
-        // Precontrol at t=0 on open path should be the point itself
+        // t=0 on an open path: the precontrol is the point itself
         let pre0 = bp.precontrol_at(0.0);
         assert!((pre0.x - 0.0).abs() < EPSILON, "expected 0, got {}", pre0.x);
 
-        // Precontrol at t=1 should be the pre control of segment 0
+        // t=1: the pre control of segment 0
         let pre1 = bp.precontrol_at(1.0);
         assert!(
             (pre1.x - 20.0 / 3.0).abs() < EPSILON,
@@ -460,7 +451,7 @@ mod tests {
     fn postcontrol_at_open_endpoints() {
         let bp = test_helpers::line();
 
-        // Postcontrol at t=0 should be the post control of segment 0
+        // t=0: the post control of segment 0
         let post0 = bp.postcontrol_at(0.0);
         assert!(
             (post0.x - 10.0 / 3.0).abs() < EPSILON,
@@ -468,7 +459,7 @@ mod tests {
             post0.x
         );
 
-        // Postcontrol at t=1 (last knot, open path) should be the point itself
+        // t=1 (last knot, open path): the point itself
         let post1 = bp.postcontrol_at(1.0);
         assert!(
             (post1.x - 10.0).abs() < EPSILON,
@@ -480,10 +471,9 @@ mod tests {
     #[test]
     fn precontrol_at_fractional_time() {
         let bp = test_helpers::line();
-        // At fractional time, precontrol is from splitting the segment
+        // Fractional time: precontrol comes from splitting the segment; for a
+        // straight line the split at 0.5 gives a precontrol near the midpoint
         let pre_half = bp.precontrol_at(0.5);
-        // For a straight line, the split at 0.5 should give a precontrol
-        // near the midpoint on the left side
         assert!(pre_half.x > 0.0 && pre_half.x < 10.0);
     }
 
@@ -497,7 +487,7 @@ mod tests {
     #[test]
     fn precontrol_at_cyclic_knot() {
         let bp = test_helpers::triangle();
-        // Precontrol at t=0 on cyclic path uses the pre of segment n-1
+        // t=0 on a cyclic path uses the pre of segment n-1
         let pre0 = bp.precontrol_at(0.0);
         let expected = bp.segment_controls(2).pre;
         assert!(

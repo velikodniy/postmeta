@@ -1,4 +1,4 @@
-//! The `input` statement and the FileSystem trait wiring.
+//! The `input` statement and `FileSystem` trait wiring
 
 use crate::interpreter::Interpreter;
 
@@ -7,7 +7,6 @@ use super::helpers::TestInterp;
 #[test]
 fn eval_input_file_not_found() {
     let mut interp = TestInterp::new();
-    // Should report error but not crash
     interp.run("input nonexistent;");
     assert!(
         interp

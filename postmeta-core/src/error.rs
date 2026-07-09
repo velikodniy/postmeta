@@ -1,4 +1,4 @@
-//! Error types for the `MetaPost` parser and interpreter.
+//! Error types for the `MetaPost` parser and interpreter
 
 use std::fmt;
 
@@ -8,16 +8,16 @@ use crate::token::Span;
 // Error severity
 // ---------------------------------------------------------------------------
 
-/// Severity level for diagnostics.
+/// Severity level for diagnostics
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
-    /// Informational message (e.g. tracing output).
+    /// Informational message (e.g. tracing output)
     Info,
-    /// Warning (execution continues).
+    /// Warning (execution continues)
     Warning,
-    /// Error (execution may continue with recovery).
+    /// Error (execution may continue with recovery)
     Error,
-    /// Fatal error (execution stops).
+    /// Fatal error (execution stops)
     Fatal,
 }
 
@@ -25,21 +25,16 @@ pub enum Severity {
 // Error type
 // ---------------------------------------------------------------------------
 
-/// An error produced by the `MetaPost` parser or interpreter.
+/// An error produced by the `MetaPost` parser or interpreter
 #[derive(Debug, Clone)]
 pub struct InterpreterError {
-    /// What went wrong.
     pub kind: ErrorKind,
-    /// Human-readable message.
     pub message: String,
-    /// Source location, if available.
     pub span: Option<Span>,
-    /// Severity.
     pub severity: Severity,
 }
 
 impl InterpreterError {
-    /// Create a new error.
     #[must_use]
     pub fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self {
@@ -50,14 +45,12 @@ impl InterpreterError {
         }
     }
 
-    /// Attach a source span.
     #[must_use]
     pub const fn with_span(mut self, span: Span) -> Self {
         self.span = Some(span);
         self
     }
 
-    /// Set severity.
     #[must_use]
     pub const fn with_severity(mut self, severity: Severity) -> Self {
         self.severity = severity;
@@ -80,57 +73,46 @@ impl std::error::Error for InterpreterError {}
 // Error kinds
 // ---------------------------------------------------------------------------
 
-/// Categories of errors.
+/// Categories of errors
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     // -- Scan errors --
-    /// Invalid character in input.
     InvalidCharacter,
-    /// Unterminated string literal.
     UnterminatedString,
 
     // -- Parse errors --
-    /// Unexpected token.
     UnexpectedToken,
-    /// Missing expected token.
     MissingToken,
-    /// Unbalanced delimiters.
     UnbalancedDelimiter,
-    /// Invalid path expression.
     InvalidPath,
-    /// Expression error.
     InvalidExpression,
 
     // -- Type errors --
-    /// Wrong type for operation.
+    /// Wrong type for an operation
     TypeError,
-    /// Incompatible types in equation.
+    /// Incompatible types in an equation
     IncompatibleTypes,
 
     // -- Equation errors --
-    /// Inconsistent equation (e.g. `0 = 1`).
+    /// Inconsistent equation (e.g. `0 = 1`)
     InconsistentEquation,
-    /// Redundant equation (e.g. `x = x`).
+    /// Redundant equation (e.g. `x = x`)
     RedundantEquation,
 
     // -- Runtime errors --
-    /// Undefined variable used.
     UndefinedVariable,
-    /// Division by zero or similar.
+    /// Division by zero or similar
     ArithmeticError,
-    /// Macro expansion error.
     MacroError,
-    /// Overflow (too many equations, recursion depth, etc.).
+    /// Overflow (too many equations, recursion depth, etc.)
     Overflow,
-    /// File I/O error.
     IoError,
 
     // -- Control flow --
-    /// `exitif` outside of a loop.
+    /// `exitif` outside of a loop
     BadExitIf,
 
     // -- Internal --
-    /// Internal error (should not happen).
     Internal,
 }
 
@@ -159,7 +141,7 @@ impl fmt::Display for ErrorKind {
     }
 }
 
-/// Convenience type alias for results using [`InterpreterError`].
+/// Result alias using [`InterpreterError`]
 pub type InterpResult<T> = Result<T, InterpreterError>;
 
 // ---------------------------------------------------------------------------

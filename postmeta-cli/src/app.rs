@@ -1,4 +1,4 @@
-//! Application orchestration: run the interpreter and write SVG output.
+//! Application orchestration: run the interpreter and write SVG output
 
 use std::env;
 use std::fs;
@@ -13,16 +13,14 @@ use crate::args::Cli;
 use crate::fonts::build_font_provider;
 use crate::fs::{OsFileSystem, read_source};
 
-/// Run the CLI: interpret the program and write SVG output.
+/// Run the CLI: interpret the program and write SVG output
 ///
-/// Returns the process exit code (0 on success, 1 on error).
+/// Returns the process exit code: 0 on success, 1 on error.
 pub fn run(cli: &Cli) -> u8 {
     let mut interp = Interpreter::new();
 
-    // Build search directories for input files
     let mut search_dirs = Vec::new();
 
-    // Add the directory containing the input file
     if let Some(ref file) = cli.file {
         let stem = Path::new(file)
             .file_stem()
@@ -35,15 +33,13 @@ pub fn run(cli: &Cli) -> u8 {
         }
     }
 
-    // Add current directory
     if let Ok(cwd) = env::current_dir() {
         search_dirs.push(cwd);
     }
 
-    // Add the standard library directory (lib/ relative to the executable)
+    // lib/ relative to the executable, tried at several common install layouts
     if let Ok(exe) = env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            // Try several common locations for the standard library
             for relative in &["../lib", "../../lib", "lib"] {
                 let lib_dir = exe_dir.join(relative);
                 if lib_dir.is_dir() {
@@ -55,7 +51,6 @@ pub fn run(cli: &Cli) -> u8 {
 
     interp.set_filesystem(Box::new(OsFileSystem::new(search_dirs)));
 
-    // Build the font provider.
     let fonts: Arc<dyn FontProvider> = match build_font_provider(&cli.font_dirs) {
         Ok(provider) => Arc::new(provider),
         Err(e) => {
@@ -85,8 +80,7 @@ fn run_and_output(
 ) -> u8 {
     let run_err = interp.run(source).err();
 
-    // Always print diagnostics (messages, warnings, errors from the program)
-    // even if run() returned an error.
+    // Print program diagnostics even when run() itself returned an error
     print_diagnostics(interp);
 
     if let Some(e) = run_err {
@@ -140,7 +134,6 @@ fn write_output(
         write_svg(output_dir, &filename, &svg_str);
     }
 
-    // If no pictures shipped but current picture has content, output it
     if interp.output().is_empty() && !interp.current_picture().is_empty() {
         let svg_str = render_with_fonts(interp.current_picture(), &opts, fonts).to_string();
         let filename = format!("{}.svg", interp.job_name());

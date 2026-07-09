@@ -1,8 +1,7 @@
-//! Variable storage for the `MetaPost` interpreter.
+//! Variable storage for the `MetaPost` interpreter
 //!
-//! `MetaPost` variables have a suffix-based naming system: `x`, `x1`,
-//! `x.r`, `z1r` are all distinct variables. This module provides the
-//! storage for variable values and their equation-system state.
+//! `MetaPost` variables have a suffix-based naming system: `x`, `x1`, `x.r`, `z1r` are all distinct variables.
+//! This module stores variable values and their equation-system state.
 //!
 //! Each variable is either:
 //! - **Undefined**: never mentioned
@@ -23,35 +22,35 @@ use crate::types::{Type, Value};
 // Variable state
 // ---------------------------------------------------------------------------
 
-/// The state of a numeric variable in the equation system.
+/// The state of a numeric variable in the equation system
 #[derive(Debug, Clone)]
 pub enum NumericState {
-    /// Undefined (never mentioned).
     Undefined,
-    /// Declared numeric but no constraints yet.
+    /// Declared numeric but no constraints yet
     Numeric,
-    /// Known scalar value.
     Known(Scalar),
-    /// Free variable with serial number.
-    Independent { serial: u32 },
-    /// Linear combination of independents.
+    Independent {
+        serial: u32,
+    },
     Dependent(DepList),
 }
 
-/// A stored variable value.
+/// A stored variable value
 #[derive(Debug, Clone)]
 pub enum VarValue {
-    /// Undefined.
     Undefined,
-    /// A fully-known value of any type.
+    /// A fully-known value of any type
     Known(Value),
-    /// A numeric variable in some equation state.
     NumericVar(NumericState),
-    /// A pair with two numeric sub-parts.
-    Pair { x: VarId, y: VarId },
-    /// A color with three numeric sub-parts.
-    Color { r: VarId, g: VarId, b: VarId },
-    /// A transform with six numeric sub-parts.
+    Pair {
+        x: VarId,
+        y: VarId,
+    },
+    Color {
+        r: VarId,
+        g: VarId,
+        b: VarId,
+    },
     Transform {
         tx: VarId,
         ty: VarId,
@@ -63,9 +62,9 @@ pub enum VarValue {
 }
 
 impl VarValue {
-    /// Build a compound variable value of type `ty` from component ids in
-    /// storage order. Returns `None` if `ty` is not compound or the slice
-    /// length does not match [`Type::components`].
+    /// Build a compound variable value of type `ty` from component ids in storage order
+    ///
+    /// Returns `None` if `ty` is not compound or the slice length does not match [`Type::components`].
     #[must_use]
     pub fn compound(ty: Type, parts: &[VarId]) -> Option<Self> {
         match (ty, parts) {
@@ -83,7 +82,7 @@ impl VarValue {
         }
     }
 
-    /// Component variable ids in storage order, for compound values.
+    /// Component variable ids in storage order, for compound values
     #[must_use]
     pub fn component_ids(&self) -> Option<Vec<VarId>> {
         match self {
@@ -101,7 +100,6 @@ impl VarValue {
         }
     }
 
-    /// Get the `MetaPost` type of this variable.
     #[must_use]
     pub const fn ty(&self) -> Type {
         match self {
@@ -125,38 +123,31 @@ impl VarValue {
 // Variable storage
 // ---------------------------------------------------------------------------
 
-/// Storage for all variables.
+/// Storage for all variables
 ///
-/// Variables are identified by `VarId`. The suffix tree structure from
-/// `mp.web` is simplified: we use a flat map from string keys (like
-/// `"x"`, `"x1"`, `"x.r"`) to `VarId`s, and a vec of values.
+/// Variables are identified by `VarId`. The suffix tree structure from `mp.web` is simplified to a flat map from string keys (like `"x"`, `"x1"`, `"x.r"`) to `VarId`s, plus a vec of values.
 #[derive(Debug)]
 pub struct Variables {
-    /// `VarId` → variable value.
     values: Vec<VarValue>,
-    /// Name → `VarId` mapping for root variables.
+    /// Name → `VarId` mapping for root variables
     name_to_id: HashMap<String, VarId>,
-    /// Next serial number for independent variables.
     next_serial: u32,
-    /// Reverse dependency index: independent `VarId` → set of dependent `VarId`s
-    /// that reference it. Maintained by `set()` so `apply_linear_solution` can
-    /// find affected dependents in O(k) instead of scanning all variables.
-    dep_index: HashMap<VarId, HashSet<VarId>>,
-    /// Root name → set of all full names (root + suffixes) in `name_to_id`.
-    /// Enables O(k) lookup for `take_name_bindings_for_root` and
-    /// `clear_name_bindings_for_root` instead of scanning all names.
-    names_by_root: HashMap<String, HashSet<String>>,
-    /// `SymbolId` → `VarId` fast lookup for root-only variables.
+    /// Reverse dependency index: independent `VarId` → set of dependent `VarId`s that reference it
     ///
-    /// Indexed by `SymbolId::raw()`. Entries are `VarId::new(u32::MAX)` (sentinel)
-    /// when not cached. Only individual entries are invalidated (on save/restore
-    /// and type declarations), so the cache stays warm across scopes for
-    /// variables that are not re-bound.
+    /// Maintained by `set()` so `apply_linear_solution` can find affected dependents in O(k) instead of scanning all variables.
+    dep_index: HashMap<VarId, HashSet<VarId>>,
+    /// Root name → set of all full names (root + suffixes) in `name_to_id`
+    ///
+    /// Enables O(k) lookup for `take_name_bindings_for_root` and `clear_name_bindings_for_root` instead of scanning all names.
+    names_by_root: HashMap<String, HashSet<String>>,
+    /// `SymbolId` → `VarId` fast lookup for root-only variables
+    ///
+    /// Indexed by `SymbolId::raw()`. Entries are `VarId::new(u32::MAX)` (sentinel) when not cached.
+    /// Only individual entries are invalidated (on save/restore and type declarations), so the cache stays warm across scopes for variables that are not re-bound.
     pub(crate) sym_cache: Vec<VarId>,
 }
 
 impl Variables {
-    /// Create empty variable storage.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -169,12 +160,11 @@ impl Variables {
         }
     }
 
-    /// Extract the root portion of a variable name (before the first `.` or `[`).
+    /// Extract the root portion of a variable name (before the first `.` or `[`)
     fn root_of(name: &str) -> &str {
         name.find(['.', '[']).map_or(name, |i| &name[..i])
     }
 
-    /// Record a name in the root index.
     fn add_to_root_index(&mut self, name: &str) {
         let root = Self::root_of(name).to_owned();
         self.names_by_root
@@ -183,7 +173,6 @@ impl Variables {
             .insert(name.to_owned());
     }
 
-    /// Remove a name from the root index.
     fn remove_from_root_index(&mut self, name: &str) {
         let root = Self::root_of(name);
         if let Some(set) = self.names_by_root.get_mut(root) {
@@ -194,7 +183,7 @@ impl Variables {
         }
     }
 
-    /// Allocate a new variable slot and return its id.
+    /// Allocate a new variable slot and return its id
     #[allow(clippy::cast_possible_truncation)]
     pub fn alloc(&mut self) -> VarId {
         let id = VarId::new(self.values.len() as u32);
@@ -202,7 +191,7 @@ impl Variables {
         id
     }
 
-    /// Look up or create a variable by name.
+    /// Look up or create a variable by name
     pub fn lookup(&mut self, name: &str) -> VarId {
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
@@ -213,13 +202,12 @@ impl Variables {
         id
     }
 
-    /// Sentinel value for empty/invalid sym-cache slots.
+    /// Sentinel value for empty/invalid sym-cache slots
     pub const SYM_CACHE_EMPTY: VarId = VarId::new(u32::MAX);
 
-    /// Fast O(1) variable lookup by `SymbolId` for root-only variables.
+    /// Fast O(1) variable lookup by `SymbolId` for root-only variables
     ///
-    /// Uses a vec-indexed cache that avoids all string hashing. Falls back
-    /// to the standard string-based `lookup` on cache miss.
+    /// Uses a vec-indexed cache that avoids all string hashing, falling back to the standard string-based `lookup` on cache miss.
     pub fn lookup_by_sym(&mut self, sym: SymbolId, name: &str) -> VarId {
         let idx = sym.raw() as usize;
         if idx < self.sym_cache.len() {
@@ -235,7 +223,7 @@ impl Variables {
         id
     }
 
-    /// Invalidate a single sym-cache entry for a specific symbol.
+    /// Invalidate a single sym-cache entry for a specific symbol
     pub fn invalidate_sym_cache_entry(&mut self, sym: SymbolId) {
         let idx = sym.raw() as usize;
         if idx < self.sym_cache.len() {
@@ -243,7 +231,7 @@ impl Variables {
         }
     }
 
-    /// Register a name for an existing variable id.
+    /// Register a name for an existing variable id
     ///
     /// Used when creating compound type sub-parts (e.g. `p.x`, `p.y` for a pair `p`).
     pub fn register_name(&mut self, name: &str, id: VarId) {
@@ -251,7 +239,7 @@ impl Variables {
         self.add_to_root_index(name);
     }
 
-    /// Remove a name binding and return the previously bound variable id.
+    /// Remove a name binding and return the previously bound variable id
     pub fn unbind_name(&mut self, name: &str) -> Option<VarId> {
         let result = self.name_to_id.remove(name);
         if result.is_some() {
@@ -260,16 +248,11 @@ impl Variables {
         result
     }
 
-    /// Try the fast save path for a root variable.
+    /// Try the fast save path for a root variable
     ///
-    /// If the variable is root-only (no suffixed descendants), removes the
-    /// `name_to_id` entry and returns the `(root_name, VarId, old_value)`.
-    /// The caller pushes a `RootValueOnly` save entry.
-    ///
-    /// Returns `None` if the variable has descendants or doesn't exist,
-    /// in which case the caller should fall through to the slow path.
+    /// If the variable is root-only (no suffixed descendants), removes the `name_to_id` entry and returns `(root_name, VarId, old_value)`; the caller pushes a `RootValueOnly` save entry.
+    /// Returns `None` if the variable has descendants or doesn't exist, in which case the caller falls through to the slow path.
     pub fn try_save_root_fast(&mut self, root: &str) -> Option<(String, VarId, VarValue)> {
-        // Check root-only: no suffixed descendants.
         let has_descendants = self
             .names_by_root
             .get(root)
@@ -277,20 +260,19 @@ impl Variables {
         if has_descendants {
             return None;
         }
-        // Remove name→id mapping so next reference creates a fresh variable.
-        // names_by_root is left untouched.
+        // Remove name→id mapping so next reference creates a fresh variable; names_by_root is left untouched.
         let (name, id) = self.name_to_id.remove_entry(root)?;
         let value = std::mem::replace(&mut self.values[id.index()], VarValue::Undefined);
         Some((name, id, value))
     }
 
-    /// Restore a root-only variable: put back both the value and the name→id mapping.
+    /// Restore a root-only variable: put back both the value and the name→id mapping
     pub fn restore_root_value(&mut self, root: String, id: VarId, value: VarValue) {
         self.values[id.index()] = value;
         self.name_to_id.insert(root, id);
     }
 
-    /// Remove all bindings for a root name and its suffix/subscript descendants.
+    /// Remove all bindings for a root name and its suffix/subscript descendants
     ///
     /// Examples for root `a`: `a`, `a.x`, `a[1]`, `a[1].x`.
     pub fn take_name_bindings_for_root(&mut self, root: &str) -> Vec<(String, VarId)> {
@@ -308,11 +290,10 @@ impl Variables {
         taken
     }
 
-    /// Clear a variable and all its suffixed descendants from the name table.
+    /// Clear a variable and all its suffixed descendants from the name table
     ///
-    /// For a name `"t"`, this removes `"t"`, `"t[0]"`, `"t.x"`, etc.
-    /// For a compound name `"a.b"`, it removes `"a.b"`, `"a.b[0]"`,
-    /// `"a.b.c"`, etc., but NOT `"a"` or `"a.c"`.
+    /// For a name `"t"`, removes `"t"`, `"t[0]"`, `"t.x"`, etc.
+    /// For a compound name `"a.b"`, removes `"a.b"`, `"a.b[0]"`, `"a.b.c"`, etc., but NOT `"a"` or `"a.c"`.
     pub fn clear_variable_and_descendants(&mut self, name: &str) {
         let root = Self::root_of(name);
         let Some(all_names) = self.names_by_root.get_mut(root) else {
@@ -332,12 +313,10 @@ impl Variables {
         }
     }
 
-    /// Check whether a concrete variable name matches a generic pattern.
+    /// Check whether a concrete variable name matches a generic pattern
     ///
-    /// The pattern may contain `[]` which matches any subscript like `[0]`,
-    /// `[1]`, `[-3.5]`, etc. in the concrete name.  A match means the name
-    /// is either identical to the pattern (after generic expansion), or is a
-    /// descendant of it (has additional suffix segments).
+    /// The pattern may contain `[]`, matching any subscript like `[0]`, `[1]`, `[-3.5]`, etc. in the concrete name.
+    /// A match means the name is identical to the pattern (after generic expansion), or is a descendant of it (has additional suffix segments).
     ///
     /// Examples:
     /// - pattern `"a"`, name `"a"` → match (exact)
@@ -353,8 +332,7 @@ impl Variables {
 
         loop {
             match (pi.peek(), ni.peek()) {
-                // Pattern exhausted: match if name is also done or starts a new
-                // suffix/subscript segment (descendant).
+                // Pattern exhausted: match if name is also done or starts a new suffix/subscript segment (descendant)
                 (None, None | Some(&&(b'.' | b'['))) => return true,
                 (None, _) | (Some(_), None) => return false,
                 (Some(&&b'['), _) => {
@@ -366,7 +344,6 @@ impl Variables {
                             return false; // name must have `[` here
                         }
                         ni.next(); // skip `[` in name
-                        // Skip until matching `]` in name
                         let mut found_close = false;
                         for ch in ni.by_ref() {
                             if *ch == b']' {
@@ -378,8 +355,7 @@ impl Variables {
                             return false;
                         }
                     } else {
-                        // Literal `[` in pattern (shouldn't happen for generic
-                        // patterns, but handle gracefully)
+                        // Literal `[` in pattern (shouldn't happen for generic patterns, but handle gracefully)
                         if ni.peek() != Some(&&b'[') {
                             return false;
                         }
@@ -397,7 +373,7 @@ impl Variables {
         }
     }
 
-    /// Clear current bindings for a root name and all its descendants.
+    /// Clear current bindings for a root name and all its descendants
     pub fn clear_name_bindings_for_root(&mut self, root: &str) {
         let Some(names) = self.names_by_root.remove(root) else {
             return;
@@ -408,7 +384,7 @@ impl Variables {
         }
     }
 
-    /// Restore a name binding to a previous state.
+    /// Restore a name binding to a previous state
     pub fn restore_name_binding(&mut self, name: &str, prev: Option<VarId>) {
         if let Some(id) = prev {
             self.name_to_id.insert(name.to_owned(), id);
@@ -419,13 +395,12 @@ impl Variables {
         }
     }
 
-    /// Look up a variable by name without creating it.
+    /// Look up a variable by name without creating it
     #[must_use]
     pub fn lookup_existing(&self, name: &str) -> Option<VarId> {
         self.name_to_id.get(name).copied()
     }
 
-    /// Get a variable's value.
     #[must_use]
     pub fn get(&self, id: VarId) -> &VarValue {
         let idx = id.index();
@@ -436,14 +411,14 @@ impl Variables {
         }
     }
 
-    /// Set a variable's value, maintaining the reverse dependency index.
+    /// Set a variable's value, maintaining the reverse dependency index
     pub fn set(&mut self, id: VarId, value: VarValue) {
         let idx = id.index();
         if idx >= self.values.len() {
             return;
         }
 
-        // Remove old dep-index entries for this variable.
+        // Remove old dep-index entries for this variable
         if let VarValue::NumericVar(NumericState::Dependent(ref old_dep)) = self.values[idx] {
             for term in old_dep {
                 if let Some(ref_id) = term.var_id {
@@ -457,7 +432,7 @@ impl Variables {
             }
         }
 
-        // Add new dep-index entries.
+        // Add new dep-index entries
         if let VarValue::NumericVar(NumericState::Dependent(ref new_dep)) = value {
             for term in new_dep {
                 if let Some(ref_id) = term.var_id {
@@ -469,18 +444,16 @@ impl Variables {
         self.values[idx] = value;
     }
 
-    /// Take a variable's value, replacing it with `Undefined`.
+    /// Take a variable's value, replacing it with `Undefined`
     ///
-    /// This is like `std::mem::take` — it moves the value out without cloning.
-    /// The dependency index is maintained: any dependent references from the old
-    /// value are removed.
+    /// Like `std::mem::take` — moves the value out without cloning.
+    /// The dependency index is maintained: dependent references from the old value are removed.
     pub fn take(&mut self, id: VarId) -> VarValue {
         let idx = id.index();
         if idx >= self.values.len() {
             return VarValue::Undefined;
         }
         let old = std::mem::replace(&mut self.values[idx], VarValue::Undefined);
-        // Remove old dep-index entries.
         if let VarValue::NumericVar(NumericState::Dependent(ref dep)) = old {
             for term in dep {
                 if let Some(ref_id) = term.var_id {
@@ -496,17 +469,15 @@ impl Variables {
         old
     }
 
-    /// Set a variable to a known value.
     pub fn set_known(&mut self, id: VarId, value: Value) {
         self.set(id, VarValue::Known(value));
     }
 
-    /// Set a variable to a known numeric value.
     pub fn set_numeric(&mut self, id: VarId, value: Scalar) {
         self.set(id, VarValue::NumericVar(NumericState::Known(value)));
     }
 
-    /// Make a variable independent, assigning a new serial number.
+    /// Make a variable independent, assigning a new serial number
     pub fn make_independent(&mut self, id: VarId) -> u32 {
         let serial = self.next_serial;
         self.next_serial += 1;
@@ -517,17 +488,14 @@ impl Variables {
         serial
     }
 
-    /// Make a variable dependent with the given dependency list.
     pub fn make_dependent(&mut self, id: VarId, dep: DepList) {
         self.set(id, VarValue::NumericVar(NumericState::Dependent(dep)));
     }
 
-    /// Make a variable known with a scalar value.
     pub fn make_known(&mut self, id: VarId, value: Scalar) {
         self.set(id, VarValue::NumericVar(NumericState::Known(value)));
     }
 
-    /// Get the serial number of an independent variable.
     #[must_use]
     pub fn serial(&self, id: VarId) -> Option<u32> {
         match self.get(id) {
@@ -536,10 +504,9 @@ impl Variables {
         }
     }
 
-    /// Check if a variable is unknown (undefined or declared-but-unconstrained).
+    /// Check if a variable is unknown (undefined or declared-but-unconstrained)
     ///
-    /// This includes Undefined, `NumericVar(Undefined)`, `NumericVar(Numeric)`,
-    /// and compound types whose sub-parts are all unknown.
+    /// Includes `Undefined`, `NumericVar(Undefined)`, `NumericVar(Numeric)`, and compound types whose sub-parts are all unknown.
     #[must_use]
     pub fn is_unknown(&self, id: VarId) -> bool {
         match self.get(id) {
@@ -563,7 +530,6 @@ impl Variables {
         }
     }
 
-    /// Get a known numeric value.
     #[must_use]
     #[allow(clippy::match_same_arms)]
     pub fn known_value(&self, id: VarId) -> Option<Scalar> {
@@ -574,8 +540,7 @@ impl Variables {
         }
     }
 
-    /// Apply a solved linear equation `pivot = dep` and substitute it into all
-    /// existing dependent variables that reference the pivot.
+    /// Apply a solved linear equation `pivot = dep` and substitute it into all existing dependent variables that reference the pivot
     pub fn apply_linear_solution(&mut self, pivot: VarId, dep: &DepList) {
         if let Some(v) = constant_value(dep) {
             self.make_known(pivot, v);
@@ -583,8 +548,7 @@ impl Variables {
             self.make_dependent(pivot, dep.clone());
         }
 
-        // Use the reverse dependency index to find only variables that
-        // actually reference the pivot, instead of scanning all variables.
+        // Use the reverse dependency index to find only variables that actually reference the pivot
         let dependents: Vec<VarId> = self
             .dep_index
             .get(&pivot)
@@ -613,8 +577,7 @@ impl Variables {
         }
     }
 
-    /// Allocate a compound variable of type `ty` with its component
-    /// sub-parts (allocated first, in storage order).
+    /// Allocate a compound variable of type `ty` with its component sub-parts (allocated first, in storage order)
     ///
     /// Returns `None` if `ty` is not a compound type.
     pub fn alloc_compound(&mut self, ty: Type) -> Option<(VarId, Vec<VarId>)> {
@@ -626,11 +589,11 @@ impl Variables {
         Some((compound, parts))
     }
 
-    /// Allocate a pair variable with two sub-parts.
+    /// Allocate a pair variable with two sub-parts
     pub fn alloc_pair(&mut self) -> (VarId, VarId, VarId) {
         match self.alloc_compound(Type::PairType) {
             Some((pair, parts)) if parts.len() == 2 => (pair, parts[0], parts[1]),
-            // Unreachable: PairType is compound with two components.
+            // Unreachable: PairType is compound with two components
             _ => (
                 Self::SYM_CACHE_EMPTY,
                 Self::SYM_CACHE_EMPTY,
@@ -639,13 +602,12 @@ impl Variables {
         }
     }
 
-    /// Total number of allocated variables.
     #[must_use]
     pub fn count(&self) -> usize {
         self.values.len()
     }
 
-    /// Iterate over all variable ids and their values.
+    /// Iterate over all variable ids and their values
     #[allow(clippy::cast_possible_truncation)]
     pub fn iter(&self) -> impl Iterator<Item = (VarId, &VarValue)> {
         self.values
@@ -665,64 +627,51 @@ impl Default for Variables {
 // Variable type trie
 // ---------------------------------------------------------------------------
 
-/// A node in the variable type trie.
+/// A node in the variable type trie
 ///
-/// The trie records the structure of declared variables so the scanner can
-/// determine whether a suffix token extends a variable name or starts a new
-/// syntactic construct (e.g. a macro call).
-///
-/// This is a simplified version of `mp.web`'s "suffix tree". It does NOT
-/// store values (those stay in the flat [`Variables`] map); it only tracks
-/// **what paths are declared** and their types.
+/// Records the structure of declared variables so the scanner can determine whether a suffix token extends a variable name or starts a new syntactic construct (e.g. a macro call).
+/// A simplified version of `mp.web`'s "suffix tree": it does NOT store values (those stay in the flat [`Variables`] map), only **what paths are declared** and their types.
 #[derive(Debug, Clone, Default)]
 struct TrieNode {
-    /// The type declared at this node (`Undefined` if no declaration here).
+    /// The type declared at this node (`Undefined` if no declaration here)
     ty: Type,
-    /// Named children (attribute suffixes, keyed by `SymbolId`).
+    /// Named children (attribute suffixes, keyed by `SymbolId`)
     ///
-    /// For `pair laboff.lft`, the root "laboff" node has a child keyed by
-    /// the `SymbolId` for "lft" with `ty = PairType`.
+    /// For `pair laboff.lft`, the root "laboff" node has a child keyed by the `SymbolId` for "lft" with `ty = PairType`.
     attrs: HashMap<SymbolId, Self>,
-    /// Collective subscript child (`[]`).
+    /// Collective subscript child (`[]`)
     ///
-    /// If present, any numeric subscript at this level follows this subtree
-    /// for type and structure information. For `numeric x[]`, the "x" node
-    /// has a `collective` child with `ty = Numeric`.
+    /// If present, any numeric subscript at this level follows this subtree for type and structure information.
+    /// For `numeric x[]`, the "x" node has a `collective` child with `ty = Numeric`.
     collective: Option<Box<Self>>,
 }
 
-/// Variable type trie — tracks the structure of declared variables.
+/// Variable type trie — tracks the structure of declared variables
 ///
-/// Enables the scanner to answer "is `lft` a suffix of `laboff`?" by
-/// checking whether `laboff.lft` exists as a declared path in the trie.
-/// This is the Rust equivalent of `mp.web`'s variable tree structure,
-/// but only for type/structure info (values stay in [`Variables`]).
+/// Enables the scanner to answer "is `lft` a suffix of `laboff`?" by checking whether `laboff.lft` exists as a declared path in the trie.
+/// The Rust equivalent of `mp.web`'s variable tree structure, but only for type/structure info (values stay in [`Variables`]).
 ///
 /// # Usage
 ///
-/// 1. **Type declarations** (`pair laboff.lft;`) register paths via
-///    [`declare`].
-/// 2. **Suffix scanning** uses [`has_suffix`] to check whether extending
-///    the current variable name is valid.
-/// 3. **Collective subscripts** (`numeric x[];`) register via `declare`
-///    with `None` suffix segments for `[]`.
+/// 1. **Type declarations** (`pair laboff.lft;`) register paths via [`declare`].
+/// 2. **Suffix scanning** uses [`declared_type`](Self::declared_type) to check whether extending the current variable name is valid.
+/// 3. **Collective subscripts** (`numeric x[];`) register via `declare` with `None` suffix segments for `[]`.
 #[derive(Debug, Clone, Default)]
 pub struct VarTrie {
-    /// Root nodes keyed by the root variable's `SymbolId`.
+    /// Root nodes keyed by the root variable's `SymbolId`
     roots: HashMap<SymbolId, TrieNode>,
 }
 
-/// One segment of a variable suffix path.
+/// One segment of a variable suffix path
 #[derive(Debug, Clone)]
 pub enum SuffixSegment {
-    /// A named attribute (e.g. `.lft`, `.x`, `.r`).
+    /// A named attribute (e.g. `.lft`, `.x`, `.r`)
     Attr(SymbolId),
-    /// A collective subscript (`[]`).
+    /// A collective subscript (`[]`)
     Subscript,
 }
 
 impl VarTrie {
-    /// Create an empty trie.
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -730,24 +679,19 @@ impl VarTrie {
         }
     }
 
-    /// Declare a variable path with the given type.
+    /// Declare a variable path with the given type
     ///
-    /// `root` is the `SymbolId` of the root token (e.g. "laboff").
-    /// `suffixes` is the path of suffix segments (e.g. `[Attr("lft")]`).
-    /// `ty` is the declared type (e.g. `PairType`).
-    ///
-    /// This creates all intermediate nodes as needed and sets the type
-    /// on the leaf node.
+    /// `root` is the root token's `SymbolId` (e.g. "laboff"), `suffixes` the path of suffix segments (e.g. `[Attr("lft")]`), `ty` the declared type (e.g. `PairType`).
+    /// Creates all intermediate nodes as needed and sets the type on the leaf node.
     pub fn declare(&mut self, root: SymbolId, suffixes: &[SuffixSegment], ty: Type) {
         let node = self.roots.entry(root).or_default();
         let leaf = Self::walk_or_create(node, suffixes);
         leaf.ty = ty;
     }
 
-    /// Return the declared type for an exact variable path.
+    /// Return the declared type for an exact variable path
     ///
-    /// For collective declarations like `pair A[]`, querying
-    /// `[SuffixSegment::Subscript]` on root `A` returns `Some(PairType)`.
+    /// For collective declarations like `pair A[]`, querying `[SuffixSegment::Subscript]` on root `A` returns `Some(PairType)`.
     #[must_use]
     pub fn declared_type(&self, root: SymbolId, suffixes: &[SuffixSegment]) -> Option<Type> {
         let mut node = self.roots.get(&root)?;
@@ -760,10 +704,7 @@ impl VarTrie {
         (node.ty != Type::Undefined).then_some(node.ty)
     }
 
-    /// Check whether extending a variable rooted at `root` with the given
-    /// `suffix_id` (a named attribute) would match a declared path.
-    ///
-    /// Walk or create a path in the trie, returning a mutable ref to the leaf.
+    /// Walk or create a path in the trie, returning a mutable ref to the leaf
     fn walk_or_create<'a>(node: &'a mut TrieNode, segments: &[SuffixSegment]) -> &'a mut TrieNode {
         let mut current = node;
         for seg in segments {
@@ -784,31 +725,32 @@ impl VarTrie {
 // Save stack for scoping
 // ---------------------------------------------------------------------------
 
-/// An entry on the save stack for `begingroup`/`endgroup` scoping.
+/// An entry on the save stack for `begingroup`/`endgroup` scoping
 #[derive(Debug, Clone)]
 pub enum SaveEntry {
-    /// Group boundary marker.
     Boundary,
-    /// Saved variable value.
-    Variable { id: VarId, value: VarValue },
-    /// Saved internal quantity.
-    Internal { index: u16, value: Scalar },
-    /// Saved symbol entry.
+    Variable {
+        id: VarId,
+        value: VarValue,
+    },
+    Internal {
+        index: u16,
+        value: Scalar,
+    },
     Symbol {
         id: crate::symbols::SymbolId,
         entry: crate::symbols::SymbolEntry,
     },
-    /// Saved bindings for a root name and its descendants (`a`, `a[1]`, `a.x`, ...).
+    /// Saved bindings for a root name and its descendants (`a`, `a[1]`, `a.x`, ...)
     NameBindings {
         root: String,
         sym: crate::symbols::SymbolId,
         prev: Vec<(String, VarId)>,
     },
-    /// Fast save for root-only variables (no suffixed descendants).
+    /// Fast save for root-only variables (no suffixed descendants)
     ///
-    /// Removes only the `name_to_id` mapping (not `names_by_root`),
-    /// so next reference creates a fresh variable. On restore, the
-    /// mapping is re-inserted and the old value restored.
+    /// Removes only the `name_to_id` mapping (not `names_by_root`), so next reference creates a fresh variable.
+    /// On restore, the mapping is re-inserted and the old value restored.
     RootValueOnly {
         root: String,
         sym: crate::symbols::SymbolId,
@@ -817,14 +759,13 @@ pub enum SaveEntry {
     },
 }
 
-/// The save stack for scoping.
+/// The save stack for scoping
 #[derive(Debug, Default)]
 pub struct SaveStack {
     entries: Vec<SaveEntry>,
 }
 
 impl SaveStack {
-    /// Create a new save stack.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -832,22 +773,18 @@ impl SaveStack {
         }
     }
 
-    /// Push a group boundary.
     pub fn push_boundary(&mut self) {
         self.entries.push(SaveEntry::Boundary);
     }
 
-    /// Save a variable's current value.
     pub fn save_variable(&mut self, id: VarId, value: VarValue) {
         self.entries.push(SaveEntry::Variable { id, value });
     }
 
-    /// Save an internal quantity's current value.
     pub fn save_internal(&mut self, index: u16, value: Scalar) {
         self.entries.push(SaveEntry::Internal { index, value });
     }
 
-    /// Save a symbol entry.
     pub fn save_symbol(
         &mut self,
         id: crate::symbols::SymbolId,
@@ -856,13 +793,13 @@ impl SaveStack {
         self.entries.push(SaveEntry::Symbol { id, entry });
     }
 
-    /// Save bindings for a root name and its descendants.
+    /// Save bindings for a root name and its descendants
     pub fn save_name_bindings(&mut self, root: String, sym: SymbolId, prev: Vec<(String, VarId)>) {
         self.entries
             .push(SaveEntry::NameBindings { root, sym, prev });
     }
 
-    /// Save a root-only variable (fast path — minimal `HashMap` churn).
+    /// Save a root-only variable (fast path — minimal `HashMap` churn)
     pub fn save_root_value_only(
         &mut self,
         root: String,
@@ -878,9 +815,7 @@ impl SaveStack {
         });
     }
 
-    /// Restore all entries back to the last boundary.
-    ///
-    /// Returns the list of entries to restore (in reverse order).
+    /// Restore all entries back to the last boundary, returning them in reverse order
     pub fn restore_to_boundary(&mut self) -> Vec<SaveEntry> {
         let mut restored = Vec::new();
         while let Some(entry) = self.entries.pop() {
@@ -892,7 +827,7 @@ impl SaveStack {
         restored
     }
 
-    /// Current depth (number of entries).
+    /// Current depth (number of entries)
     #[must_use]
     pub fn depth(&self) -> usize {
         self.entries.len()

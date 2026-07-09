@@ -1,9 +1,6 @@
 //! Macro expansion, conditionals, and loops.
 //!
-//! This module handles all expandable commands: `if`/`elseif`/`else`/`fi`,
-//! `for`/`forsuffixes`/`forever`/`endfor`/`exitif`, macro definitions
-//! (`def`/`vardef`/`primarydef`/`secondarydef`/`tertiarydef`), macro
-//! expansion, `input`, and `scantokens`.
+//! Handles all expandable commands: `if`/`elseif`/`else`/`fi`, `for`/`forsuffixes`/`forever`/`endfor`/`exitif`, macro definitions (`def`/`vardef`/`primarydef`/`secondarydef`/`tertiarydef`), macro expansion, `input`, and `scantokens`.
 
 use crate::command::Command;
 use crate::input::SharedTokenList;
@@ -22,38 +19,36 @@ mod macros;
 /// State of one level in the `if/elseif/else/fi` nesting stack.
 #[derive(Debug, Clone, Copy)]
 pub(super) enum IfState {
-    /// We are currently executing the active branch.
+    /// Currently executing the active branch
     Active,
-    /// A branch was already taken; skip remaining branches.
+    /// A branch was already taken; skip remaining branches
     Done,
-    /// We are skipping tokens looking for `elseif`/`else`/`fi`.
+    /// Skipping tokens looking for `elseif`/`else`/`fi`
     Skipping,
+}
+
+/// One active loop frame, pushed for each `for`/`forsuffixes`/`forever` in progress.
+#[derive(Debug, Clone)]
+pub(super) struct ForeverLoopFrame {
+    /// Loop body tokens replayed by `RepeatLoop`, with the `RepeatLoop` sentinel already appended.
+    /// Stored as `Arc` so re-iterations are O(1) clones.
+    pub body: SharedTokenList,
+    /// Whether this is a `for`/`forsuffixes` loop (vs `forever`).
+    /// When true, the loop terminates once `remaining_iterations` is exhausted.
+    pub is_for_loop: bool,
+    /// Remaining iteration parameter lists for `for`/`forsuffixes` loops, stored in reverse order so `Vec::pop()` yields the next iteration.
+    /// `forever` loops leave this empty since they replay unconditionally.
+    pub remaining_iterations: Vec<SharedTokenList>,
 }
 
 /// Groups all conditional and loop control state.
 ///
-/// Extracted from `Interpreter` to reduce the top-level field count.
-/// Only accessed by the expansion code in this module.
-#[derive(Debug, Clone)]
-pub(super) struct ForeverLoopFrame {
-    /// Loop body tokens replayed by `RepeatLoop`, with the `RepeatLoop`
-    /// sentinel already appended.  Stored as `Arc` so re-iterations are
-    /// O(1) clones.
-    pub body: SharedTokenList,
-    /// Whether this is a `for`/`forsuffixes` loop (vs `forever`).
-    /// When true, the loop terminates after `remaining_iterations` is exhausted.
-    pub is_for_loop: bool,
-    /// Remaining iteration parameter lists for `for`/`forsuffixes` loops,
-    /// stored in reverse order so that `Vec::pop()` yields the next iteration.
-    /// `forever` loops leave this empty (they replay unconditionally).
-    pub remaining_iterations: Vec<SharedTokenList>,
-}
-
+/// Extracted from `Interpreter` to reduce its top-level field count; only accessed by the expansion code in this module.
 #[derive(Debug)]
 pub(super) struct ControlFlow {
-    /// If-stack depth tracking for nested conditionals.
+    /// If-stack depth tracking for nested conditionals
     pub if_stack: Vec<IfState>,
-    /// Active `forever` loop frames (outer -> inner).
+    /// Active `forever` loop frames (outer -> inner)
     pub forever_stack: Vec<ForeverLoopFrame>,
 }
 
@@ -91,10 +86,8 @@ pub(super) enum ParamType {
     UndelimitedSuffix,
     /// `text` — undelimited text (tokens until semicolon/endgroup).
     UndelimitedText,
-    /// Expression parameter preceded by `of` delimiter (from `expr t of p`
-    /// pattern in macro definitions).  During expansion the `of` token is
-    /// consumed, then the argument is scanned as a primary expression
-    /// (matching `MetaPost`'s behavior per mp.web §710).
+    /// Expression parameter preceded by `of` delimiter (from `expr t of p` pattern in macro definitions).
+    /// During expansion the `of` token is consumed, then the argument is scanned as a primary expression (matching `MetaPost`'s behavior per `mp.web` §710).
     OfPrimary,
 }
 
@@ -117,22 +110,19 @@ impl ParamType {
 /// A defined macro's parameter and body information.
 #[derive(Debug, Clone)]
 pub(super) struct MacroInfo {
-    /// Parameter types in order.
+    /// Parameter types in order
     pub(super) params: Vec<ParamType>,
-    /// Delimited parameter group for each parameter.
-    /// `u16::MAX` means the parameter is undelimited.
+    /// Delimited parameter group for each parameter; `u16::MAX` means the parameter is undelimited
     pub(super) param_groups: Vec<u16>,
     /// The macro body as a shared token list.
     ///
-    /// Stored as `Arc` so that expansion clones are O(1).  For vardefs,
-    /// `begingroup`/`endgroup` tokens are pre-baked at definition time.
+    /// Stored as `Arc` so expansion clones are O(1).
+    /// For vardefs, `begingroup`/`endgroup` tokens are pre-baked at definition time.
     pub(super) body: SharedTokenList,
-    /// Whether this is a `vardef` (wraps body in begingroup/endgroup).
+    /// Whether this is a `vardef` (wraps body in begingroup/endgroup)
     pub(super) is_vardef: bool,
     /// Whether this vardef has an `@#` suffix parameter.
-    /// When true, the LAST entry in `params` is `UndelimitedSuffix` and
-    /// corresponds to the `@#` suffix that appears between the macro name
-    /// and the argument list.
+    /// When true, the last entry in `params` is `UndelimitedSuffix` and corresponds to the `@#` suffix between the macro name and the argument list.
     pub(super) has_at_suffix: bool,
 }
 
@@ -146,13 +136,9 @@ impl Interpreter {
                 Command::IfTest => self.expand_if(),
                 Command::FiOrElse => self.expand_fi_or_else(),
                 Command::Iteration => self.expand_iteration(),
-                // ExitTest and DefinedMacro handlers do NOT advance past
-                // their last token. The central loop calls get_next()
-                // afterwards.
-                // This prevents chain expansions inside the handler from
-                // crossing input-level boundaries and consuming sentinel
-                // tokens that belong to enclosing scopes (e.g. the
-                // look-ahead token saved by expand_binary_macro).
+                // ExitTest and DefinedMacro handlers do NOT advance past their last token; the central loop calls get_next() afterwards.
+                // This prevents chain expansions inside the handler from crossing input-level boundaries and consuming sentinel tokens
+                // that belong to enclosing scopes (e.g. the look-ahead token saved by expand_binary_macro).
                 Command::ExitTest => {
                     self.expand_exitif();
                     self.get_next();

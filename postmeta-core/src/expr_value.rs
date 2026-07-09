@@ -1,9 +1,9 @@
-//! Shared expression payload for interpreter and capsule tokens.
+//! Shared expression payload for interpreter and capsule tokens
 
 use crate::equation::{DepList, VarId, const_dep, single_dep};
 use crate::types::{Type, Value};
 
-/// Expression value with type and dependency metadata.
+/// Expression value with type and dependency metadata
 #[derive(Debug, Clone)]
 pub struct ExprValue {
     pub exp: Value,

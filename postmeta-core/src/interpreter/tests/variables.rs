@@ -1,4 +1,4 @@
-//! Declarations, assignment, subscripts, and save/begingroup scoping.
+//! Declarations, assignment, subscripts, and save/begingroup scoping
 
 use super::helpers::TestInterp;
 
@@ -142,28 +142,25 @@ fn newinternal_multiple() {
 #[test]
 fn type_declaration_subscript_array() {
     let mut interp = TestInterp::new();
-    // Should not hang
     interp.run("pair z_[];");
 }
 
 #[test]
 fn type_declaration_compound_suffix() {
     let mut interp = TestInterp::new();
-    // Should not hang
     interp.run("path path_.l, path_.r;");
 }
 
 #[test]
 fn type_declaration_clears_subscripted_descendants() {
     let mut interp = TestInterp::new();
-    // First pass: assign t[0] and t[1]
     interp.run("numeric t[]; t[0] := 10; t[1] := 20; show t[0];");
     assert!(
         interp.shows()[0].contains("10"),
         "first assignment: expected 10 in {:?}",
         interp.shows()[0]
     );
-    // Re-declare: clears old subscripted values
+    // Re-declaring clears old subscripted values
     interp.run("numeric t[]; t[0] := 99; show t[0];");
     let msg = interp.shows()[1];
     assert!(
@@ -175,12 +172,12 @@ fn type_declaration_clears_subscripted_descendants() {
 #[test]
 fn type_declaration_generic_subscript_clears_existing() {
     // Declaring `pair a[].off` must clear any pre-existing `a[N].off`
-    // that was auto-created as numeric by prior reference.
+    // that was auto-created as numeric by prior reference
     let mut interp = TestInterp::new();
     interp.run(concat!(
         "show (pair a1.off);\n", // false: a1.off auto-created as numeric
-        "pair a[].off;\n",       // should clear a[1].off and redeclare as pair
-        "show (pair a1.off);\n", // should be true now
+        "pair a[].off;\n",       // clears a[1].off and redeclares as pair
+        "show (pair a1.off);\n", // true now
     ));
     assert!(
         interp.shows()[0].contains("false"),
@@ -252,7 +249,7 @@ fn save_localizes_suffix_bindings_in_recursive_vardef() {
 
 #[test]
 fn collective_pair_subscript_is_pair_typed() {
-    // Regression: `pair A[]` must make `A[1]` a pair, not a numeric.
+    // Regression: `pair A[]` must make `A[1]` a pair, not a numeric
     let mut interp = TestInterp::new();
     interp.run("pair A[]; show pair A[1]; show numeric A[1];");
 
@@ -270,8 +267,6 @@ fn collective_pair_subscript_is_pair_typed() {
         infos[1]
     );
 }
-
-// save must not affect similar-prefix roots
 
 #[test]
 fn save_root_does_not_affect_similar_prefix() {
@@ -326,7 +321,7 @@ fn refactor_guard_save_hides_and_restores_vardef_across_group() {
     );
     assert!(
         show_outputs[2].contains(">> 42"),
-        "after endgroup f should be restored to vardef: {}",
+        "after endgroup, f should be restored to vardef: {}",
         show_outputs[2]
     );
 }
@@ -499,9 +494,8 @@ fn randomseed_statement_sets_seed() {
 
 #[test]
 fn save_hides_vardef_in_group() {
-    // Regression: `save pic` inside a group must hide the vardef `pic`
-    // so that `picture pic; pic=p;` treats `pic` as a plain variable,
-    // not as the vardef.
+    // Regression: `save pic` must hide the vardef `pic` so `picture pic; pic=p;`
+    // treats `pic` as a plain variable, not the vardef
     let mut interp = TestInterp::new();
     interp.run(
         "vardef pic suffix $ = $ enddef; \
@@ -524,7 +518,6 @@ fn save_hides_vardef_in_group() {
 
 #[test]
 fn save_restores_vardef_after_endgroup() {
-    // After `endgroup`, the vardef should be restored and callable again.
     let mut interp = TestInterp::new();
     interp.run(
         "vardef f = 42 enddef; \
@@ -537,7 +530,6 @@ fn save_restores_vardef_after_endgroup() {
 
     let infos = interp.shows();
     assert_eq!(infos.len(), 3, "expected 3 show outputs: {infos:?}");
-    // First and third calls should invoke the vardef and produce 42.
     assert!(
         infos[0].contains("42"),
         "before save, f should be 42: {}",
@@ -557,9 +549,8 @@ fn save_restores_vardef_after_endgroup() {
 
 #[test]
 fn save_hides_defined_macro_in_group() {
-    // `save` should also hide non-vardef macros (def/primarydef/etc.).
-    // Inside the group, `greet` becomes an unknown tag so the macro body
-    // is NOT invoked (the `show 99` in its body does NOT fire).
+    // `save` also hides non-vardef macros (def/primarydef/etc).
+    // Inside the group, `greet` becomes an unknown tag, so its body does not fire.
     // After endgroup the macro is restored.
     let mut interp = TestInterp::new();
     interp.run(
@@ -572,7 +563,6 @@ fn save_hides_defined_macro_in_group() {
     interp.assert_no_errors();
 
     let infos = interp.shows();
-    // Only the two calls outside the group should produce output.
     assert_eq!(infos.len(), 2, "expected 2 show outputs: {infos:?}");
     assert!(infos[0].contains("99"), "first greet: {}", infos[0]);
     assert!(infos[1].contains("99"), "restored greet: {}", infos[1]);

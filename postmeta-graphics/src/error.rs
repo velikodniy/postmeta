@@ -1,9 +1,9 @@
 use std::fmt;
 
-/// Errors returned by graphics operations.
+/// Errors returned by graphics operations
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GraphicsError {
-    /// `makepen` was called with an invalid path.
+    /// `makepen` was called with an invalid path
     InvalidPen(&'static str),
 }
 

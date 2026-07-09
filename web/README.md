@@ -19,23 +19,9 @@ rustup target add wasm32-unknown-unknown
 
 Run from `web/`:
 
-```bash
-deno task dev
-```
-
-- Builds the WASM module and starts a local dev server at port 5173.
-
-```bash
-deno task build
-```
-
-- Builds WASM, bundles the app, and writes static output to `web/dist/`.
-
-```bash
-deno task preview
-```
-
-- Serves `web/dist/` for a final static preview.
+- `deno task dev` — builds the WASM module and serves a dev server on port 5173
+- `deno task build` — builds WASM, bundles the app, writes static output to `web/dist/`
+- `deno task preview` — serves `web/dist/` for a final static check
 
 ## Notes
 

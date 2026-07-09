@@ -1,9 +1,7 @@
-//! Resolved cubic Bezier path representation.
+//! Resolved cubic Bezier path representation
 //!
-//! A [`BezierPath`] stores on-curve knot points and per-segment control point
-//! pairs ([`SegmentControls`]).  It is produced by resolving a [`KnotPath`]
-//! (running Hobby's algorithm) and provides efficient segment-level access
-//! without the direction/tension metadata carried by knots.
+//! A [`BezierPath`] stores on-curve knot points and per-segment control point pairs ([`SegmentControls`]).
+//! It is produced by resolving a [`KnotPath`] (running Hobby's algorithm) and provides efficient segment-level access without the direction/tension metadata carried by knots.
 //!
 //! Submodules:
 //! - [`queries`] — point/direction/arc-length/turning-number queries.
@@ -23,15 +21,12 @@ use crate::types::{Knot, KnotDirection, Point, Scalar, index_to_scalar};
 // SegmentControls
 // ---------------------------------------------------------------------------
 
-/// A pair of Bezier control handles for one cubic segment.
-///
-/// `post` is the handle leaving the start knot (postcontrol), and `pre` is
-/// the handle arriving at the end knot (precontrol).
+/// A pair of Bezier control handles for one cubic segment
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SegmentControls {
-    /// Handle leaving the start knot (postcontrol).
+    /// Handle leaving the start knot (postcontrol)
     pub post: Point,
-    /// Handle arriving at the end knot (precontrol).
+    /// Handle arriving at the end knot (precontrol)
     pub pre: Point,
 }
 
@@ -39,22 +34,21 @@ pub struct SegmentControls {
 // BezierPath
 // ---------------------------------------------------------------------------
 
-/// A resolved cubic Bezier path.
+/// A resolved cubic Bezier path
 ///
 /// Stores the on-curve knot points and per-segment control point pairs.
 /// Created by calling [`KnotPath::resolve()`](super::KnotPath::resolve).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BezierPath {
-    /// On-curve points at each knot.
+    /// On-curve points at each knot
     points: Vec<Point>,
-    /// Per-segment control point pairs.
+    /// Per-segment control point pairs
     controls: Vec<SegmentControls>,
-    /// Whether the path is closed.
+    /// Whether the path is closed
     is_cyclic: bool,
 }
 
 impl BezierPath {
-    /// Create an empty open path.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -64,12 +58,11 @@ impl BezierPath {
         }
     }
 
-    /// Construct a `BezierPath` from raw parts.
+    /// Construct a `BezierPath` from raw parts
     ///
     /// # Panics
     ///
-    /// Panics (in debug builds) if the number of controls does not match
-    /// the expected segment count for the given points and cyclicity.
+    /// Panics (in debug builds) if the number of controls does not match the expected segment count for the given points and cyclicity.
     #[must_use]
     pub fn from_parts(points: Vec<Point>, controls: Vec<SegmentControls>, is_cyclic: bool) -> Self {
         debug_assert_eq!(
@@ -92,25 +85,25 @@ impl BezierPath {
         }
     }
 
-    /// Number of cubic segments in the path.
+    /// Number of cubic segments in the path
     #[must_use]
     pub fn num_segments(&self) -> usize {
         self.controls.len()
     }
 
-    /// Number of on-curve knot points.
+    /// Number of on-curve knot points
     #[must_use]
     pub fn num_knots(&self) -> usize {
         self.points.len()
     }
 
-    /// Whether the path is cyclic (closed).
+    /// Whether the path is cyclic (closed)
     #[must_use]
     pub const fn is_cyclic(&self) -> bool {
         self.is_cyclic
     }
 
-    /// Get the on-curve point at knot index `i`.
+    /// Get the on-curve point at knot index `i`
     ///
     /// # Panics
     ///
@@ -120,13 +113,13 @@ impl BezierPath {
         self.points[i]
     }
 
-    /// Get all on-curve knot points as a slice.
+    /// Get all on-curve knot points as a slice
     #[must_use]
     pub fn knot_points(&self) -> &[Point] {
         &self.points
     }
 
-    /// Get segment `i` as a [`CubicSegment`] (an owned 64-byte copy).
+    /// Get segment `i` as a [`CubicSegment`] (an owned 64-byte copy)
     ///
     /// # Panics
     ///
@@ -138,12 +131,12 @@ impl BezierPath {
         CubicSegment::new(self.points[i], ctrl.post, ctrl.pre, self.points[j])
     }
 
-    /// Iterate over all segments as [`CubicSegment`] values.
+    /// Iterate over all segments as [`CubicSegment`] values
     pub fn segments(&self) -> impl Iterator<Item = CubicSegment> + '_ {
         (0..self.num_segments()).map(move |i| self.segment(i))
     }
 
-    /// Get the segment controls at index `i`.
+    /// Get the segment controls at index `i`
     ///
     /// # Panics
     ///
@@ -157,7 +150,7 @@ impl BezierPath {
     // Path time helpers (private)
     // -----------------------------------------------------------------------
 
-    /// Normalize a time parameter for this path.
+    /// Normalize a time parameter for this path
     ///
     /// Cyclic paths wrap around; open paths clamp to `[0, n]`.
     /// Returns `None` if the path has no segments.
@@ -169,8 +162,7 @@ impl BezierPath {
         Some(if self.is_cyclic {
             let n_f = index_to_scalar(n);
             let wrapped = ((t % n_f) + n_f) % n_f;
-            // Normalize -0.0 to 0.0
-            wrapped + 0.0
+            wrapped + 0.0 // normalize -0.0 to 0.0
         } else {
             t.clamp(0.0, index_to_scalar(n))
         })
@@ -180,7 +172,7 @@ impl BezierPath {
     // Intersection queries
     // -----------------------------------------------------------------------
 
-    /// Find the first intersection between this path and `other`.
+    /// Find the first intersection between this path and `other`
     ///
     /// Returns `None` if the paths don't intersect.
     /// The returned times are in the range [0, `num_segments()`].
@@ -189,7 +181,7 @@ impl BezierPath {
         crate::intersection::intersection_times(self, other)
     }
 
-    /// Find all intersections between this path and `other`.
+    /// Find all intersections between this path and `other`
     #[must_use]
     pub fn all_intersection_times(&self, other: &Self) -> Vec<crate::intersection::Intersection> {
         crate::intersection::all_intersection_times(self, other)
@@ -199,11 +191,9 @@ impl BezierPath {
     // Conversion
     // -----------------------------------------------------------------------
 
-    /// Convert this resolved path back to a [`KnotPath`](super::KnotPath)
-    /// with explicit control points.
+    /// Convert this resolved path back to a [`KnotPath`](super::KnotPath) with explicit control points
     ///
-    /// This is useful for operations (like path concatenation) that still
-    /// operate on `KnotPath`.
+    /// Useful for operations (like path concatenation) that still operate on `KnotPath`.
     #[must_use]
     pub fn to_knot_path(&self) -> super::KnotPath {
         let n = self.num_segments();
@@ -252,8 +242,6 @@ mod tests {
     use crate::test_helpers;
     use crate::types::{EPSILON, Knot, KnotDirection, Point};
 
-    // -- Test 1: BezierPath::new() is empty ----------------------------------
-
     #[test]
     fn new_is_empty() {
         let bp = BezierPath::new();
@@ -262,8 +250,6 @@ mod tests {
         assert!(!bp.is_cyclic());
         assert!(bp.knot_points().is_empty());
     }
-
-    // -- Test 2: BezierPath::from_parts() with a simple line segment ----------
 
     #[test]
     fn from_parts_line_segment() {
@@ -275,8 +261,6 @@ mod tests {
         assert!((bp.knot_point(1).x - 10.0).abs() < EPSILON);
     }
 
-    // -- Test 3: segment() returns correct CubicSegment ----------------------
-
     #[test]
     fn segment_returns_correct_cubic() {
         let bp = test_helpers::line();
@@ -286,13 +270,10 @@ mod tests {
         assert!((seg.p2.x - 20.0 / 3.0).abs() < EPSILON);
         assert!((seg.p3.x - 10.0).abs() < EPSILON);
 
-        // Midpoint of a straight-line cubic should be at x=5
         let mid = seg.point_at(0.5);
         assert!((mid.x - 5.0).abs() < EPSILON);
         assert!((mid.y - 0.0).abs() < EPSILON);
     }
-
-    // -- Test 4: segments() iterator -----------------------------------------
 
     #[test]
     fn segments_iterator() {
@@ -300,7 +281,6 @@ mod tests {
         let segs: Vec<_> = bp.segments().collect();
         assert_eq!(segs.len(), 3);
 
-        // Each segment's p0 should match the corresponding knot point
         for (i, seg) in segs.iter().enumerate() {
             assert!(
                 (seg.p0.x - bp.knot_point(i).x).abs() < EPSILON
@@ -309,8 +289,6 @@ mod tests {
             );
         }
     }
-
-    // -- Test 5: KnotPath::resolve() — 2-knot line, 1 segment ---------------
 
     #[test]
     fn resolve_two_knot_line() {
@@ -326,18 +304,14 @@ mod tests {
         assert_eq!(bp.num_knots(), 2);
         assert!(!bp.is_cyclic());
 
-        // Endpoints should match
         assert!((bp.knot_point(0).x - 0.0).abs() < EPSILON);
         assert!((bp.knot_point(1).x - 10.0).abs() < EPSILON);
 
-        // Midpoint should be near (5, 0)
         let seg = bp.segment(0);
         let mid = seg.point_at(0.5);
         assert!((mid.x - 5.0).abs() < 0.5);
         assert!(mid.y.abs() < 0.5);
     }
-
-    // -- Test 6: KnotPath::resolve() — cyclic triangle, 3 segments -----------
 
     #[test]
     fn resolve_cyclic_triangle() {
@@ -354,7 +328,6 @@ mod tests {
         assert_eq!(bp.num_knots(), 3);
         assert!(bp.is_cyclic());
 
-        // Verify knot points match
         assert!((bp.knot_point(0).x - 0.0).abs() < EPSILON);
         assert!((bp.knot_point(0).y - 0.0).abs() < EPSILON);
         assert!((bp.knot_point(1).x - 10.0).abs() < EPSILON);
@@ -362,11 +335,8 @@ mod tests {
         assert!((bp.knot_point(2).y - 10.0).abs() < EPSILON);
     }
 
-    // -- Test 7: Roundtrip KnotPath → resolve → BezierPath → to_knot_path ---
-
     #[test]
     fn roundtrip_knot_bezier_knot() {
-        // Open path
         let kp = super::super::KnotPath::from_knots(
             vec![
                 Knot::new(Point::new(0.0, 0.0)),
@@ -381,17 +351,14 @@ mod tests {
         assert_eq!(kp2.knots.len(), 3);
         assert!(!kp2.is_cyclic);
 
-        // Knot points should be preserved exactly
         assert!((kp2.knots[0].point.x - 0.0).abs() < EPSILON);
         assert!((kp2.knots[1].point.x - 5.0).abs() < EPSILON);
         assert!((kp2.knots[2].point.x - 10.0).abs() < EPSILON);
 
-        // First knot left should be Open (open path endpoint)
+        // Open-path endpoints have no incoming/outgoing constraint on the outer side
         assert_eq!(kp2.knots[0].left, KnotDirection::Open);
-        // Last knot right should be Open (open path endpoint)
         assert_eq!(kp2.knots[2].right, KnotDirection::Open);
 
-        // Middle knot should have Explicit controls on both sides
         assert!(matches!(kp2.knots[1].left, KnotDirection::Explicit(_)));
         assert!(matches!(kp2.knots[1].right, KnotDirection::Explicit(_)));
     }
@@ -412,7 +379,6 @@ mod tests {
         assert_eq!(kp2.knots.len(), 3);
         assert!(kp2.is_cyclic);
 
-        // All knots should have Explicit controls on both sides (cyclic)
         for (i, knot) in kp2.knots.iter().enumerate() {
             assert!(
                 matches!(knot.left, KnotDirection::Explicit(_)),
@@ -425,8 +391,6 @@ mod tests {
         }
     }
 
-    // -- Default trait -------------------------------------------------------
-
     #[test]
     fn default_is_empty() {
         let bp = BezierPath::default();
@@ -434,12 +398,10 @@ mod tests {
         assert_eq!(bp.num_knots(), 0);
     }
 
-    // -- Cyclic segment wrapping ---------------------------------------------
-
     #[test]
     fn cyclic_last_segment_wraps() {
         let bp = test_helpers::triangle();
-        // Segment 2 should connect knot 2 back to knot 0
+        // Segment 2 connects knot 2 back to knot 0
         let seg = bp.segment(2);
         assert!((seg.p0.x - 5.0).abs() < EPSILON);
         assert!((seg.p0.y - 10.0).abs() < EPSILON);
@@ -451,7 +413,7 @@ mod tests {
     // Intersection method wrappers
     // -------------------------------------------------------------------
 
-    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y).
+    /// Make a horizontal line `BezierPath` from (x0, y) to (x1, y)
     fn hline(x0: Scalar, x1: Scalar, y: Scalar) -> BezierPath {
         let dx = (x1 - x0) / 3.0;
         BezierPath::from_parts(
@@ -464,7 +426,7 @@ mod tests {
         )
     }
 
-    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1).
+    /// Make a vertical line `BezierPath` from (x, y0) to (x, y1)
     fn vline(x: Scalar, y0: Scalar, y1: Scalar) -> BezierPath {
         let dy = (y1 - y0) / 3.0;
         BezierPath::from_parts(

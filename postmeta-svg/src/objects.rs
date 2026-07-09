@@ -7,7 +7,7 @@ use crate::util::{
     color_to_svg, dash_to_svg, fmt_scalar, linecap_to_svg, linejoin_to_svg, pen_stroke_width,
 };
 
-/// Render a filled contour to an SVG `<path>` element.
+/// Render a filled contour to an SVG `<path>` element
 pub fn render_fill(fill: &FillObject, opts: &RenderOptions) -> svg::node::element::Path {
     let d = path_to_d(&fill.path, opts.precision);
     let mut el = svg::node::element::Path::new()
@@ -31,7 +31,7 @@ pub fn render_fill(fill: &FillObject, opts: &RenderOptions) -> svg::node::elemen
     el
 }
 
-/// Render a stroked path to an SVG `<path>` element.
+/// Render a stroked path to an SVG `<path>` element
 pub fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::element::Path {
     let d = path_to_d(&stroke.path, opts.precision);
     let width = pen_stroke_width(&stroke.pen);
@@ -57,10 +57,9 @@ pub fn render_stroke(stroke: &StrokeObject, opts: &RenderOptions) -> svg::node::
     el
 }
 
-/// Render a text label as a raw SVG `<text>` element.
+/// Render a text label as a raw SVG `<text>` element
 ///
-/// Y coordinates are negated to convert from `MetaPost` (Y-up) to SVG
-/// (Y-down). The transform matrix is adjusted accordingly.
+/// The `MetaPost` Y-up to SVG Y-down flip is applied by conjugating the transform via `svg_text_matrix`.
 pub fn render_text_raw(text: &TextObject, opts: &RenderOptions) -> SvgText {
     let matrix = crate::util::svg_text_matrix(&text.transform, opts.precision);
 

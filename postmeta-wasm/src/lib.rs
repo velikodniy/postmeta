@@ -46,7 +46,7 @@ impl CompileOutput {
 
     #[wasm_bindgen(getter, js_name = hasError)]
     #[must_use]
-    #[allow(clippy::missing_const_for_fn)] // wasm_bindgen rejects `const fn`
+    #[allow(clippy::missing_const_for_fn)] // `wasm_bindgen` rejects `const fn`
     pub fn has_error(&self) -> bool {
         self.has_error
     }
@@ -62,7 +62,7 @@ fn compile_program(source: &str) -> CompileOutput {
     let mut interpreter = Interpreter::new();
     interpreter.set_filesystem(Box::new(EmbeddedFileSystem));
 
-    // Build font provider with embedded defaults (no custom dirs in WASM).
+    // Embedded defaults only; WASM has no filesystem for custom font dirs
     let fonts: Option<Arc<dyn FontProvider>> = CompositeFontProvider::new()
         .ok()
         .map(|p| Arc::new(p) as Arc<dyn FontProvider>);

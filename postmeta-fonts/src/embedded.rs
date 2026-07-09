@@ -1,7 +1,6 @@
-//! Bundled font data and name alias table.
+//! Bundled font data and name alias table
 //!
-//! Embeds New Computer Modern OpenType fonts via `include_bytes!` and
-//! maps legacy `MetaPost`/TeX font names to the appropriate embedded font.
+//! Embeds New Computer Modern OpenType fonts and maps legacy `MetaPost`/TeX font names onto them.
 
 use crate::data::FontData;
 use crate::error::FontError;
@@ -12,18 +11,15 @@ static NEWCM_ITALIC: &[u8] = include_bytes!("../fonts/NewCM10-Italic.otf");
 static NEWCM_MONO: &[u8] = include_bytes!("../fonts/NewCMMono10-Regular.otf");
 static NEWCM_MATH: &[u8] = include_bytes!("../fonts/NewCMMath-Regular.otf");
 
-/// An entry in the font alias table.
 struct AliasEntry {
-    /// The name as used in `MetaPost` (e.g. `"cmr10"`).
+    /// The name as used in `MetaPost` (e.g. `"cmr10"`)
     name: &'static str,
-    /// The embedded font bytes.
     bytes: &'static [u8],
 }
 
-/// Font alias table: `MetaPost` font names mapped to embedded fonts.
+/// Alias table mapping `MetaPost` font names to embedded fonts
 ///
-/// Names are stored lowercase. Lookup should normalize to lowercase
-/// before matching.
+/// Names are stored lowercase; lookup must normalize before matching.
 static ALIASES: &[AliasEntry] = &[
     // Computer Modern Roman
     AliasEntry {
@@ -115,20 +111,18 @@ static ALIASES: &[AliasEntry] = &[
     },
 ];
 
-/// Load all embedded fonts into a name-to-[`FontData`] map.
+/// Load all embedded fonts as (name, [`FontData`]) pairs
 ///
-/// Aliases that map to the same underlying bytes share the same
-/// `Arc<[u8]>` allocation.
+/// Aliases backed by the same bytes share one `Arc<[u8]>` allocation.
 ///
 /// # Errors
 ///
-/// Returns [`FontError::ParseError`] if any embedded font fails to parse
-/// (should not happen unless the bundled files are corrupt).
+/// Returns [`FontError::ParseError`] if a bundled font fails to parse, which only happens if the files are corrupt.
 pub fn load_embedded() -> Result<Vec<(String, FontData)>, FontError> {
     use std::collections::HashMap;
     use std::sync::Arc;
 
-    // Deduplicate: parse each unique byte slice only once.
+    // Deduplicate by data pointer: parse each unique byte slice only once
     let mut parsed: HashMap<*const u8, FontData> = HashMap::new();
     let mut result = Vec::with_capacity(ALIASES.len());
 
